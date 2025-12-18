@@ -2,6 +2,68 @@
 
 This guide will help you set up your development environment for GTKPass.
 
+## Dev Container (Recommended)
+
+If you're using the provided dev container (VS Code or GitHub Codespaces):
+
+1. **The container automatically installs all dependencies** when it starts via `.devcontainer/setup.sh`
+2. **The app is installed in editable mode** at `.venv/bin/python`
+3. **Wayland and X11 are both supported** for GUI access from the container
+
+⚠️ **Important**: If you just updated the devcontainer configuration, rebuild it to apply changes:
+- In VS Code: `Cmd/Ctrl+Shift+P` → "Dev Containers: Rebuild Container"
+
+### Running the App in Dev Container
+
+```bash
+# Quick run
+./run_app.sh
+
+# Or check display backend status first
+./check_display.sh
+
+# Or manually
+source .venv/bin/activate
+python -m gtkpass
+```
+
+### GUI Requirements
+
+The devcontainer supports both **Wayland and X11**:
+
+**Wayland (preferred on modern Linux):**
+- Works out of the box on GNOME, KDE Plasma 6, Sway, etc.
+- No additional configuration needed!
+
+**X11 (fallback or macOS/Windows):**
+
+**On Linux:**
+```bash
+xhost +local:
+```
+
+**On macOS:**
+- Install XQuartz: `brew install --cask xquartz`
+- Enable "Allow connections from network clients" in XQuartz preferences
+- Run: `xhost +localhost`
+
+**On Windows (WSL2):**
+- Install VcXsrv or X410
+- Set DISPLAY and run: `xhost +`
+
+See [docs/DEVCONTAINER_GUI.md](docs/DEVCONTAINER_GUI.md) for detailed GUI setup instructions.
+
+### Troubleshooting Dev Container
+
+If the setup failed or you need to reinstall:
+```bash
+# Run the setup script manually
+bash .devcontainer/setup.sh
+
+# Or rebuild the container
+# In VS Code: Cmd/Ctrl+Shift+P → "Dev Containers: Rebuild Container"
+```
+
 ## Prerequisites
 
 - Python 3.10 or higher
