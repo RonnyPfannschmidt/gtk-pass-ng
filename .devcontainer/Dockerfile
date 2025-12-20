@@ -37,6 +37,9 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     libwayland-egl1 \
     libxkbcommon-dev \
     libegl1-mesa-dev \
+    dconf-service \
+    dconf-cli \
+    dconf-gsettings-backend \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*

@@ -1,12 +1,23 @@
 # GSettings Testing in Development Environment
 
-## Current Limitation
+## Current Configuration
 
-In the devcontainer environment, GSettings uses a memory backend because dconf is not properly configured. This means settings do NOT persist across process restarts, but they DO work within a single process session.
+The devcontainer now uses GSettings **keyfile backend** for persistent storage. This is a file-based backend that doesn't require D-Bus or dconf, making it perfect for containerized development.
+
+## How It Works
+
+- **Backend**: `keyfile` (file-based, not memory or dconf)
+- **Storage**: Settings are stored in files (typically ~/.local/share/glib-2.0/settings/)
+- **Persistence**: ✅ Settings persist across process restarts
+- **Dependencies**: None (no D-Bus, no dconf-service required)
+
+The keyfile backend is automatically configured in:
+- `run_app.sh`: Sets `GSETTINGS_BACKEND=keyfile`
+- `.devcontainer/setup.sh`: Adds to shell rc files
 
 ## Verification
 
-The backend loading feature is fully implemented and working. To verify:
+To verify persistence works:
 
 ```python
 cd /workspaces/gtkpass && GSETTINGS_SCHEMA_DIR=/workspaces/gtkpass/data uv run python << 'EOF'
@@ -56,25 +67,19 @@ This will output:
 - ✅ Backend loading from GSettings within a process
 - ✅ Password listing from loaded backends  
 - ✅ GSettings schema structure (main + relocatable backend schemas)
-- ✅ Settings UI saving to GSettings (within process)
-- ✅ Main window loading backends from GSettings (within process)
+- ✅ Settings UI saving to GSettings
+- ✅ Main window loading backends from GSettings
+- ✅ **Settings persistence across process restarts** (keyfile backend)
+- ✅ No D-Bus or dconf required
 
-## What Doesn't Work in Devcontainer
+## Backend Comparison
 
-- ❌ GSettings persistence across process restarts
-- ❌ Using gsettings CLI to set values (memory backend)
-- ❌ Using dconf to set values (database not initialized)
+| Backend | Persistence | D-Bus Required | Use Case |
+|---------|-------------|----------------|----------|
+| keyfile | ✅ Yes | ❌ No | Development, containers, testing |
+| dconf | ✅ Yes | ✅ Yes | Production desktop environments |
+| memory | ❌ No | ❌ No | Temporary/testing only |
 
 ## Production Deployment
 
-In a proper installation (e.g., system-wide schema installation via Meson), GSettings will use dconf and settings WILL persist across restarts. The devcontainer limitation is purely environmental.
-
-## Workaround for Testing
-
-To test the full UI flow in the devcontainer, you would need to:
-1. Start the app
-2. Use the Settings window to add a backend
-3. The backend will be available for the duration of that app session
-4. Settings will be lost when the app is closed
-
-This is the expected behavior in the current dev environment.
+In system-wide installations, GSettings will automatically use dconf when available. The keyfile backend is specifically configured for development convenience.

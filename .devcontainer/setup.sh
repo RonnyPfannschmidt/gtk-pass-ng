@@ -34,6 +34,14 @@ else
     echo "⚠ Warning: glib-compile-schemas not available"
 fi
 
+# Setup GSettings with keyfile backend (file-based, persistent, no D-Bus)
+echo ""
+echo "Configuring GSettings with keyfile backend..."
+echo "export GSETTINGS_BACKEND=keyfile" >> ~/.bashrc
+echo "export GSETTINGS_BACKEND=keyfile" >> ~/.zshrc
+echo "✓ Keyfile backend configured (persistent, no D-Bus required)"
+echo "  Settings will persist in ~/.local/share/glib-2.0/settings/"
+
 # Verify installation
 echo ""
 echo "Verifying installation..."
@@ -49,10 +57,16 @@ echo "Setup complete!"
 echo "========================================="
 echo ""
 echo "To run the app:"
-echo "  uv run gtkpass"
+echo "  ./run_app.sh"
+echo "  OR: uv run gtkpass"
 echo ""
 echo "To run tests:"
 echo "  uv run pytest tests/"
 echo ""
 echo "Note: GUI apps require X11 forwarding from your host."
 echo "Make sure DISPLAY is set and xhost allows connections."
+echo ""
+echo "GSettings persistence:"
+echo "  Using keyfile backend - settings persist in file storage."
+echo "  No D-Bus/dconf required!"
+echo "  Schema: $PWD/data/org.ronny_pfannschmidt.gtkpass.gschema.xml"
