@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <!-- Main application schema -->
+  <schema id="org.ronny_pfannschmidt.gtkpass" path="/org/ronny-pfannschmidt/gtkpass/">
+    
+    <!-- Backend instances list -->
+    <key name="backend-instances" type="a(ss)">
+      <default>[]</default>
+      <summary>List of backend instances</summary>
+      <description>
+        Array of (backend_id, backend_type) tuples for configured backends.
+        Each instance has settings stored at /org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/
+      </description>
+    </key>
+    
+    <!-- Window state -->
+    <key name="window-width" type="i">
+      <default>800</default>
+      <summary>Window width</summary>
+    </key>
+    
+    <key name="window-height" type="i">
+      <default>600</default>
+      <summary>Window height</summary>
+    </key>
+    
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized state</summary>
+    </key>
+    
+    <!-- UI settings -->
+    <key name="show-hidden-passwords" type="b">
+      <default>false</default>
+      <summary>Show hidden passwords by default</summary>
+    </key>
+    
+    <key name="search-as-you-type" type="b">
+      <default>true</default>
+      <summary>Search as you type</summary>
+      <description>
+        Enable live search filtering as user types.
+      </description>
+    </key>
+    
+    <!-- Security settings -->
+    <key name="clipboard-timeout" type="i">
+      <default>45</default>
+      <summary>Clipboard auto-clear timeout</summary>
+      <description>
+        Seconds before automatically clearing clipboard. 0 to disable.
+      </description>
+    </key>
+    
+    <key name="auto-lock-timeout" type="i">
+      <default>300</default>
+      <summary>Auto-lock timeout</summary>
+      <description>
+        Seconds of inactivity before auto-locking. 0 to disable.
+      </description>
+    </key>
+  </schema>
+  
+  <!-- Demo backend schema (relocatable) -->
+  <schema id="org.ronny_pfannschmidt.gtkpass.backend.demo">
+    <key name="custom-data-path" type="s">
+      <default>''</default>
+      <summary>Custom demo data file path</summary>
+      <description>
+        Path to custom demo.json file. If empty, uses built-in demo data.
+      </description>
+    </key>
+  </schema>
+  
+  <!-- Secret Service backend schema (relocatable) -->
+  <schema id="org.ronny_pfannschmidt.gtkpass.backend.secretservice">
+    <key name="collection-name" type="s">
+      <default>'Login'</default>
+      <summary>Keyring collection name</summary>
+      <description>
+        Name of the Secret Service collection (keyring) to use.
+      </description>
+    </key>
+  </schema>
+  
+  <!-- Pass CLI backend schema (relocatable) -->
+  <schema id="org.ronny_pfannschmidt.gtkpass.backend.pass">
+    <key name="password-store-dir" type="s">
+      <default>''</default>
+      <summary>Password store directory</summary>
+      <description>
+        Path to password store directory. If empty, uses PASSWORD_STORE_DIR environment variable or ~/.password-store.
+      </description>
+    </key>
+    
+    <key name="use-git" type="b">
+      <default>true</default>
+      <summary>Enable git integration</summary>
+      <description>
+        Use git for version control of password store.
+      </description>
+    </key>
+  </schema>
+  
+  <!-- Direct GPG backend schema (relocatable) -->
+  <schema id="org.ronny_pfannschmidt.gtkpass.backend.direct">
+    <key name="password-store-dir" type="s">
+      <default>''</default>
+      <summary>Password store directory</summary>
+      <description>
+        Path to password store directory. If empty, uses PASSWORD_STORE_DIR environment variable or ~/.password-store.
+      </description>
+    </key>
+    
+    <key name="gpg-home" type="s">
+      <default>''</default>
+      <summary>GPG home directory</summary>
+      <description>
+        Custom GPG home directory. If empty, uses default GPG home.
+      </description>
+    </key>
+  </schema>
+  
+</schemalist>

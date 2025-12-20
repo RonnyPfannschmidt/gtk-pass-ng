@@ -1,14 +1,10 @@
 #!/bin/bash
-# Convenience script to run gtkpass with proper environment setup
+# Convenience script to run gtkpass with uv
 
-# Activate virtual environment if it exists
-if [ -f ".venv/bin/activate" ]; then
-    source .venv/bin/activate
-else
-    echo "Error: Virtual environment not found. Run setup first:"
-    echo "  bash .devcontainer/setup.sh"
-    exit 1
-fi
+cd "$(dirname "$0")" || exit 1
 
-# Run the application
-exec python -m gtkpass "$@"
+# Set GSettings schema directory for development
+export GSETTINGS_SCHEMA_DIR="$PWD/data"
+
+# Run the application with uv
+exec uv run gtkpass "$@"

@@ -45,10 +45,23 @@ class GTKPassApp(Adw.Application):
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
 
+        # Preferences action
+        preferences_action = Gio.SimpleAction.new("preferences", None)
+        preferences_action.connect("activate", self._on_preferences_action)
+        self.add_action(preferences_action)
+        self.set_accels_for_action("app.preferences", ["<Control>comma"])
+
         # About action
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self._on_about_action)
         self.add_action(about_action)
+
+    def _on_preferences_action(self, action: Gio.SimpleAction, param):
+        """Show the preferences window."""
+        from gtkpass.ui.settings import SettingsWindow
+        
+        settings_window = SettingsWindow(transient_for=self.window)
+        settings_window.present()
 
     def _on_about_action(self, action: Gio.SimpleAction, param):
         """Show the about dialog."""

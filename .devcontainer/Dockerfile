@@ -40,3 +40,20 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast Python package management for both root and vscode user
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+USER vscode
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+USER root
+ENV PATH="/home/vscode/.cargo/bin:/home/vscode/.local/bin:/root/.cargo/bin:/root/.local/bin:${PATH}"
+
+# Install blueprint-compiler from source
+RUN cd /tmp \
+    && git clone https://gitlab.gnome.org/jwestman/blueprint-compiler.git \
+    && cd blueprint-compiler \
+    && meson setup build --prefix=/usr \
+    && meson install -C build \
+    && sed -i '1s|.*|#!/usr/bin/python3|' /usr/bin/blueprint-compiler \
+    && cd / \
+    && rm -rf /tmp/blueprint-compiler

@@ -1,0 +1,42 @@
+[
+  {
+    "name": "personal/email",
+    "content": "MyPersonalP@ss123\nusername: john.doe@example.com\nurl: https://mail.example.com\nnotes: Primary personal email account"
+  },
+  {
+    "name": "personal/bank/checking",
+    "content": "B@nk1ngS3cure!\nusername: johndoe\nurl: https://bank.example.com\naccount: 1234567890\nnotes: Main checking account"
+  },
+  {
+    "name": "personal/bank/savings",
+    "content": "S@v1ngsP@ss456\nusername: johndoe\nurl: https://bank.example.com\naccount: 0987654321\nnotes: High-yield savings"
+  },
+  {
+    "name": "personal/social/github",
+    "content": "GitHubT0ken789\nusername: johndoe\nurl: https://github.com\nnotes: Personal GitHub account"
+  },
+  {
+    "name": "work/email",
+    "content": "W0rkEm@il2024\nusername: j.doe@company.com\nurl: https://mail.company.com\nnotes: Company email - Office 365"
+  },
+  {
+    "name": "work/vpn",
+    "content": "Vpn$ecur3Pass\nusername: jdoe\nurl: https://vpn.company.com\nserver: vpn.company.com:443\nnotes: Corporate VPN access"
+  },
+  {
+    "name": "work/jira",
+    "content": "J1r@T1cket99\nusername: john.doe\nurl: https://company.atlassian.net\nnotes: Project tracking system"
+  },
+  {
+    "name": "work/aws",
+    "content": "AwsC0ns0le!2024\nusername: jdoe-admin\nurl: https://console.aws.amazon.com\naccount_id: 123456789012\nnotes: AWS console access"
+  },
+  {
+    "name": "servers/production/db",
+    "content": "Pr0dDB$ecret\nusername: dbadmin\nhost: db.production.example.com\nport: 5432\nnotes: Production PostgreSQL database"
+  },
+  {
+    "name": "servers/staging/db",
+    "content": "St@g1ngDB123\nusername: dbadmin\nhost: db.staging.example.com\nport: 5432\nnotes: Staging database for testing"
+  }
+]
