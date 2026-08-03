@@ -26,7 +26,7 @@ def main():
 
     # Create and initialize the service
     with BackgroundService(max_workers=3) as service:
-        print(f"Service initialized with 3 workers\n")
+        print("Service initialized with 3 workers\n")
 
         # Submit multiple tasks
         futures = []
