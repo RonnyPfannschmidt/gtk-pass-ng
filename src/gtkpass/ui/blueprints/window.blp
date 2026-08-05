@@ -40,14 +40,8 @@ template $GTKPassWindow : Adw.ApplicationWindow {
           margin-end: 6;
         }
 
-        ScrolledWindow {
+        $PasswordTreeView password_list {
           vexpand: true;
-          
-          ListBox password_list {
-            selection-mode: single;
-            
-            styles ["navigation-sidebar"]
-          }
         }
       };
 

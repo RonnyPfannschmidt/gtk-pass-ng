@@ -51,9 +51,19 @@ class BackendSettingsRow(Adw.PreferencesRow):
         # Header with backend type and remove button
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         
-        label = Gtk.Label(label=f"{backend_type.title()} Backend", xalign=0)
-        label.add_css_class("heading")
-        header_box.append(label)
+        # Backend name entry
+        name_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        name_label = Gtk.Label(label="Name:", xalign=0)
+        name_label.add_css_class("caption")
+        self.name_entry = Gtk.Entry(
+            text=self._get_friendly_name(),
+            hexpand=True,
+            placeholder_text=f"{backend_type.title()} Backend"
+        )
+        self.name_entry.connect("changed", lambda e: self.emit("settings-changed"))
+        name_box.append(name_label)
+        name_box.append(self.name_entry)
+        header_box.append(name_box)
         
         remove_btn = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
         remove_btn.add_css_class("destructive-action")
@@ -69,6 +79,35 @@ class BackendSettingsRow(Adw.PreferencesRow):
         box.append(self.settings_group)
         
         self.set_child(box)
+    
+    def _get_friendly_name(self) -> str:
+        """Get a friendly display name for this backend.
+        
+        Returns:
+            User-friendly name, extracting it from backend_id or creating default
+        """
+        # Try to extract a custom name from backend_id
+        # Format: backend_type_timestamp or custom_name
+        parts = self.backend_id.split('_')
+        if len(parts) >= 2 and parts[-1].isdigit():
+            # It's a generated ID like "demo_1766234611"
+            # Create a friendly name with a counter
+            count = len([k for k in self.backend_id if k == self.backend_type]) + 1
+            return f"{self.backend_type.title()} {count}"
+        else:
+            # It's already a custom name
+            return self.backend_id.replace('_', ' ').title()
+    
+    def get_display_name(self) -> str:
+        """Get the current display name from the entry.
+        
+        Returns:
+            The name to display in the UI
+        """
+        name = self.name_entry.get_text().strip()
+        if not name:
+            return f"{self.backend_type.title()} Backend"
+        return name
     
     def _get_default_settings(self) -> BackendSettings:
         """Get default settings for backend type."""

@@ -44,7 +44,9 @@
     "DISPLAY": "${localEnv:DISPLAY}",
     "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
     "XDG_RUNTIME_DIR": "/tmp/host-runtime",
-    "GDK_BACKEND": "wayland,x11"
+    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/host-runtime/bus",
+    "GDK_BACKEND": "wayland,x11",
+    "GSETTINGS_BACKEND": "keyfile"
   },
 
   "forwardPorts": [],

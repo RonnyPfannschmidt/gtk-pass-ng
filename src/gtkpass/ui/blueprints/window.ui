@@ -48,16 +48,8 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                   </object>
                 </child>
                 <child>
-                  <object class="GtkScrolledWindow">
+                  <object class="PasswordTreeView" id="password_list">
                     <property name="vexpand">true</property>
-                    <child>
-                      <object class="GtkListBox" id="password_list">
-                        <property name="selection-mode">1</property>
-                        <style>
-                          <class name="navigation-sidebar"/>
-                        </style>
-                      </object>
-                    </child>
                   </object>
                 </child>
               </object>

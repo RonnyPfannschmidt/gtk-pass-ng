@@ -1,6 +1,7 @@
 """Main GTKPass application class."""
 
 import sys
+import logging
 from typing import Optional
 
 import gi
@@ -8,7 +9,10 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, Gtk, GLib  # noqa: E402
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 
 class GTKPassApp(Adw.Application):
@@ -18,10 +22,55 @@ class GTKPassApp(Adw.Application):
         """Initialize the application."""
         super().__init__(
             application_id="io.github.ronnypfannschmidt.GTKPass",
-            flags=Gio.ApplicationFlags.FLAGS_NONE,
+            flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
             **kwargs,
         )
         self.window: Optional[Gtk.ApplicationWindow] = None
+        
+        # Add command-line options
+        self.add_main_option(
+            "debug",
+            ord("d"),
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.NONE,
+            "Enable debug logging",
+            None,
+        )
+        self.add_main_option(
+            "log-level",
+            ord("l"),
+            GLib.OptionFlags.NONE,
+            GLib.OptionArg.STRING,
+            "Set log level (DEBUG, INFO, WARNING, ERROR)",
+            "LEVEL",
+        )
+    
+    def do_handle_local_options(self, options):
+        """Handle command-line options."""
+        # Configure logging based on options
+        log_level = logging.INFO
+        
+        if options.contains("debug"):
+            log_level = logging.DEBUG
+        elif options.contains("log-level"):
+            level_str = options.lookup_value("log-level").get_string().upper()
+            log_level = getattr(logging, level_str, logging.INFO)
+        
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        
+        logger.info("Starting GTKPass application")
+        logger.debug(f"Log level: {logging.getLevelName(log_level)}")
+        
+        return -1  # Continue processing
+    
+    def do_command_line(self, command_line):
+        """Handle command line."""
+        self.activate()
+        return 0
 
     def do_activate(self):
         """Activate the application."""

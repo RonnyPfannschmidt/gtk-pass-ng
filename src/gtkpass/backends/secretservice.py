@@ -74,7 +74,11 @@ class SecretServiceBackend(PasswordBackend):
             secretstorage.get_default_collection(connection)
             connection.close()
             return True
-        except Exception:
+        except Exception as e:
+            # Log the reason for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Secret Service not available: {type(e).__name__}: {e}")
             return False
     
     @classmethod
@@ -147,11 +151,15 @@ class SecretServiceBackend(PasswordBackend):
         Returns:
             List of secret items
         """
-        attributes = {"application": self.APPLICATION_NAME}
+        # Get all items from the collection instead of filtering by application
+        # This allows us to see all passwords in the keyring, not just gtkpass-created ones
         if name:
-            attributes["name"] = name
-        
-        return list(self._collection.search_items(attributes))
+            # If a specific name is requested, search for it
+            attributes = {"application": self.APPLICATION_NAME, "name": name}
+            return list(self._collection.search_items(attributes))
+        else:
+            # Get all items in the collection
+            return list(self._collection.get_all_items())
     
     def list_passwords(self, prefix: str = "") -> List[PasswordMetadata]:
         """List all passwords, optionally filtered by prefix.
@@ -169,7 +177,13 @@ class SecretServiceBackend(PasswordBackend):
             
             for item in items:
                 attrs = item.get_attributes()
-                name = attrs.get("name", "")
+                # Use the label as the name if no "name" attribute exists
+                # This allows us to show all keyring items with their labels
+                name = attrs.get("name", item.get_label())
+                
+                # Skip items with empty names/labels
+                if not name or not name.strip():
+                    continue
                 
                 if not prefix or name.startswith(prefix):
                     metadata = PasswordMetadata(
