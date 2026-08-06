@@ -1,7 +1,7 @@
 """Backend base classes and interfaces for password storage."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -45,7 +45,15 @@ class PasswordEntry:
 
     name: str
     path: Path
-    content: str | None = None
+    # Excluded from the generated repr: the default would print the decrypted
+    # password into any log line, traceback or assertion diff that renders this
+    # object. See __repr__ below.
+    content: str | None = field(default=None, repr=False)
+
+    def __repr__(self) -> str:
+        """Identify the entry without disclosing what it holds."""
+        state = "loaded" if self.content else "empty"
+        return f"PasswordEntry(name={self.name!r}, {state})"
 
     @property
     def password(self) -> str | None:

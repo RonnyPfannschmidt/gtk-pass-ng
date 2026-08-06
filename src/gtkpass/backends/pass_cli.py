@@ -10,6 +10,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from gtkpass.safety import default_store_dir, ensure_store_allowed
+
 from . import (
     BackendError,
     BackendMetadata,
@@ -99,6 +101,8 @@ class PassBackend(PasswordBackend):
 
         if settings is None:
             settings = PassBackendSettings()
+
+        ensure_store_allowed(settings.password_store_dir or default_store_dir())
 
         # Detect environment and build command
         if cls._is_flatpak():

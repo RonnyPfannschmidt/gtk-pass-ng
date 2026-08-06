@@ -34,3 +34,6 @@ data/gschemas.compiled
 .idea/
 *.swp
 .DS_Store
+
+# Throwaway development store and GPG home
+.dev/

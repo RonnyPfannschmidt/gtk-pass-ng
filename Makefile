@@ -25,7 +25,7 @@ export UV_NO_SYNC := 1
 # from the developer's real keyring.
 HEADLESS := xvfb-run -a dbus-run-session --
 
-.PHONY: help venv sync ui schemas check test test-gui build run clean
+.PHONY: help venv sync ui schemas check test test-gui build run run-dev devstore clean
 
 help:
 	@echo "sync     create the environment and install dependencies"
@@ -35,6 +35,8 @@ help:
 	@echo "test     run the test suite headless"
 	@echo "build    build the wheel and sdist"
 	@echo "run      launch the application (make run ARGS=\"--debug\")"
+	@echo "devstore create a throwaway store with fake passwords"
+	@echo "run-dev  launch against the throwaway store, never the real one"
 	@echo "clean    remove build and cache artefacts"
 
 venv:
@@ -66,7 +68,20 @@ build:
 run:
 	./run_app.sh $(ARGS)
 
+# A store full of invented passwords, for manual testing and screenshots.
+# Use this instead of the real one; see src/gtkpass/safety.py.
+DEV_STORE := .dev/store
+DEV_GNUPGHOME := .dev/gnupg
+
+devstore:
+	./scripts/make-dev-store.sh $(DEV_STORE) $(DEV_GNUPGHOME)
+
+run-dev: devstore
+	PASSWORD_STORE_DIR=$(PWD)/$(DEV_STORE) GNUPGHOME=$(PWD)/$(DEV_GNUPGHOME) \
+		GTKPASS_ALLOW_REAL_STORE=1 ./run_app.sh $(ARGS)
+
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
 	rm -f data/gschemas.compiled
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+	rm -rf .dev/

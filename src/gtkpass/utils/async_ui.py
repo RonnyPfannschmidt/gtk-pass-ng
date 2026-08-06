@@ -26,7 +26,7 @@ def on_ui_thread(
     def deliver(completed: Future) -> None:
         try:
             result = completed.result()
-        except BaseException as error:  # noqa: BLE001 - reported, not swallowed
+        except BaseException as error:
             GLib.idle_add(_once, on_error or _log_error, error)
         else:
             GLib.idle_add(_once, on_success, result)

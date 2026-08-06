@@ -33,6 +33,11 @@ def pytest_configure(config: pytest.Config) -> None:
     # Keep the accessibility bridge out of the way; it is noisy under xvfb.
     os.environ.setdefault("NO_AT_BRIDGE", "1")
 
+    # No test has any business reading the developer's own passwords. Clearing
+    # this rather than merely not setting it means an exported value in the
+    # surrounding shell cannot quietly re-enable it for the whole run.
+    os.environ.pop("GTKPASS_ALLOW_REAL_STORE", None)
+
     compiler = shutil.which("glib-compile-schemas")
     if compiler is None:
         return

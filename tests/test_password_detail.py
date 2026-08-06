@@ -116,9 +116,9 @@ class TestCopyRequests:
 
     def emitted(self, view, button):
         captured = []
-        view.connect("copy-requested", lambda _v, field, value: captured.append(
-            (field, value)
-        ))
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
         button.emit("clicked")
         return captured
 
@@ -135,9 +135,7 @@ class TestCopyRequests:
     def test_copying_the_url(self, view):
         view.show_entry(entry("s3cret\nurl: https://example.com"))
 
-        assert self.emitted(view, view.copy_url_btn) == [
-            ("URL", "https://example.com")
-        ]
+        assert self.emitted(view, view.copy_url_btn) == [("URL", "https://example.com")]
 
     def test_an_empty_field_asks_for_nothing(self, view):
         """The placeholder dash must never reach the clipboard."""

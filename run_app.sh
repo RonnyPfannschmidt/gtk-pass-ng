@@ -16,6 +16,10 @@ glib-compile-schemas data/ || exit 1
 # In devcontainer, the host runtime is mounted to /tmp/host-runtime
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/tmp/host-runtime/bus}"
 
+# This is the application actually being used, so it may open the real store.
+# Nothing else should: see src/gtkpass/safety.py.
+export GTKPASS_ALLOW_REAL_STORE=1
+
 # Unbuffer Python output for better logging visibility
 export PYTHONUNBUFFERED=1
 

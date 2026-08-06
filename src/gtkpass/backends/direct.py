@@ -6,7 +6,6 @@ are the same, so a store is usable from either.
 """
 
 import logging
-import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,10 +26,9 @@ from gtkpass.backends import (
     PasswordEntry,
     PasswordMetadata,
 )
+from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_STORE = "~/.password-store"
 
 
 @dataclass
@@ -45,11 +43,6 @@ class DirectBackendSettings(BackendSettings):
 
     password_store_dir: Path | None = None
     gpg_home: Path | None = None
-
-
-def default_store_dir() -> Path:
-    """Where pass keeps its store when nothing is configured."""
-    return Path(os.environ.get("PASSWORD_STORE_DIR") or DEFAULT_STORE).expanduser()
 
 
 class DirectBackend(PasswordBackend):
@@ -94,6 +87,7 @@ class DirectBackend(PasswordBackend):
             raise BackendError(f"expected DirectBackendSettings, got {type(settings)}")
 
         store = settings.password_store_dir or default_store_dir()
+        ensure_store_allowed(store)
         if not store.is_dir():
             raise BackendError(f"Password store directory not found: {store}")
 

@@ -41,7 +41,9 @@ class ClipboardCopier:
 
         # Gdk.Clipboard.set() is a varargs C function whose Python override is
         # not available in every PyGObject build; set_content always is.
-        clipboard.set_content(Gdk.ContentProvider.new_for_value(GObject.Value(str, text)))
+        clipboard.set_content(
+            Gdk.ContentProvider.new_for_value(GObject.Value(str, text))
+        )
 
         self.cancel_pending_clear()
         if timeout_seconds > 0:

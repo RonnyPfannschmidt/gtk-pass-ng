@@ -1,0 +1,61 @@
+# Working on GTKPass
+
+GTKPass is a GTK4/Libadwaita frontend over pluggable password backends, not a
+password manager of its own. Backends are discovered through the
+`gtkpass.backends` entry point group.
+
+## Never read real passwords
+
+The single rule that matters most. Development code, tests, probes and one-off
+scripts must never open `~/.password-store` or the user's keyring. Whatever they
+print lands in a terminal, a CI log, or an AI assistant's transcript, and a
+decrypted password cannot be un-disclosed.
+
+- `make devstore` creates a throwaway store under `.dev/` with invented
+  passwords and its own GPG key. Use it for manual testing and screenshots.
+- `make run-dev` launches the application against that store.
+- The backends refuse the real store unless `GTKPASS_ALLOW_REAL_STORE=1` is set.
+  Only `run_app.sh` sets it, because that is the application actually being
+  used. If you are reaching for that variable in anything else, stop.
+- The test suite clears the variable in `conftest.py`, so an exported value in
+  your shell cannot re-enable it for a run.
+
+Never print a decrypted value. `PasswordEntry.__repr__` is redacted on purpose:
+the generated dataclass repr would have put plaintext into every log line,
+traceback and pytest assertion diff that rendered one. Do not undo that, and do
+not add a `__str__` or a log line that defeats it.
+
+## Test first
+
+Write the failing test, run it, watch it fail, then make it pass. Not "when
+appropriate" — the previous wording said that and it never once happened, which
+is why a syntax error and a backend that could not be instantiated both survived
+seven months in the tree.
+
+The backend conformance suite in `tests/test_backend_contract.py` is the
+definition of done for backend work.
+
+## UI lives in Blueprint
+
+Widgets are declared in `src/gtkpass/ui/blueprints/*.blp` and loaded as
+templates. Edit the `.blp`, run `make ui`, commit both files, and never hand-edit
+a `.ui` — CI recompiles and diffs them. A test parses every module and fails on
+widget construction in Python; models such as `Gtk.TreeStore` are exempt.
+
+## Other things worth knowing
+
+- Import GI namespaces from `gtkpass._gi`, which pins the versions once. Never
+  call `gi.require_version` anywhere else.
+- Nothing outside `backends/manager.py` imports a backend module directly.
+- Application identity lives in `gtkpass/config.py`. The D-Bus name, desktop
+  file, icon, AppStream id and GSettings schema all have to stay the same string.
+- `Gio.Settings.new()` on a missing schema calls `g_error()` and aborts the
+  process without a traceback, so go through `config.get_settings()`.
+- Do not add dependencies without discussion. In particular not `keyring`,
+  `GitPython`, `pyotp`, `qrcode`, `pillow` or `opencv`: an earlier version of
+  this file prescribed all of them and none were ever used.
+
+## Commands
+
+`make help` lists them. `make check` runs lint, format and types via pre-commit;
+`make test` runs the suite headless under xvfb.
