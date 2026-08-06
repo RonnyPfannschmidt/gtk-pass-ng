@@ -111,6 +111,48 @@ class TestSecrets:
         assert view.password_row.get_text() == ""
 
 
+class TestRevealingThePassword:
+    """The 'show hidden passwords' preference, which never worked.
+
+    It was bound to a 'show-password' property that Adw.PasswordEntryRow does
+    not have, so every window construction logged a GLib-GIO-CRITICAL and the
+    setting did nothing. The row's text visibility lives on its GtkEditable
+    delegate instead.
+    """
+
+    def shown(self, view) -> bool:
+        return view.password_row.get_delegate().get_visibility()
+
+    def test_a_password_starts_hidden(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert not self.shown(view)
+
+    def test_it_can_be_revealed(self, view):
+        view.show_entry(entry("s3cret"))
+
+        view.set_reveal_password(True)
+
+        assert self.shown(view)
+
+    def test_it_can_be_hidden_again(self, view):
+        view.show_entry(entry("s3cret"))
+        view.set_reveal_password(True)
+
+        view.set_reveal_password(False)
+
+        assert not self.shown(view)
+
+    def test_revealing_survives_the_next_entry(self, view):
+        """Arrow-keying to another entry must not silently re-hide it."""
+        view.show_entry(entry("s3cret"))
+        view.set_reveal_password(True)
+
+        view.show_entry(entry("other", name="second"))
+
+        assert self.shown(view)
+
+
 class TestCopyRequests:
     """The view asks for a copy; the window owns the clipboard and timeout."""
 

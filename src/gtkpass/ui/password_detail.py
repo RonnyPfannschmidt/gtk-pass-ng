@@ -51,6 +51,9 @@ class PasswordDetailView(Gtk.Box):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._entry: PasswordEntry | None = None
+        #: Whether passwords are shown rather than dotted out. Kept so that
+        #: moving to another entry does not silently re-hide one.
+        self._reveal_password = False
         self.stack.set_visible_child_name("content")
 
     # -- state ---------------------------------------------------------------
@@ -74,6 +77,8 @@ class PasswordDetailView(Gtk.Box):
         self.name_row.set_subtitle(entry.name)
         self.username_row.set_subtitle(_first(metadata, USERNAME_KEYS) or PLACEHOLDER)
         self.password_row.set_text(entry.password or "")
+        # Re-applied per entry: setting the text can reset the delegate.
+        self.set_reveal_password(self._reveal_password)
         self.url_row.set_subtitle(_first(metadata, URL_KEYS) or PLACEHOLDER)
 
         notes = _notes(entry)
@@ -95,8 +100,17 @@ class PasswordDetailView(Gtk.Box):
         self.spinner.set_spinning(False)
 
     def set_reveal_password(self, reveal: bool) -> None:
-        """Whether the password starts visible rather than dotted out."""
-        self.password_row.set_show_password(reveal)
+        """Whether the password is shown rather than dotted out.
+
+        Adw.PasswordEntryRow has no property for this -- binding one logged a
+        GLib-GIO-CRITICAL on every window and changed nothing. Visibility
+        belongs to the GtkText the row delegates its editing to, which
+        GtkEditable exposes.
+        """
+        delegate = self.password_row.get_delegate()
+        if delegate is not None:
+            delegate.set_visibility(reveal)
+        self._reveal_password = reveal
 
     def _replace_entry(self, entry: PasswordEntry | None) -> None:
         """Drop the previous entry's plaintext before taking a new one."""

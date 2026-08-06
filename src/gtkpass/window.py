@@ -236,12 +236,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Connect selection handler
         self.password_list.connect_password_selected(self._on_password_selected)
         self.password_detail.connect("copy-requested", self._on_copy_requested)
-        self.settings.bind(
-            "show-hidden-passwords",
-            self.password_detail.password_row,
-            "show-password",
-            Gio.SettingsBindFlags.GET,
+
+        # Not a Gio.Settings.bind: Adw.PasswordEntryRow has no property to bind
+        # to, and binding a name it does not have logs a GLib-GIO-CRITICAL on
+        # every window and does nothing.
+        self.settings.connect(
+            "changed::show-hidden-passwords", self._apply_reveal_preference
         )
+        self._apply_reveal_preference()
 
         # Show warning for failed backends
         if len(self.failed_backends) > 0:
@@ -407,6 +409,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             report(e)
             return
         on_ui_thread(future, show, report)
+
+    def _apply_reveal_preference(self, *_args) -> None:
+        """Show or dot out passwords, following the preference."""
+        self.password_detail.set_reveal_password(
+            self.settings.get_boolean("show-hidden-passwords")
+        )
 
     def _set_shown(self, shown: tuple[str, str] | None) -> None:
         """Record which entry the detail pane holds, and offer editing for it."""

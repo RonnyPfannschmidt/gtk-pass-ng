@@ -211,6 +211,55 @@ class TestShowingDetails:
         assert window.lookup_action("edit-password").get_enabled()
 
 
+class TestTheRevealPreference:
+    """'show hidden passwords' has to reach the pane that shows them.
+
+    It used to be a Gio.Settings.bind onto a property Adw.PasswordEntryRow does
+    not have: a GLib-GIO-CRITICAL on every window construction, and a setting
+    that did nothing.
+    """
+
+    @pytest.fixture
+    def reveal(self):
+        settings = get_settings()
+        previous = settings.get_boolean("show-hidden-passwords")
+        settings.set_boolean("show-hidden-passwords", True)
+        yield
+        settings.set_boolean("show-hidden-passwords", previous)
+
+    def revealed(self, window) -> bool:
+        return window.password_detail.password_row.get_delegate().get_visibility()
+
+    def test_an_opened_entry_honours_the_preference(
+        self, demo_backend_configured, reveal
+    ):
+        window, _ = run_in_application(TestShowingDetails().open_first_password)
+
+        assert self.revealed(window)
+
+    def test_it_is_hidden_when_the_preference_is_off(self, demo_backend_configured):
+        window, _ = run_in_application(TestShowingDetails().open_first_password)
+
+        assert not self.revealed(window)
+
+    def test_changing_the_preference_reaches_an_open_window(
+        self, demo_backend_configured
+    ):
+        from gtkpass.window import GTKPassWindow
+
+        def toggle_while_open(app):
+            window = GTKPassWindow(application=app)
+            settings = get_settings()
+            previous = settings.get_boolean("show-hidden-passwords")
+            settings.set_boolean("show-hidden-passwords", True)
+            try:
+                return self.revealed(window)
+            finally:
+                settings.set_boolean("show-hidden-passwords", previous)
+
+        assert run_in_application(toggle_while_open)
+
+
 class TestEditing:
     """Saving the edit dialog writes through the backend and re-reads it."""
 
