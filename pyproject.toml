@@ -80,23 +80,11 @@ check_untyped_defs = true
 # Ratchet target; the tree is not clean enough for this yet.
 disallow_untyped_defs = false
 
-# None of these ship type information. Declaring them here is also what lets the
-# pre-commit hook run in its own isolated environment without PyGObject.
 [[tool.mypy.overrides]]
 module = ["gi.*", "gnupg.*", "secretstorage.*"]
 ignore_missing_imports = true
 
-# Known debt, deliberately visible so it can only shrink. Every module listed
-# here is scheduled for repair; delete its entry once it type checks, and never
-# add a new one. Current counts, for reference:
-#
-#   direct.py       16  implements a superseded interface; being rewritten
-#   settings.py     11  lambdas returning setattr(), unannotated dict
-#   secretservice.py 4  includes a duplicate _get_items that shadows the real one
-#   pass_cli.py      2
-#   manager.py       1  entry point lookup
-#   demo.py          1
-#   backends/__init__.py 1
+# Known debt: remove entries as these are repaired, do not add new ones.
 [[tool.mypy.overrides]]
 module = [
     "gtkpass.backends",
