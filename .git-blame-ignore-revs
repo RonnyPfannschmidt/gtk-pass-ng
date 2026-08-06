@@ -1,0 +1,5 @@
+# Mechanical reformats. Configure with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply ruff format and safe autofixes
+8355750411b8993248e59525e0f644b1efcbcfd8
