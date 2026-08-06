@@ -1,645 +1,179 @@
-# GTKPass Architecture Overview
+# GTKPass Architecture
 
-## Introduction
+GTKPass is a GTK4/Libadwaita frontend over pluggable password backends. It is
+not a password manager of its own: it stores nothing, encrypts nothing, and
+owns no format. A backend does that, and GTKPass shows the result.
 
-This document describes the software architecture of GTKPass, a modern GTK4-based password manager for Linux/GNOME.
+This document describes the code as it stands. Where something is deliberately
+absent, that is said outright rather than left to look like an omission.
 
-## System Architecture
-
-### High-Level Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   GTK4 UI Layer                      │
-│  (Libadwaita Widgets, Blueprint UI Definitions)     │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│              Application Layer                       │
-│  (Controllers, View Models, Event Handlers)          │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│               Service Layer                          │
-│  (GPG, Git, OTP, QR, Keyring Services)              │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│              Domain Model Layer                      │
-│  (Password, PasswordStore, OTPToken Models)          │
-└─────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│          External Systems & Storage                  │
-│  (Filesystem, GPG, Git, System Keyring)             │
-└─────────────────────────────────────────────────────┘
-```
-
-## Component Architecture
-
-### 1. UI Layer Components
-
-#### 1.1 Main Application Window
-- **Purpose**: Primary application container
-- **Responsibilities**:
-  - Host sidebar and content views
-  - Manage global shortcuts
-  - Handle application state
-- **Technology**: Adw.ApplicationWindow with Blueprint definition
-
-#### 1.2 Password List (Sidebar)
-- **Purpose**: Display password hierarchy
-- **Responsibilities**:
-  - Show password tree structure
-  - Handle search/filter
-  - Support selection
-- **Technology**: Gtk.TreeView or Gtk.ListView with custom model
-
-#### 1.3 Password Detail View
-- **Purpose**: Display selected password details
-- **Responsibilities**:
-  - Show password information
-  - Provide quick actions (copy, edit)
-  - Display OTP if available
-- **Technology**: Custom Adw widget with Blueprint definition
-
-#### 1.4 Password Editor Dialog
-- **Purpose**: Create/edit password entries
-- **Responsibilities**:
-  - Form for password details
-  - Password generation
-  - Validation
-- **Technology**: Adw.Dialog with Blueprint definition
-
-#### 1.5 Preferences Window
-- **Purpose**: Application settings
-- **Responsibilities**:
-  - Configure application behavior
-  - Set security options
-  - Manage password store location
-- **Technology**: Adw.PreferencesWindow
-
-### 2. Application Layer Components
-
-#### 2.1 Application Class
-```python
-class GTKPassApp(Adw.Application):
-    """Main application class."""
-    - Initialize services
-    - Setup signal handlers
-    - Manage application lifecycle
-```
-
-#### 2.2 Controllers
-- **PasswordListController**: Handle password list interactions
-- **PasswordDetailController**: Manage detail view updates
-- **EditorController**: Handle password editing logic
-
-### 3. Service Layer Components
-
-#### 3.1 GPG Service
-```python
-class GPGService:
-    """Handle GPG encryption/decryption."""
-    - encrypt(data: str, recipients: list[str]) -> str
-    - decrypt(data: str) -> str
-    - list_keys() -> list[GPGKey]
-    - verify_signature(data: str) -> bool
-```
-
-#### 3.2 PasswordStore Service
-```python
-class PasswordStoreService:
-    """Manage passwordstore operations."""
-    - list_passwords() -> list[PasswordEntry]
-    - get_password(path: Path) -> Password
-    - save_password(password: Password) -> None
-    - delete_password(path: Path) -> None
-    - move_password(old_path: Path, new_path: Path) -> None
-```
-
-#### 3.3 Git Service
-```python
-class GitService:
-    """Handle git operations."""
-    - commit(message: str, files: list[Path]) -> None
-    - push() -> None
-    - pull() -> None
-    - get_history(path: Path) -> list[GitCommit]
-    - sync() -> None
-```
-
-#### 3.4 Keyring Service
-```python
-class KeyringService:
-    """Integrate with system keyring."""
-    - store_passphrase(key: str, passphrase: str) -> None
-    - get_passphrase(key: str) -> Optional[str]
-    - delete_passphrase(key: str) -> None
-```
-
-#### 3.5 OTP Service
-```python
-class OTPService:
-    """Generate and manage OTP tokens."""
-    - generate_totp(secret: str) -> str
-    - generate_hotp(secret: str, counter: int) -> str
-    - parse_otpauth_uri(uri: str) -> OTPConfig
-    - create_otpauth_uri(config: OTPConfig) -> str
-```
-
-#### 3.6 QR Service
-```python
-class QRService:
-    """Handle QR code generation and scanning."""
-    - generate_qr(data: str) -> Image
-    - scan_qr_from_camera() -> str
-    - scan_qr_from_file(path: Path) -> str
-```
-
-### 4. Domain Model Layer
-
-#### 4.1 Password Model
-```python
-@dataclass
-class Password:
-    """Password entry model."""
-    name: str
-    path: Path
-    password: str
-    username: Optional[str]
-    url: Optional[str]
-    notes: Optional[str]
-    otp_secret: Optional[str]
-    created_at: datetime
-    modified_at: datetime
-
-    def to_passwordstore_format() -> str
-    def from_passwordstore_format(content: str) -> 'Password'
-    def clear_sensitive_data() -> None
-```
-
-#### 4.2 PasswordStore Model
-```python
-class PasswordStore:
-    """Password store repository."""
-    store_path: Path
-    gpg_service: GPGService
-    git_service: Optional[GitService]
-
-    def initialize() -> None
-    def get_password(path: Path) -> Password
-    def list_passwords(prefix: Optional[Path]) -> list[Path]
-    def search(query: str) -> list[Path]
-```
-
-#### 4.3 OTPToken Model
-```python
-@dataclass
-class OTPToken:
-    """OTP token model."""
-    type: Literal['totp', 'hotp']
-    secret: str
-    digits: int = 6
-    period: int = 30  # for TOTP
-    counter: int = 0  # for HOTP
-    algorithm: str = 'SHA1'
-    issuer: Optional[str] = None
-    account: Optional[str] = None
-```
-
-### 5. Utility Components
-
-#### 5.1 Password Generator
-```python
-class PasswordGenerator:
-    """Generate secure passwords."""
-    - generate_random(length: int, charset: str) -> str
-    - generate_passphrase(word_count: int) -> str
-    - calculate_strength(password: str) -> float
-```
-
-#### 5.2 Clipboard Manager
-```python
-class ClipboardManager:
-    """Manage clipboard operations."""
-    - copy_text(text: str, timeout: int) -> None
-    - clear() -> None
-    - start_clear_timer(timeout: int) -> None
-```
-
-#### 5.3 Validators
-```python
-class PasswordValidator:
-    """Validate password entries."""
-    - validate_name(name: str) -> ValidationResult
-    - validate_password(password: str) -> ValidationResult
-    - check_strength(password: str) -> StrengthResult
-```
-
-## Data Flow
-
-### Password Retrieval Flow
+## Module map
 
 ```
-User Clicks Password
-        │
-        ▼
-PasswordListController.on_password_selected()
-        │
-        ▼
-PasswordStoreService.get_password(path)
-        │
-        ▼
-GPGService.decrypt(encrypted_content)
-        │
-        ▼
-Password.from_passwordstore_format(content)
-        │
-        ▼
-PasswordDetailView.display(password)
-        │
-        ▼
-ClipboardManager.copy_text(password.password, timeout=45)
+src/gtkpass/
+├── __main__.py          entry point; calls app.main()
+├── app.py               GTKPassApp (Adw.Application): actions, CLI options
+├── window.py            GTKPassWindow: backends, sidebar, detail pane, editing
+├── config.py            application identity and GSettings access
+├── safety.py            keeps development code out of the real store
+├── _gi.py               the one place gi.require_version is called
+├── backends/
+│   ├── __init__.py      the backend contract: PasswordBackend and its data
+│   ├── manager.py       discovery, instances, and the worker thread pool
+│   ├── demo.py          invented entries, read-only
+│   ├── direct.py        GPG-encrypted files, read and written natively
+│   ├── pass_cli.py      delegates to the pass(1) executable
+│   └── secretservice.py the D-Bus Secret Service (keyrings)
+├── ui/
+│   ├── blueprints/      *.blp sources and their compiled *.ui
+│   ├── password_list.py the sidebar tree
+│   ├── password_detail.py  the pane showing one decrypted entry
+│   ├── password_edit.py    the edit dialog
+│   ├── settings.py      preferences, including configuring backends
+│   └── about.py
+└── utils/
+    ├── async_ui.py      moving worker results onto the UI thread
+    └── clipboard.py     copying a secret and taking it back out
 ```
 
-### Password Creation Flow
-
-```
-User Clicks "New Password"
-        │
-        ▼
-PasswordEditorDialog.show()
-        │
-        ▼
-User Fills Form / Generates Password
-        │
-        ▼
-EditorController.on_save()
-        │
-        ▼
-PasswordValidator.validate(password_data)
-        │
-        ▼
-Password.to_passwordstore_format()
-        │
-        ▼
-GPGService.encrypt(content, recipients)
-        │
-        ▼
-PasswordStoreService.save_password(password)
-        │
-        ▼
-GitService.commit("Add password", [path])
-        │
-        ▼
-PasswordListView.refresh()
-```
-
-### OTP Generation Flow
-
-```
-User Views Password with OTP
-        │
-        ▼
-PasswordDetailView.display_otp()
-        │
-        ▼
-OTPService.generate_totp(otp_secret)
-        │
-        ▼
-Display OTP Code + Countdown Timer
-        │
-        ▼
-Timer Expires (30 seconds)
-        │
-        ▼
-OTPService.generate_totp(otp_secret)  [Refresh]
-```
-
-## Storage Format
-
-### Password File Format
-
-Standard passwordstore format:
-```
-<password>
-<optional metadata lines>
-```
-
-Extended format with metadata:
-```
-<password>
-username: <username>
-url: <url>
-otp: <otpauth_uri>
-notes: <multi-line notes>
-```
-
-### Directory Structure
-
-```
-~/.password-store/
-├── .gpg-id                 # GPG recipient IDs
-├── .git/                   # Git repository
-├── work/
-│   ├── email.gpg
-│   └── vpn.gpg
-├── personal/
-│   ├── bank.gpg
-│   └── social/
-│       ├── twitter.gpg
-│       └── facebook.gpg
-└── .extensions/
-    └── pass-otp/           # OTP extension data
-```
-
-## Security Architecture
-
-### Security Layers
-
-1. **Storage Security**
-   - GPG encryption at rest
-   - Filesystem permissions (700 for directories, 600 for files)
-   - Git for versioning and sync
-
-2. **Runtime Security**
-   - Keyring integration for GPG passphrase
-   - Memory clearing for sensitive data
-   - Clipboard auto-clear timer
-   - Session locking
-
-3. **UI Security**
-   - Password masking by default
-   - Secure input fields (no autocomplete)
-   - Screenshot prevention (when supported)
-   - Visual feedback for security operations
-
-### Threat Model
-
-**Threats Addressed:**
-- Unauthorized access to password files (mitigated by GPG encryption)
-- Memory dumps (mitigated by clearing sensitive data)
-- Clipboard sniffing (mitigated by auto-clear timer)
-- Keyloggers (partial mitigation via secure entry)
-
-**Threats Not Addressed:**
-- Malware on the system (requires OS-level security)
-- Physical access to unlocked system
-- Compromised GPG keys
-
-## Concurrency and Threading
-
-### Main Thread (GTK)
-- All UI operations
-- Event handling
-- Model updates
-
-### Background Operations
-- GPG encryption/decryption (can be slow)
-- Git operations (network latency)
-- QR code scanning (camera processing)
-
-**Threading Strategy:**
-```python
-# Use GLib.idle_add for UI updates from background threads
-def on_decrypt_complete(result):
-    GLib.idle_add(update_ui, result)
-
-# Use threading or asyncio for background operations
-executor = ThreadPoolExecutor(max_workers=2)
-future = executor.submit(gpg_service.decrypt, data)
-```
-
-## Configuration Management
-
-### Application Settings
-
-Stored in GSettings (XDG_CONFIG_HOME/gtkpass/):
-- Password store location
-- Clipboard timeout
-- Auto-lock timeout
-- Git sync settings
-- UI preferences (dark mode, window size)
-
-### Password Store Configuration
-
-Standard passwordstore format (~/.password-store/):
-- `.gpg-id`: GPG recipient IDs
-- `.git/config`: Git configuration
-- `.extensions/`: Extension configurations
-
-## Error Handling Strategy
-
-### Error Categories
-
-1. **User Errors**
-   - Invalid input
-   - Missing required fields
-   - Show user-friendly dialog
-
-2. **System Errors**
-   - GPG not available
-   - Git operation failed
-   - Show error with suggested action
-
-3. **Security Errors**
-   - Decryption failed
-   - Invalid signature
-   - Show error and log (without sensitive data)
-
-4. **Programming Errors**
-   - Assertions
-   - Should not happen in production
-   - Log and attempt graceful degradation
-
-### Error Recovery
-
-```python
-try:
-    password = store.get_password(path)
-except DecryptionError as e:
-    # User error: wrong passphrase
-    show_error_dialog("Failed to decrypt password. Check your GPG passphrase.")
-except FileNotFoundError:
-    # System error: file missing
-    show_error_dialog("Password file not found. It may have been deleted.")
-    refresh_password_list()
-except Exception as e:
-    # Unexpected error
-    logger.error(f"Unexpected error: {e}")
-    show_error_dialog("An unexpected error occurred. Please report this issue.")
-```
-
-## Testing Strategy
-
-### Unit Tests
-- Test each service independently
-- Mock external dependencies
-- Test error conditions
-
-### Integration Tests
-- Test service interactions
-- Use temporary directories
-- Mock external services (git remote, keyring)
-
-### UI Tests
-- Test user workflows
-- Verify keyboard shortcuts
-- Test accessibility
-
-### Security Tests
-- Test encryption/decryption
-- Verify clipboard clearing
-- Test session locking
-
-## Performance Considerations
-
-### Optimization Strategies
-
-1. **Lazy Loading**
-   - Load password list on demand
-   - Decrypt passwords only when viewed
-
-2. **Caching**
-   - Cache decrypted passwords (with timeout)
-   - Cache password list
-   - Invalidate on changes
-
-3. **Asynchronous Operations**
-   - Background git operations
-   - Parallel GPG operations for multiple passwords
-
-4. **Efficient UI Updates**
-   - Update only changed items
-   - Use incremental search
-   - Virtual scrolling for large lists
-
-## Extensibility
-
-### Plugin System (Future)
-
-```python
-class PasswordStorePlugin(Protocol):
-    """Plugin interface for extending functionality."""
-
-    def on_password_save(password: Password) -> None: ...
-    def on_password_load(password: Password) -> Password: ...
-    def get_menu_items() -> list[MenuItem]: ...
-```
-
-### Extension Points
-
-1. **Custom Password Generators**
-2. **Import/Export Formats**
-3. **Additional OTP Types**
-4. **Custom UI Themes**
-5. **Additional Security Checks**
-
-## Deployment Architecture
-
-### Distribution Methods
-
-1. **PyPI Package**
-   ```bash
-   pip install gtkpass
-   ```
-
-2. **Flatpak** (Preferred for Linux)
-   ```bash
-   flatpak install flathub org.gnome.GTKPass
-   ```
-
-3. **Distribution Packages**
-   - Debian/Ubuntu: .deb
-   - Fedora/RHEL: .rpm
-   - Arch: AUR package
-
-### Dependencies
-
-**Required:**
-- Python 3.10+
-- GTK4 4.10+
-- Libadwaita 1.4+
-- GnuPG 2.x
-
-**Optional:**
-- git (for version control)
-- pass (for CLI compatibility)
-- webcam (for QR scanning)
-
-## Migration and Compatibility
-
-### Compatibility with Existing Tools
-
-- **pass CLI**: Full compatibility with standard format
-- **qtpass**: Can use same password store
-- **pass-otp**: Compatible OTP format
-- **Android Password Store**: Same git repository
-
-### Migration from Other Password Managers
-
-Future support for importing from:
-- KeePass/KeePassXC
-- 1Password
-- LastPass
-- Bitwarden
-
-## Monitoring and Logging
-
-### Logging Levels
-
-- **DEBUG**: Detailed diagnostic information
-- **INFO**: General application flow
-- **WARNING**: Unexpected but handled situations
-- **ERROR**: Error conditions
-- **CRITICAL**: Application cannot continue
-
-### Log Format
-
-```python
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-```
-
-### What to Log
-
-- Application startup/shutdown
-- Password store operations (without sensitive data)
-- GPG/Git errors
-- Security events (failed decryption, etc.)
-
-### What NOT to Log
-
-- Passwords (plain or encrypted)
-- GPG passphrases
-- OTP secrets
-- Any personally identifiable information
-
-## Future Architecture Considerations
-
-1. **Wayland Protocol Extensions**
-   - Secure clipboard protocols
-   - Screenshot prevention
-
-2. **Hardware Security**
-   - YubiKey integration
-   - TPM integration
-
-3. **Cloud Sync**
-   - E2E encrypted sync service
-   - Conflict resolution
-
-4. **Mobile Apps**
-   - Shared backend code
-   - Platform-specific UI
-
-5. **Browser Extension**
-   - Native messaging protocol
-   - Secure password filling
+## Identity and settings
+
+Every identifier the desktop cares about — the D-Bus name, the `.desktop` file,
+the icon, the AppStream component, the GSettings schema — has to be the same
+string, so `config.py` defines `APP_ID` once and derives the rest from it.
+
+Settings are reached through `config.get_settings()` and
+`config.get_backend_settings()`, never through `Gio.Settings.new()` directly:
+that function calls `g_error()` on a schema it cannot find, which aborts the
+process with no traceback. The helpers look the schema up first and raise
+`SchemaNotInstalledError` instead.
+
+Each configured backend instance gets its own settings, stored under a
+*relocatable* schema at `/io/github/RonnyPfannschmidt/GTKPass/backends/<id>/`.
+The top level schema holds only the list of instances, as `(id, type)` pairs,
+plus the application's own preferences.
+
+## Backends
+
+`backends/__init__.py` is the contract. It defines:
+
+- **`PasswordBackend`**, the abstract base. Classmethods `is_available()` and
+  `create(settings)`; instance methods `list_passwords()`, `get_password()`,
+  `search()`, and the writes `add_password()`, `edit_password()`,
+  `delete_password()`, `move_password()`, `copy_password()`.
+- **`PasswordMetadata`** — what listing returns: name, path, mtime. No secret.
+- **`PasswordEntry`** — one entry, with `content` once it has been decrypted.
+  Its `password` property is the first line and `metadata` the `key: value`
+  lines after it. Its `repr` is redacted deliberately; see *Handling secrets*.
+- **`BackendSettings`**, subclassed per backend for its own configuration.
+- **`BackendError`** and the more specific `GPGError` and `GitError`.
+
+Backends are discovered through the `gtkpass.backends` entry point group, which
+is what makes them pluggable: a backend shipped by another distribution needs
+no change here. The four in-tree ones are registered in `pyproject.toml`.
+
+`BackendManager` owns discovery and the live instances, keyed by instance id.
+**Nothing outside `manager.py` imports a backend module directly** — the window
+asks the manager, and the manager holds the only references.
+
+The conformance suite in `tests/test_backend_contract.py` is the definition of
+done for backend work: a new backend is finished when it passes.
+
+## User interface
+
+Widgets are declared in `ui/blueprints/*.blp` and loaded as templates. The
+`.ui` files beside them are generated by `make ui` and must never be hand
+edited. `tests/test_ui_is_declarative.py` fails on widget construction in
+Python, so a widget tree that drifts out of Blueprint is caught rather than
+merely discouraged.
+
+**The window** loads the configured backends at startup, lists each one in the
+sidebar, and records those that failed so they can be shown as unavailable
+rather than silently missing.
+
+**The sidebar** (`password_list.py`) is a `Gtk.ColumnView` over a
+`Gtk.TreeListModel` of `PasswordNode` objects — a backend, a folder, or an
+entry. Path components become folders, so `work/mail/imap` nests three deep.
+Every node carries the id of the backend it belongs to, so a selected entry
+names its own backend without a walk back up the tree. The row itself is
+declared in the Blueprint as a `BuilderListItemFactory` template, which is why
+the binding expressions there cast to `$GTKPassPasswordNode`.
+
+**The detail pane** shows one decrypted entry and emits `copy-requested`
+instead of touching the clipboard, leaving the window to apply the user's
+timeout and raise the toast.
+
+**The edit dialog** splits an entry into the password and everything after it,
+and joins the two back on save. It never reserialises the fields it parsed:
+what it hands over replaces the entry wholesale, so anything dropped on the way
+would be lost.
+
+## Threads
+
+GPG is slow and `pass` is a subprocess, so backend calls do not run on the UI
+thread. `BackendManager` owns a `ThreadPoolExecutor` and returns futures from
+`list_passwords_async()`, `get_password_async()` and `edit_password_async()`.
+
+`utils/async_ui.on_ui_thread()` is the single place a result crosses back.
+`Future.add_done_callback` runs on the worker, and touching a widget from there
+corrupts GTK state in ways that surface much later, so the callback only
+schedules a `GLib.idle_add`.
+
+Selection carries a request counter. Arrow-keying down the sidebar starts one
+decrypt per row, and a slow one landing after a later selection would otherwise
+replace an entry the user has already moved off; a result whose number is stale
+is dropped.
+
+## Data flow
+
+**Startup.** `main()` → `GTKPassApp.do_activate()` → `GTKPassWindow`, which
+reads `backend-instances` from GSettings, creates each backend through
+`BackendManager`, and fills the sidebar. With nothing configured, the window
+shows a prompt pointing at Preferences instead of an empty tree.
+
+**Opening an entry.** Selecting a row calls `get_password_async()`; the pane
+shows a spinner, then the decrypted entry when the future lands, or a toast if
+it fails.
+
+**Editing an entry.** The dialog emits `saved` with the replacement content,
+the window puts it through `edit_password_async()`, and on success reads the
+entry back from the store rather than trusting the widgets — which is also what
+proves the write landed.
+
+## Storage format
+
+The `pass` convention, which the file backends follow: the first line is the
+password, and the lines after it are free text, conventionally `key: value`.
+GTKPass reads `username`/`user`/`login` and `url`/`website`/`uri` out of it for
+display, and treats anything else as notes. It does not impose a schema, and an
+entry it did not understand is preserved verbatim through an edit.
+
+## Handling secrets
+
+The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
+
+- `safety.py` refuses `~/.password-store` and `$PASSWORD_STORE_DIR` unless
+  `GTKPASS_ALLOW_REAL_STORE` is set. Only `run_app.sh` sets it. The test suite
+  clears it, so an exported value cannot re-enable it for a run.
+- `PasswordEntry.__repr__` is redacted and `content` is excluded from it. The
+  generated dataclass repr would have put plaintext into every log line,
+  traceback and pytest assertion diff that rendered an entry.
+- `PasswordEntry.clear_password()` drops the plaintext when the pane moves on.
+- `ClipboardCopier` clears the clipboard after a configurable delay. This is
+  damage limitation, not a guarantee: a clipboard manager may already have
+  taken a copy, and a Wayland compositor may refuse a clear from an unfocused
+  application.
+
+## What is deliberately absent
+
+An earlier design described OTP, QR code, Git and keyring *services*, and
+prescribed the dependencies to build them — `keyring`, `GitPython`, `pyotp`,
+`qrcode`, `pillow`, `opencv`. None were ever written and none are planned.
+
+Git integration is not implemented either. The write methods take a `commit`
+flag, but no backend acts on it: `pass_cli` gets commits because `pass(1)`
+makes them itself, and `direct` ignores the flag and writes the file. The
+parameter is a placeholder in the interface, not a feature.
+
+There is no CI. `make check` and `make test` are run locally, and the
+pre-commit hook installed by `make hooks` runs the former on the way in.

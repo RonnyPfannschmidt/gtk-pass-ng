@@ -1,3 +1,10 @@
+> **Status: wish list, not a description of the software.**
+> Written before implementation and never revised since. Much of it is not
+> built, and some of it — OTP, QR codes, git integration, keyring storage — is
+> not planned; see the closing section of [ARCHITECTURE.md](ARCHITECTURE.md).
+> For what exists today, read [README.md](README.md) and
+> [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # GTKPass Requirements Specification
 
 ## Project Overview

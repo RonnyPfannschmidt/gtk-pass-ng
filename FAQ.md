@@ -1,3 +1,7 @@
+> **Status: aspirational.** Written before implementation. Answers here
+> describe the planned application, and many of the features they promise do
+> not exist. See [README.md](README.md) for what actually works.
+
 # GTKPass Frequently Asked Questions (FAQ)
 
 ## General Questions
@@ -252,7 +256,7 @@ GTKPass aims to be compatible with common pass extensions, particularly:
 
 1. Verify Python version: `python --version` (need 3.10+)
 2. Check GTK4 installation: `pkg-config --modversion gtk4`
-3. Check Libadwaita: See [QUICKSTART.md](QUICKSTART.md)
+3. Check Libadwaita: See [DEVELOPMENT.md](DEVELOPMENT.md)
 4. Review error messages
 5. Check GitHub issues
 
@@ -358,7 +362,7 @@ All documentation is in the repository:
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical design
 - [ROADMAP.md](ROADMAP.md) - Development plan
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution guide
-- [QUICKSTART.md](QUICKSTART.md) - Developer guide
+- [DEVELOPMENT.md](DEVELOPMENT.md) - Developer guide
 - [SECURITY.md](SECURITY.md) - Security policy
 
 ## About

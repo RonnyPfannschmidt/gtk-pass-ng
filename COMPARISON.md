@@ -1,3 +1,7 @@
+> **Status: aspirational.** This compares qtpass against the GTKPass that was
+> planned, not the one that exists. Features credited to GTKPass here are
+> largely unbuilt. See [README.md](README.md) for what actually works.
+
 # GTKPass vs qtpass Comparison
 
 This document compares GTKPass with qtpass to help users understand the differences and advantages of each tool.

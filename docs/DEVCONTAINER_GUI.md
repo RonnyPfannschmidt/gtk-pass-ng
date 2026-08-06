@@ -153,16 +153,14 @@ xhost +local:
 If you can't get GUI access working, you can still develop:
 
 ```bash
-# Run the test suite
-pytest tests/ -v
+# The suite, headless under xvfb -- no GUI access needed
+make test
 
-# Run specific tests
-pytest tests/unit/ -v
-pytest tests/integration/ -v
+# Everything that does not touch a widget
+UV_NO_SYNC=1 uv run pytest -m "not gui"
 
-# Check code with linters
-ruff check src/
-mypy src/
+# Lint, format and types
+make check
 ```
 
 ## Alternative: Run Locally

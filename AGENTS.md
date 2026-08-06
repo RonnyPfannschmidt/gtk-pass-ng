@@ -39,8 +39,14 @@ definition of done for backend work.
 
 Widgets are declared in `src/gtkpass/ui/blueprints/*.blp` and loaded as
 templates. Edit the `.blp`, run `make ui`, commit both files, and never hand-edit
-a `.ui` — CI recompiles and diffs them. A test parses every module and fails on
-widget construction in Python; models such as `Gtk.TreeStore` are exempt.
+a `.ui` — it is generated. A test parses every module and fails on widget
+construction in Python; models such as `Gio.ListStore` are exempt.
+
+That includes list and column view rows, which are declared as a
+`BuilderListItemFactory` template rather than built in a factory callback — see
+`password_list.blp`. Those bindings only run when a row is built, so a broken
+one leaves the model correct and the view empty; at least one test has to
+present the widget and read back what it rendered.
 
 ## Other things worth knowing
 
@@ -59,3 +65,11 @@ widget construction in Python; models such as `Gtk.TreeStore` are exempt.
 
 `make help` lists them. `make check` runs lint, format and types via pre-commit;
 `make test` runs the suite headless under xvfb.
+
+There is no CI. `make sync` installs the pre-commit hook (`make hooks` on its
+own if the environment already exists), and that hook is the only thing that
+runs the checks without being asked. An unformatted commit has landed before
+because the hook was never installed.
+
+`uv run` outside the Makefile re-resolves the environment and tries to build
+PyGObject and pycairo, which fails. Set `UV_NO_SYNC=1`, as the Makefile does.

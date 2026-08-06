@@ -44,77 +44,59 @@ If you discover a security vulnerability in GTKPass, please follow responsible d
 
 ## Security Measures
 
-GTKPass implements multiple security layers:
+What the application actually does today. Anything not listed here is not
+implemented, whatever other documents in this repository may suggest.
 
-### Data Protection
+### Encryption
 
-1. **Encryption at Rest**
-   - All passwords encrypted with GPG
-   - Follows passwordstore standard
-   - Multiple GPG keys supported
+Encryption is the backend's job, not the application's. The Direct GPG and Pass
+backends store entries as GPG-encrypted files in the passwordstore layout, so
+the keys, the cipher and the recipients are GnuPG's business and yours. The
+Direct backend resolves recipients from the nearest `.gpg-id` walking up from
+the entry, which is what `pass` does, so a subtree delegated to another set of
+recipients stays delegated.
 
-2. **Encryption in Transit**
-   - Git operations use HTTPS/SSH
-   - GPG signatures verified
+The Secret Service backend stores nothing itself: it hands entries to the
+session keyring over D-Bus.
 
-3. **Memory Protection**
-   - Sensitive data cleared after use
-   - Clipboard auto-cleared after timeout
-   - Secure memory allocation when available
+### Handling decrypted data
 
-### Access Control
+- Entries are decrypted only when opened, one at a time.
+- The plaintext is dropped when the detail pane moves on to another entry.
+- `PasswordEntry` excludes its content from its `repr`, which is redacted by
+  hand. The generated dataclass repr would otherwise have put plaintext into
+  every log line, traceback and test assertion diff that rendered an entry.
+- Nothing logs a decrypted value.
 
-1. **Authentication**
-   - GPG passphrase required
-   - System keyring integration
-   - Session locking support
+Python cannot guarantee that a secret is gone from memory: strings are
+immutable and the garbage collector may keep copies. Dropping references
+reduces exposure; it does not eliminate it.
 
-2. **Authorization**
-   - GPG key-based access
-   - File system permissions
-   - User-controlled sharing via GPG recipients
+### Clipboard
 
-### Input Validation
+Copying a field puts it on the clipboard and clears it again after a
+configurable delay. Treat this as damage limitation, not a guarantee: a
+clipboard manager may already have taken a copy, and a Wayland compositor may
+refuse a clear requested by an application that is not focused.
 
-1. **All user inputs validated**
-2. **Path traversal prevention**
-3. **GPG command injection prevention**
-4. **XSS prevention in UI**
+### Development safeguards
 
-### Secure Coding Practices
+Development and test code is blocked from opening the real store. The backends
+refuse `~/.password-store` and `$PASSWORD_STORE_DIR` unless
+`GTKPASS_ALLOW_REAL_STORE` is set, which only `run_app.sh` does; the test suite
+clears it. This exists because a decrypted password that reaches a terminal, a
+CI log or an AI assistant's transcript cannot be un-disclosed.
 
-1. **Type safety** (Python type hints)
-2. **Input sanitization**
-3. **Error handling without information leakage**
-4. **No logging of sensitive data**
-5. **Regular dependency updates**
+### Not implemented
 
-## Security Features
+Do not rely on any of these — they do not exist:
 
-### Password Storage
-- GPG encryption (default RSA 3072-bit or higher)
-- Support for multiple encryption keys
+- Session locking or auto-lock after inactivity
+- Storing the GPG passphrase in a keyring (GPG agent handles caching)
+- Screenshot prevention
+- Secure or locked memory allocation
 - Signature verification
-- Encrypted git repository (optional)
-
-### Password Handling
-- No plaintext password storage
-- Secure clipboard operations
-- Auto-clear clipboard (configurable timeout)
-- Password masking in UI
-- Screenshot prevention (when supported)
-
-### Session Security
-- Auto-lock after inactivity
-- Manual lock function
-- GPG agent integration
-- Keyring passphrase caching
-
-### Network Security
-- HTTPS for git remotes
-- SSH key authentication support
-- Certificate validation
-- No telemetry or external connections (except git sync)
+- Git integration of any kind, including signed commits
 
 ## Known Limitations
 
@@ -142,72 +124,34 @@ GTKPass cannot protect against:
 
 ## Security Best Practices
 
-### For Users
+### For users
 
-1. **Use strong GPG passphrases**
-   - 20+ characters recommended
-   - Use passphrase, not password
-   - Unique to GPG key
+1. **Use a strong GPG passphrase**, unique to the key, and let the GPG agent
+   cache it rather than looking for somewhere else to store it.
+2. **Protect the key material**: back it up, prefer subkeys, set expiry.
+3. **Set a short clipboard timeout**, and remember what it cannot do.
+4. **Keep GnuPG current.** It, not this application, is what stands between an
+   attacker and your entries.
 
-2. **Protect GPG keys**
-   - Backup securely
-   - Use separate subkeys
-   - Set expiration dates
+### For developers
 
-3. **Configure security settings**
-   - Enable auto-lock
-   - Set short clipboard timeout
-   - Use keyring integration
-
-4. **Keep software updated**
-   - Update GTKPass regularly
-   - Keep system packages current
-   - Update GnuPG
-
-5. **Use git sync carefully**
-   - Use private repositories
-   - Use SSH keys for authentication
-   - Enable GPG signing for commits
-
-### For Developers
-
-1. **Never log sensitive data**
-   - Passwords, passphrases, OTP secrets
-   - GPG key material
-   - User credentials
-
-2. **Validate all inputs**
-   - File paths
-   - User data
-   - External data (git, GPG)
-
-3. **Clear sensitive data**
-   - Zero memory when done
-   - Clear clipboard
-   - No temp file leakage
-
-4. **Use secure APIs**
-   - python-gnupg for GPG
-   - keyring for credentials
-   - secure random for generation
-
-5. **Review dependencies**
-   - Keep updated
-   - Check for vulnerabilities
-   - Minimize dependencies
+1. **Never print or log a decrypted value**, and do not defeat the redacted
+   `PasswordEntry.__repr__`.
+2. **Never point development code at the real store.** Use `make devstore`.
+3. **Drop plaintext when done with it**, as the detail pane does.
+4. **Validate paths** that come from an entry name before they reach the file
+   system.
+5. **Keep dependencies few.** Every one of them can read the process memory
+   that holds decrypted entries.
 
 ## Security Audits
 
-### Internal Audits
-- Code review for all changes
-- Security checklist for PRs
-- Regular dependency scanning
-- Static analysis (mypy, ruff)
+- Static analysis: `ruff` and `mypy`, via `make check`
+- Test suite: `make test`
 
-### External Audits
-- Community security review
-- Penetration testing (planned)
-- Third-party audit (planned for v1.0)
+Both are run by hand and by the pre-commit hook. There is no CI, no dependency
+scanning, and no external audit. The project has not been reviewed by anyone
+outside it.
 
 ## Vulnerability Disclosure History
 

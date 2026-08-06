@@ -38,20 +38,19 @@ We welcome code contributions! Here's how to get started:
 #### 1. Set Up Development Environment
 
 ```bash
-# Clone the repository
 git clone https://github.com/RonnyPfannschmidt/gtkpass.git
 cd gtkpass
 
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install development dependencies (when available)
-pip install -e ".[dev]"
-
-# Install pre-commit hooks (when configured)
-pre-commit install
+# Environment, dependencies and the pre-commit hook, in one step
+make sync
 ```
+
+GTK4 and Libadwaita have to come from your distribution, and so do PyGObject
+and pycairo — see [DEVELOPMENT.md](DEVELOPMENT.md) for the package names and
+for why `make sync` is not `pip install -e .`.
+
+Read [AGENTS.md](AGENTS.md) before you start. Its first rule — development code
+must never read your real password store — is not optional.
 
 #### 2. Create a Branch
 
@@ -102,27 +101,19 @@ Follow these guidelines:
 
 #### 4. Write Tests
 
-- Add tests for new features
-- Update tests for changed functionality
-- Ensure tests pass: `pytest`
-- Aim for 80%+ code coverage
-- Include unit and integration tests
+Write the failing test first, run it, watch it fail, then make it pass. The
+backend conformance suite in `tests/test_backend_contract.py` is the definition
+of done for backend work.
 
 #### 5. Run Quality Checks
 
 ```bash
-# Run tests
-pytest
-
-# Run linter
-ruff check src/
-
-# Run type checker
-mypy src/
-
-# Format code
-ruff format src/
+make test    # the suite, headless under xvfb
+make check   # lint, format and types, via pre-commit
 ```
+
+The pre-commit hook `make sync` installed runs `make check`'s hooks on the way
+in. There is no CI, so these are the entire gate.
 
 #### 6. Submit Pull Request
 
@@ -139,38 +130,37 @@ ruff format src/
 ```
 gtkpass/
 ├── src/gtkpass/          # Application code
-│   ├── models/           # Data models
-│   ├── services/         # Business logic
-│   ├── ui/               # UI components
-│   │   └── blueprints/   # Blueprint UI files
-│   └── utils/            # Utilities
-├── tests/                # Test suite
-├── data/                 # Resources (icons, desktop files)
+│   ├── backends/         # The backend contract and its implementations
+│   ├── ui/               # Widgets
+│   │   └── blueprints/   # Blueprint sources and compiled .ui files
+│   └── utils/            # Threading and clipboard helpers
+├── tests/                # Test suite, flat
+├── data/                 # GSettings schema, desktop and AppStream files
 └── docs/                 # Documentation
 ```
 
 ### Architecture
 
-GTKPass follows a layered architecture:
+GTKPass is a frontend over pluggable backends:
 
-1. **UI Layer**: GTK4/Libadwaita widgets and Blueprint definitions
-2. **Application Layer**: Controllers and event handlers
-3. **Service Layer**: Business logic (GPG, Git, OTP, QR, Keyring)
-4. **Model Layer**: Data structures (Password, PasswordStore, OTPToken)
+1. **UI**: GTK4/Libadwaita widgets, declared in Blueprint
+2. **Window**: loads the configured backends and drives the panes
+3. **Backends**: the `PasswordBackend` contract and its implementations,
+   discovered through the `gtkpass.backends` entry point group
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed information.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detail.
 
 ### Key Technologies
 
-- **Python 3.10+**: Modern Python features
-- **GTK4**: UI framework
-- **Libadwaita**: GNOME widgets
+- **Python 3.10+**
+- **GTK4** and **Libadwaita**, through PyGObject
 - **Blueprint**: UI definition format
-- **python-gnupg**: GPG operations
-- **keyring**: System keyring
-- **GitPython**: Git operations
-- **pyotp**: OTP generation
-- **qrcode**: QR code generation
+- **uv**: environment and dependencies
+
+Runtime dependencies are deliberately few. Adding one is a discussion first —
+in particular `keyring`, `GitPython`, `pyotp`, `qrcode`, `pillow` and `opencv`,
+which an earlier version of this file prescribed and none of which were ever
+used.
 
 ### Documentation
 

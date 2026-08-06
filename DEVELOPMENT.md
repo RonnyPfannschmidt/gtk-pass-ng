@@ -1,288 +1,144 @@
 # GTKPass Development Setup
 
-This guide will help you set up your development environment for GTKPass.
+Read [AGENTS.md](AGENTS.md) first. It is short, and its first rule — never let
+development code read your real password store — is the one that cannot be
+undone if you get it wrong.
 
-## Dev Container (Recommended)
+## System dependencies
 
-If you're using the provided dev container (VS Code or GitHub Codespaces):
+PyGObject and pycairo are taken from your distribution rather than built from
+PyPI: they need cairo, girepository and GTK development headers to compile, and
+the distribution's builds are already linked against the GTK the application
+will actually run on.
 
-1. **The container automatically installs all dependencies** when it starts via `.devcontainer/setup.sh`
-2. **The app is installed in editable mode** at `.venv/bin/python`
-3. **Wayland and X11 are both supported** for GUI access from the container
-
-⚠️ **Important**: If you just updated the devcontainer configuration, rebuild it to apply changes:
-- In VS Code: `Cmd/Ctrl+Shift+P` → "Dev Containers: Rebuild Container"
-
-### Running the App in Dev Container
+**Fedora**
 
 ```bash
-# Quick run
-./run_app.sh
-
-# Or check display backend status first
-./check_display.sh
-
-# Or manually
-source .venv/bin/activate
-python -m gtkpass
+sudo dnf install python3 gtk4 libadwaita python3-gobject \
+    gobject-introspection glib2-devel gnupg2 xorg-x11-server-Xvfb
 ```
 
-### GUI Requirements
+**Ubuntu/Debian**
 
-The devcontainer supports both **Wayland and X11**:
-
-**Wayland (preferred on modern Linux):**
-- Works out of the box on GNOME, KDE Plasma 6, Sway, etc.
-- No additional configuration needed!
-
-**X11 (fallback or macOS/Windows):**
-
-**On Linux:**
 ```bash
-xhost +local:
+sudo apt install python3 libgtk-4-1 libadwaita-1-0 python3-gi \
+    gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-dev-bin gnupg xvfb
 ```
 
-**On macOS:**
-- Install XQuartz: `brew install --cask xquartz`
-- Enable "Allow connections from network clients" in XQuartz preferences
-- Run: `xhost +localhost`
+**Arch**
 
-**On Windows (WSL2):**
-- Install VcXsrv or X410
-- Set DISPLAY and run: `xhost +`
-
-See [docs/DEVCONTAINER_GUI.md](docs/DEVCONTAINER_GUI.md) for detailed GUI setup instructions.
-
-### Troubleshooting Dev Container
-
-If the setup failed or you need to reinstall:
 ```bash
-# Run the setup script manually
-bash .devcontainer/setup.sh
-
-# Or rebuild the container
-# In VS Code: Cmd/Ctrl+Shift+P → "Dev Containers: Rebuild Container"
+sudo pacman -S python gtk4 libadwaita python-gobject \
+    gobject-introspection glib2 gnupg xorg-server-xvfb
 ```
 
-## Prerequisites
+[uv](https://docs.astral.sh/uv/) manages the Python side.
 
-- Python 3.10 or higher
-- GTK4 4.10+ and Libadwaita 1.4+ (for running the application)
-- Git
+## Setting up
 
-### Installing System Dependencies
-
-#### Ubuntu/Debian
-```bash
-sudo apt install python3 python3-pip python3-venv \
-    libgtk-4-dev libadwaita-1-dev \
-    gobject-introspection libgirepository1.0-dev \
-    gir1.2-gtk-4.0 gir1.2-adwaita-1
-```
-
-#### Fedora
-```bash
-sudo dnf install python3 python3-pip \
-    gtk4-devel libadwaita-devel \
-    gobject-introspection-devel \
-    python3-gobject
-```
-
-#### Arch Linux
-```bash
-sudo pacman -S python python-pip \
-    gtk4 libadwaita \
-    gobject-introspection \
-    python-gobject
-```
-
-## Setting Up the Development Environment
-
-1. Clone the repository:
 ```bash
 git clone https://github.com/RonnyPfannschmidt/gtkpass.git
 cd gtkpass
+make sync
 ```
 
-2. Create a virtual environment:
+`make sync` creates the virtual environment against the *system* interpreter
+with `--system-site-packages` — a uv-managed Python's site-packages does not
+contain the distribution's GTK bindings — installs the dependencies with
+PyGObject and pycairo excluded, and installs the pre-commit hook.
+
+If you find yourself running `uv run` by hand, set `UV_NO_SYNC=1`. Without it
+uv re-resolves the environment and tries to build the excluded packages again.
+The Makefile exports it for you.
+
+## Everyday commands
+
+`make help` lists them all.
+
+| Command | What it does |
+| --- | --- |
+| `make run` | launch the application against your real store |
+| `make run-dev` | launch against a throwaway store of invented entries |
+| `make devstore` | create that throwaway store under `.dev/` |
+| `make test` | the test suite, headless under xvfb |
+| `make check` | every pre-commit hook: lint, format, types |
+| `make ui` | compile `.blp` sources to `.ui` |
+| `make schemas` | compile the GSettings schema |
+| `make hooks` | install the pre-commit hook into `.git` |
+
+## Never test against your own passwords
+
+`make devstore` builds a store under `.dev/` with invented passwords and its
+own GPG key, and `make run-dev` launches against it. Use those for manual
+testing and screenshots.
+
+The backends refuse `~/.password-store` and `$PASSWORD_STORE_DIR` unless
+`GTKPASS_ALLOW_REAL_STORE=1` is set. Only `run_app.sh` sets it, because that is
+the application actually being used. `conftest.py` clears it, so an exported
+value in your shell cannot re-enable it for a test run.
+
+Never print a decrypted value, and do not defeat the redacted
+`PasswordEntry.__repr__`.
+
+## Tests
+
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+make test                       # everything, headless
+UV_NO_SYNC=1 uv run pytest tests/test_backend_contract.py
+UV_NO_SYNC=1 uv run pytest -m "not gui"      # no display needed
 ```
 
-3. Install the package in development mode with all dependencies:
-```bash
-pip install -e ".[dev]"
-```
+Anything touching widgets needs a display, so `make test` wraps the run in
+`xvfb-run` and a private D-Bus session — the latter keeps the tests away from
+your real keyring.
 
-4. Install pre-commit hooks (optional but recommended):
-```bash
-pip install pre-commit
-pre-commit install
-```
+Registered markers:
 
-5. Compile Blueprint UI files (optional - pre-compiled UI files are included):
-```bash
-./compile_blueprints.sh
-```
+| Marker | Meaning |
+| --- | --- |
+| `gui` | needs a display |
+| `requires_gpg` | needs a working `gpg` |
+| `requires_pass` | needs the `pass` CLI |
+| `slow` | slow running |
 
-Note: Blueprint compiler is not required for development as pre-compiled `.ui` files are included in the repository. However, if you modify `.blp` files, you'll need to recompile them.
+Write the failing test first, run it, watch it fail, then make it pass. The
+backend conformance suite in `tests/test_backend_contract.py` is the definition
+of done for backend work.
 
-## Running the Application
+## Changing the interface
 
-```bash
-# Using the installed command
-gtkpass
+Widgets are declared in `src/gtkpass/ui/blueprints/*.blp` and loaded as
+templates. Edit the `.blp`, run `make ui`, and commit both files. Never
+hand-edit a `.ui`: it is generated.
 
-# Or using Python module
-python -m gtkpass
-```
+A test parses every module and fails on widget construction in Python, so a
+widget tree has to stay in Blueprint. Models such as `Gio.ListStore` are
+exempt; see `NON_WIDGET_TYPES` in `tests/test_ui_is_declarative.py`.
 
-## Running Tests
+Rows for a list or column view are declared too, as a `BuilderListItemFactory`
+template — see `password_list.blp`. Because those bindings are only exercised
+when a row is built, at least one test presents the widget and reads back what
+it rendered.
 
-### All Tests
-```bash
-# Run all tests with coverage
-pytest tests/
+## Dev container
 
-# Or use the convenience script
-./run_tests.sh
-```
-
-### Specific Test Types
-```bash
-# Unit tests only
-pytest tests/unit/ -v
-
-# Integration tests only
-pytest tests/integration/ -v
-
-# Acceptance tests only
-pytest tests/acceptance/ -v
-
-# Run with markers
-pytest -m unit
-pytest -m integration
-pytest -m acceptance
-```
-
-### Test Coverage
-```bash
-# Generate coverage report
-pytest --cov=gtkpass --cov-report=html tests/
-
-# View the report
-open htmlcov/index.html
-```
-
-## Code Quality
-
-### Linting
-```bash
-# Check code with ruff
-ruff check src/ tests/
-
-# Auto-fix issues
-ruff check --fix src/ tests/
-```
-
-### Formatting
-```bash
-# Check formatting
-ruff format --check src/ tests/
-
-# Format code
-ruff format src/ tests/
-```
-
-### Type Checking
-```bash
-# Run mypy
-mypy src/gtkpass
-```
-
-## Project Structure
-
-```
-gtkpass/
-├── src/gtkpass/          # Main application code
-│   ├── __init__.py
-│   ├── __main__.py       # Entry point
-│   ├── app.py            # Application class
-│   ├── window.py         # Main window
-│   └── services/         # Service layer
-│       ├── __init__.py
-│       └── background.py # Background task service
-├── tests/                # Test suite
-│   ├── unit/             # Unit tests
-│   ├── integration/      # Integration tests
-│   └── acceptance/       # Acceptance tests
-├── pyproject.toml        # Project configuration
-└── README.md
-```
-
-## Development Workflow
-
-1. Create a new branch for your feature:
-```bash
-git checkout -b feature/my-feature
-```
-
-2. Make your changes following the coding standards
-
-3. Run tests and linters:
-```bash
-./run_tests.sh
-```
-
-4. Commit your changes:
-```bash
-git add .
-git commit -m "feat: add my feature"
-```
-
-5. Push and create a pull request:
-```bash
-git push origin feature/my-feature
-```
-
-## Coding Standards
-
-- Follow PEP 8 style guidelines
-- Use type hints for all function signatures
-- Minimum Python version: 3.10
-- Write docstrings for all public functions and classes
-- Ensure all tests pass before submitting PR
-- Maintain or improve code coverage
-
-## Testing Guidelines
-
-- Write unit tests for all new code
-- Use meaningful test names that describe what is being tested
-- Follow the AAA pattern: Arrange, Act, Assert
-- Mock external dependencies (GTK, filesystem, etc.)
-- Mark tests appropriately (`@pytest.mark.unit`, etc.)
-
-## Getting Help
-
-- Read the [ARCHITECTURE.md](ARCHITECTURE.md) for system design
-- Check [REQUIREMENTS.md](REQUIREMENTS.md) for feature requirements
-- Read [CLAUDE.md](CLAUDE.md) for AI-assisted development guidelines
-- Open an issue on GitHub for questions
+`.devcontainer/` sets up dependencies on start and supports Wayland and X11.
+`.devcontainer/check_display.sh` reports which backend is available. For X11
+from the host, `xhost +local:` first. See
+[docs/DEVCONTAINER_GUI.md](docs/DEVCONTAINER_GUI.md).
 
 ## Troubleshooting
 
-### GTK not found
-If you get GTK import errors, ensure you've installed the system GTK4 packages listed above.
+**`Gio.Settings` aborts with no traceback.** `Gio.Settings.new()` calls
+`g_error()` on a missing schema, which kills the process outright. Go through
+`config.get_settings()`, and run `make schemas`.
 
-### Tests fail with GTK errors
-Some tests require GTK4 to be installed. Tests that depend on GTK will be automatically skipped if GTK is not available.
+**A schema change has no effect.** GLib reads `gschemas.compiled` and ignores
+the `.xml` beside it, so a stale compiled blob wins. Re-run `make schemas`.
 
-### Virtual environment issues
-If you have issues with the virtual environment, try removing it and creating a new one:
-```bash
-rm -rf .venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
+**`uv sync` tries to build pycairo and fails.** The environment was created
+against a uv-managed Python instead of the system one. Remove `.venv` and run
+`make sync`.
+
+**Tests emit D-Bus and portal warnings.** Expected under `xvfb-run
+dbus-run-session`; there is no secret service on the private bus.

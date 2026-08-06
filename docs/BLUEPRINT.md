@@ -56,7 +56,7 @@ Designers and developers can work on UI files without needing to understand Pyth
 ## Workflow
 
 1. **Design**: Create or modify `.blp` files in `src/gtkpass/ui/blueprints/`
-2. **Compile**: Run `./compile_blueprints.sh` to generate `.ui` XML files
+2. **Compile**: Run `make ui` to generate the `.ui` XML files
 3. **Load**: Python code loads the compiled `.ui` file using `@Gtk.Template` decorator
 
 ## File Structure

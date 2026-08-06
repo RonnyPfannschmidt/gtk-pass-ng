@@ -1,119 +1,107 @@
 # GTKPass
 
-A modern GTK4-based password manager for GNOME/Linux, designed as an alternative to qtpass.
+A GTK4/Libadwaita frontend for password stores on GNOME/Linux, in the spirit of
+qtpass.
 
 ## Overview
 
-GTKPass is a user-friendly password manager that integrates seamlessly with the GNOME desktop environment. It uses the standard passwordstore (pass) format for compatibility with existing tools while providing a modern, native GTK4/Libadwaita interface.
-
-## Features (Planned)
-
-- 🔐 **Secure Password Management**: GPG-encrypted password storage
-- 🌳 **Hierarchical Organization**: Organize passwords in folders
-- 🔍 **Fast Search**: Quickly find passwords with incremental search
-- 🔑 **Password Generation**: Generate secure passwords and passphrases
-- 📱 **OTP Support**: Time-based and HMAC-based one-time passwords (TOTP/HOTP)
-- 📷 **QR Code Support**: Generate and scan QR codes for OTP secrets
-- 🔄 **Git Integration**: Automatic version control and sync
-- 🔐 **Keyring Integration**: Secure GPG passphrase storage
-- 🎨 **Modern UI**: GTK4 + Libadwaita with dark mode support
-- ⚡ **Fast & Native**: Written in Python with native GTK bindings
-- 🔄 **Lifecycle Management**: Track password age, detect weak/duplicate passwords
+GTKPass is not a password manager of its own: it stores nothing and owns no
+format. It is a native GTK4 interface over pluggable backends, one of which
+reads and writes the standard [passwordstore](https://www.passwordstore.org/)
+layout, so an existing store stays usable from `pass` and every other tool that
+speaks it.
 
 ## Status
 
-**This project is currently in the planning and documentation phase.**
+**Early, and honest about it.** The application runs, reads and edits, and is
+covered by a test suite. It is not packaged or released, and there is no
+installable build yet.
 
-The specifications and architecture have been defined. Implementation will begin soon. See [ROADMAP.md](ROADMAP.md) for the development plan.
+What works today:
 
-## Documentation
+- Configuring several backends at once, each with its own settings
+- Browsing entries as a tree, grouped by backend, folders nested by path
+- Opening an entry: decrypted off the UI thread, shown with its username, URL
+  and notes picked out
+- Copying a field, with the clipboard cleared again after a timeout
+- Editing an entry and writing it back through its backend
 
-- [Requirements Specification](REQUIREMENTS.md) - Detailed feature requirements
-- [Architecture Overview](ARCHITECTURE.md) - Technical architecture and design
-- [Development Roadmap](ROADMAP.md) - Implementation timeline and milestones
-- [Claude AI Guide](CLAUDE.md) - Guidelines for AI-assisted development
+What does not exist yet: adding and deleting entries from the UI, working
+search (the box is there, nothing is wired to it), and the "show hidden
+passwords" preference. See [ROADMAP.md](ROADMAP.md).
+
+## Backends
+
+| Backend | Reads | Writes | Notes |
+| --- | --- | --- | --- |
+| Direct GPG | yes | yes | GPG-encrypted files, handled natively |
+| Pass | yes | yes | delegates to the `pass` executable |
+| Secret Service | yes | yes | the D-Bus keyring service |
+| Demo | yes | no | invented entries, for trying the UI out |
+
+Backends are discovered through the `gtkpass.backends` entry point group, so
+one can be shipped separately from this repository.
 
 ## Requirements
 
 - Python 3.10+
-- GTK4 4.10+
-- Libadwaita 1.4+
-- GnuPG 2.x
-- Git (optional, for version control)
+- GTK4 4.10+ and Libadwaita 1.4+
+- PyGObject and pycairo, from your distribution rather than from PyPI
+- GnuPG 2.x, for the GPG-backed stores
 
-## Installation
+## Running it
 
-**Not yet available** - Installation instructions will be provided when the first release is ready.
+There is no release to install. From a checkout:
 
-Planned distribution methods:
-- PyPI package (`pip install gtkpass`)
-- Flatpak (Flathub)
-- Distribution packages (.deb, .rpm)
-
-## Usage
-
-Coming soon - detailed usage instructions will be provided with the first release.
-
-## Development
-
-### Project Structure
-
-The project will follow this structure:
-
-```
-gtkpass/
-├── src/gtkpass/          # Main application code
-├── tests/                # Test suite
-├── data/                 # Icons, desktop files, metadata
-├── docs/                 # User and developer documentation
-└── pyproject.toml        # Project configuration
+```bash
+make sync      # environment, dependencies and the git hooks
+make run       # launch against your real password store
 ```
 
-### Getting Started
+To try it out without touching your own passwords:
 
-Development setup instructions will be provided soon.
+```bash
+make run-dev   # a throwaway store of invented entries under .dev/
+```
 
-### Contributing
+`make help` lists the rest.
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## Working on it
+
+Read [AGENTS.md](AGENTS.md) first — it is short, and the first rule in it
+matters more than the others: **development code must never read your real
+password store.** [ARCHITECTURE.md](ARCHITECTURE.md) describes how the pieces
+fit together.
 
 ## Compatibility
 
-GTKPass maintains compatibility with:
-- **pass** (passwordstore CLI)
-- **qtpass** (can use same password store)
-- **pass-otp** (OTP extension)
-- **Android Password Store** (via git sync)
+The Direct GPG and Pass backends use the passwordstore format, so a store stays
+readable by `pass`, qtpass, and Android Password Store via git sync. Extensions
+such as `pass-otp` are not supported: GTKPass shows an OTP secret as the text
+it is, and does not generate codes.
 
 ## Security
 
-Security is a top priority for GTKPass. The application:
-- Uses GPG for encryption/decryption
-- Integrates with system keyring for secure storage
-- Clears clipboard after configurable timeout
-- Supports session locking
-- Never logs sensitive data
+- Entries are decrypted only when opened, and the plaintext is dropped when the
+  view moves on
+- Decrypted content is kept out of logs, reprs and assertion diffs on purpose
+- The clipboard is cleared after a configurable delay, as damage limitation
+  rather than a guarantee — see [SECURITY.md](SECURITY.md)
+- Development and test code is blocked from opening the real store
 
-See [REQUIREMENTS.md](REQUIREMENTS.md#2-security-and-safety) for detailed security requirements.
+## Documentation
+
+- [AGENTS.md](AGENTS.md) — how to work on this project
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how it is put together
+- [ROADMAP.md](ROADMAP.md) — what is done and what is next
+- [SECURITY.md](SECURITY.md) — threat model and reporting
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
 
 ## License
 
-This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
+GPL-3.0. See [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- [passwordstore](https://www.passwordstore.org/) - The original pass utility
-- [qtpass](https://qtpass.org/) - Inspiration for this project
-- [GNOME](https://www.gnome.org/) - For the excellent GTK toolkit
-- All contributors to the password management ecosystem
-
-## Contact
-
-- Issues: [GitHub Issues](https://github.com/RonnyPfannschmidt/gtkpass/issues)
-- Discussions: [GitHub Discussions](https://github.com/RonnyPfannschmidt/gtkpass/discussions)
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for detailed development plans and timeline.
-
-**Target**: First release (v1.0) in approximately 5-6 months of development.
+- [passwordstore](https://www.passwordstore.org/) — the original `pass`
+- [qtpass](https://qtpass.org/) — the inspiration
