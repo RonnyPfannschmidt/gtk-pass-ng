@@ -194,6 +194,89 @@ class TestShowingDetails:
 
         assert run_in_application(select_nonsense) == "placeholder"
 
+    def test_editing_is_not_offered_before_anything_is_open(
+        self, demo_backend_configured
+    ):
+        from gtkpass.window import GTKPassWindow
+
+        def edit_enabled(app):
+            window = GTKPassWindow(application=app)
+            return window.lookup_action("edit-password").get_enabled()
+
+        assert run_in_application(edit_enabled) is False
+
+    def test_editing_is_offered_for_an_open_entry(self, demo_backend_configured):
+        window, _ = run_in_application(self.open_first_password)
+
+        assert window.lookup_action("edit-password").get_enabled()
+
+
+class TestEditing:
+    """Saving the edit dialog writes through the backend and re-reads it."""
+
+    def open_and_save(self, app, new_password, backend_edit=None):
+        """Open an entry, then drive its edit dialog to the Save button.
+
+        Returns the entry name, whatever the backend was asked to write, and
+        the toasts the window raised.
+        """
+        from gtkpass.window import GTKPassWindow
+
+        window = GTKPassWindow(application=app)
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        assert backend is not None
+        if backend_edit is not None:
+            backend.edit_password = backend_edit  # type: ignore[method-assign]
+
+        toasts: list[str] = []
+        window._toast = toasts.append  # type: ignore[method-assign,assignment]
+
+        name = backend.list_passwords()[0].name
+        window._on_password_selected(DEMO_BACKEND_ID, name)
+        pump_until(
+            lambda: window.password_detail.stack.get_visible_child_name() == "content"
+        )
+
+        dialog = window._open_edit_dialog()
+        assert dialog is not None, "the edit dialog did not open"
+        dialog.password_row.set_text(new_password)
+        dialog.save_button.emit("clicked")
+        pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+        return name, toasts
+
+    def test_the_backend_is_asked_to_write_the_new_content(
+        self, demo_backend_configured
+    ):
+        written = []
+
+        def record(name, content, commit=True):
+            written.append((name, content))
+
+        name, _ = run_in_application(
+            lambda app: self.open_and_save(app, "replaced", backend_edit=record)
+        )
+
+        assert [entry[0] for entry in written] == [name]
+        assert written[0][1].startswith("replaced\n")
+
+    def test_a_successful_write_is_confirmed(self, demo_backend_configured):
+        def record(name, content, commit=True):
+            pass
+
+        _, toasts = run_in_application(
+            lambda app: self.open_and_save(app, "replaced", backend_edit=record)
+        )
+
+        assert toasts and "aved" in toasts[0]
+
+    def test_a_refused_write_is_reported_and_not_swallowed(
+        self, demo_backend_configured
+    ):
+        """The demo backend is read-only, so refusal is its real behaviour."""
+        _, toasts = run_in_application(lambda app: self.open_and_save(app, "replaced"))
+
+        assert toasts and "read-only" in toasts[0]
+
     def test_a_stale_decrypt_cannot_overwrite_a_newer_selection(
         self, demo_backend_configured
     ):

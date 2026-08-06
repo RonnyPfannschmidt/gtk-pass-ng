@@ -21,6 +21,13 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                 <property name="action-name">win.add-password</property>
               </object>
             </child>
+            <child type="start">
+              <object class="GtkButton" id="edit_button">
+                <property name="icon-name">document-edit-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Edit Password</property>
+                <property name="action-name">win.edit-password</property>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkMenuButton">
                 <property name="icon-name">open-menu-symbolic</property>

@@ -43,6 +43,7 @@ class TestPackagedResources:
             ("gtkpass.ui.blueprints", "window.ui"),
             ("gtkpass.ui.blueprints", "password_list.ui"),
             ("gtkpass.ui.blueprints", "password_detail.ui"),
+            ("gtkpass.ui.blueprints", "password_edit.ui"),
             ("gtkpass.backends.data", "demo.json"),
         ],
     )

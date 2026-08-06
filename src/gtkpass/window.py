@@ -23,6 +23,7 @@ from gtkpass.config import (
 # Imported for their side effect: the GTypes must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
 from gtkpass.ui.password_detail import PasswordDetailView  # noqa: F401
+from gtkpass.ui.password_edit import PasswordEditDialog
 from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
 from gtkpass.utils.async_ui import on_ui_thread
 from gtkpass.utils.clipboard import ClipboardCopier
@@ -71,6 +72,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._backend_settings: dict[str, Gio.Settings] = {}
         # Bumped per selection so a slow decrypt cannot overwrite a newer one.
         self._detail_request = 0
+        # (backend id, name) of the entry on display, or None.
+        self._shown: tuple[str, str] | None = None
         self._clipboard = ClipboardCopier(self)
 
         # Monitor backend-instances for changes
@@ -86,6 +89,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         add_action = Gio.SimpleAction.new("add-password", None)
         add_action.connect("activate", self._on_add_password)
         self.add_action(add_action)
+
+        # There is nothing to edit until an entry has been decrypted, and the
+        # dialog needs its content to fill itself in.
+        edit_action = Gio.SimpleAction.new("edit-password", None)
+        edit_action.connect("activate", self._on_edit_password)
+        edit_action.set_enabled(False)
+        self.add_action(edit_action)
 
     def _load_backends(self):
         """Load backend instances from GSettings."""
@@ -380,6 +390,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 entry.clear_password()
                 return
             self.password_detail.show_entry(entry)
+            self._set_shown((backend_id, password_name))
 
         def report(error):
             if request != self._detail_request:
@@ -387,6 +398,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             logger.error(f"Could not open {password_name}: {error}")
             self.password_detail.clear()
             self.content_stack.set_visible_child_name("placeholder")
+            self._set_shown(None)
             self._toast(f"Could not open {password_name}: {error}")
 
         try:
@@ -395,6 +407,65 @@ class GTKPassWindow(Adw.ApplicationWindow):
             report(e)
             return
         on_ui_thread(future, show, report)
+
+    def _set_shown(self, shown: tuple[str, str] | None) -> None:
+        """Record which entry the detail pane holds, and offer editing for it."""
+        self._shown = shown
+        action = self.lookup_action("edit-password")
+        if action is not None:
+            action.set_enabled(shown is not None)
+
+    def _on_edit_password(self, action, param):
+        """Handle the edit action."""
+        self._open_edit_dialog()
+
+    def _open_edit_dialog(self) -> PasswordEditDialog | None:
+        """Open the editor on the entry currently on display.
+
+        Returns:
+            The dialog, or None when there is nothing to edit.
+        """
+        entry = self.password_detail.entry
+        if self._shown is None or entry is None:
+            return None
+
+        backend_id, password_name = self._shown
+        dialog = PasswordEditDialog()
+        dialog.load(entry)
+        dialog.connect(
+            "saved",
+            lambda _dialog, content: self._save_entry(
+                backend_id, password_name, content
+            ),
+        )
+        dialog.present(self)
+        return dialog
+
+    def _save_entry(self, backend_id: str, password_name: str, content: str) -> None:
+        """Write an edited entry back through its backend.
+
+        Encryption can take a moment and a backend may go out to git, so the
+        write happens off the UI thread like the reads do.
+        """
+
+        def saved(_result):
+            self._toast(f"Saved {password_name}")
+            # Read it back rather than trusting the widgets: what the store now
+            # holds is the thing worth showing.
+            self._on_password_selected(backend_id, password_name)
+
+        def report(error):
+            logger.error(f"Could not save {password_name}: {error}")
+            self._toast(f"Could not save {password_name}: {error}")
+
+        try:
+            future = self.backend_manager.edit_password_async(
+                backend_id, password_name, content
+            )
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, saved, report)
 
     def _on_copy_requested(self, _view, field: str, value: str):
         """Copy a field from the detail pane, clearing it again later."""

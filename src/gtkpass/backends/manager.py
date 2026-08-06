@@ -185,6 +185,31 @@ class BackendManager:
 
         return self._executor.submit(_get)
 
+    def edit_password_async(
+        self,
+        backend_id: str,
+        name: str,
+        content: str,
+    ) -> concurrent.futures.Future:
+        """Replace a password's content asynchronously.
+
+        Args:
+            backend_id: Backend identifier
+            name: Password name
+            content: Full replacement content
+
+        Returns:
+            Future that completes when the write has landed
+
+        Raises:
+            ValueError: If backend not initialized
+        """
+        backend = self._backends.get(backend_id)
+        if not backend:
+            raise ValueError(f"Backend '{backend_id}' not initialized")
+
+        return self._executor.submit(backend.edit_password, name, content)
+
     def search_all_backends(self, query: str) -> dict[str, list[PasswordMetadata]]:
         """Search across all active backends.
 

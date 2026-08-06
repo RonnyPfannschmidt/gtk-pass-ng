@@ -10,12 +10,13 @@ import pytest
 
 from gtkpass._gi import Adw
 from gtkpass.ui.password_detail import PasswordDetailView
+from gtkpass.ui.password_edit import PasswordEditDialog
 from gtkpass.ui.password_list import PasswordTreeView
 
 pytestmark = pytest.mark.gui
 
 #: Widgets that can be built standalone, without an application or a parent.
-STANDALONE_WIDGETS = [PasswordTreeView, PasswordDetailView]
+STANDALONE_WIDGETS = [PasswordTreeView, PasswordDetailView, PasswordEditDialog]
 
 
 def declared_children(widget_class):

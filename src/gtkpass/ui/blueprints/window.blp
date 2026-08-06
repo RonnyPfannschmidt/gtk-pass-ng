@@ -16,6 +16,14 @@ template $GTKPassWindow : Adw.ApplicationWindow {
         action-name: "win.add-password";
       }
 
+      // Insensitive until an entry is open; the action owns that.
+      [start]
+      Button edit_button {
+        icon-name: "document-edit-symbolic";
+        tooltip-text: _("Edit Password");
+        action-name: "win.edit-password";
+      }
+
       [end]
       MenuButton {
         icon-name: "open-menu-symbolic";

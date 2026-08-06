@@ -55,6 +55,11 @@ class PasswordDetailView(Gtk.Box):
 
     # -- state ---------------------------------------------------------------
 
+    @property
+    def entry(self) -> PasswordEntry | None:
+        """The entry on display, for whoever needs to act on it."""
+        return self._entry
+
     def show_loading(self, name: str = "") -> None:
         """Show the spinner while an entry is being decrypted."""
         self.spinner_label.set_text(f"Decrypting {name}…" if name else "Decrypting…")
