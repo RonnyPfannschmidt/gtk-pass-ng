@@ -29,9 +29,17 @@ def gpg_home(tmp_path_factory):
     home.chmod(0o700)
     result = subprocess.run(
         [
-            "gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "",
-            "--quick-generate-key", f"GTKPass Test <{KEY_ID}>",
-            "default", "default", "never",
+            "gpg",
+            "--batch",
+            "--pinentry-mode",
+            "loopback",
+            "--passphrase",
+            "",
+            "--quick-generate-key",
+            f"GTKPass Test <{KEY_ID}>",
+            "default",
+            "default",
+            "never",
         ],
         env={"GNUPGHOME": str(home), "PATH": "/usr/bin:/bin"},
         capture_output=True,

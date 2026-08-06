@@ -63,6 +63,15 @@
 
   <!-- Demo backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.demo">
+    <key name="display-name" type="s">
+      <default>''</default>
+      <summary>User-visible name for this backend instance</summary>
+      <description>
+        Name shown in the sidebar. If empty, a name is derived from the
+        backend type.
+      </description>
+    </key>
+
     <key name="custom-data-path" type="s">
       <default>''</default>
       <summary>Custom demo data file path</summary>
@@ -74,6 +83,15 @@
 
   <!-- Secret Service backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.secretservice">
+    <key name="display-name" type="s">
+      <default>''</default>
+      <summary>User-visible name for this backend instance</summary>
+      <description>
+        Name shown in the sidebar. If empty, a name is derived from the
+        backend type.
+      </description>
+    </key>
+
     <key name="collection-name" type="s">
       <default>'Login'</default>
       <summary>Keyring collection name</summary>
@@ -85,6 +103,15 @@
 
   <!-- Pass CLI backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.pass">
+    <key name="display-name" type="s">
+      <default>''</default>
+      <summary>User-visible name for this backend instance</summary>
+      <description>
+        Name shown in the sidebar. If empty, a name is derived from the
+        backend type.
+      </description>
+    </key>
+
     <key name="password-store-dir" type="s">
       <default>''</default>
       <summary>Password store directory</summary>
@@ -104,6 +131,15 @@
 
   <!-- Direct GPG backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.direct">
+    <key name="display-name" type="s">
+      <default>''</default>
+      <summary>User-visible name for this backend instance</summary>
+      <description>
+        Name shown in the sidebar. If empty, a name is derived from the
+        backend type.
+      </description>
+    </key>
+
     <key name="password-store-dir" type="s">
       <default>''</default>
       <summary>Password store directory</summary>

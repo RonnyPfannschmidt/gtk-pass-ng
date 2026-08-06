@@ -8,7 +8,7 @@ exercised it.
 import pytest
 
 from gtkpass._gi import Adw, GLib
-from gtkpass.config import get_settings
+from gtkpass.config import get_settings, set_backend_display_name
 
 pytestmark = pytest.mark.gui
 
@@ -92,3 +92,48 @@ class TestWindowWithDemoBackend:
 
     def test_no_backend_is_marked_unavailable(self, rows):
         assert not [row for row in rows if "unavailable" in row]
+
+
+class TestRenaming:
+    """A backend renamed in the settings dialog must reach the sidebar.
+
+    The rename writes the instance's own display-name key and never touches
+    backend-instances, so watching only the latter left the old label in place.
+    """
+
+    @pytest.fixture
+    def named_demo(self, demo_backend_configured):
+        set_backend_display_name("demo", DEMO_BACKEND_ID, "My Vault")
+        yield
+        set_backend_display_name("demo", DEMO_BACKEND_ID, "")
+
+    def sidebar_names(self, window):
+        model = window.password_list.tree_view.get_model()
+        return [
+            model.get_value(row, window.password_list.COL_NAME)
+            for row in walk_tree(model)
+        ]
+
+    def test_a_stored_name_is_shown(self, named_demo):
+        from gtkpass.window import GTKPassWindow
+
+        names = run_in_application(
+            lambda app: self.sidebar_names(GTKPassWindow(application=app))
+        )
+
+        assert "My Vault" in names
+
+    def test_renaming_updates_an_open_window(self, demo_backend_configured):
+        from gtkpass.window import GTKPassWindow
+
+        def rename_while_open(app):
+            window = GTKPassWindow(application=app)
+            assert "Demo" in self.sidebar_names(window)
+
+            set_backend_display_name("demo", DEMO_BACKEND_ID, "Renamed Live")
+            try:
+                return self.sidebar_names(window)
+            finally:
+                set_backend_display_name("demo", DEMO_BACKEND_ID, "")
+
+        assert "Renamed Live" in run_in_application(rename_while_open)

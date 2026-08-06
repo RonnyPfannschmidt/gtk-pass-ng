@@ -14,7 +14,11 @@ from gtkpass.backends.secretservice import (
     SecretServiceBackend,
     SecretServiceBackendSettings,
 )
-from gtkpass.config import get_backend_settings, get_settings
+from gtkpass.config import (
+    get_backend_display_name,
+    get_backend_settings,
+    get_settings,
+)
 
 # Imported for its side effect: the GType must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
@@ -54,6 +58,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.backend_manager = BackendManager()
         self.settings = get_settings()
         self.failed_backends = []  # Track backends that failed to load
+        self.backend_types: dict[str, str] = {}  # instance id -> backend type
+        # Kept alive deliberately: a Gio.Settings that gets collected stops
+        # emitting, and these are what tell us a backend was renamed.
+        self._backend_settings: dict[str, Gio.Settings] = {}
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -81,6 +89,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
             logger.info(f"Loading {len(instances)} backend(s)...")
 
             for backend_id, backend_type in instances:
+                self.backend_types[backend_id] = backend_type
+                self._watch_display_name(backend_id, backend_type)
                 try:
                     logger.debug(f"Loading backend: {backend_id} ({backend_type})")
                     settings = self._load_backend_settings(backend_id, backend_type)
@@ -109,6 +119,25 @@ class GTKPassWindow(Adw.ApplicationWindow):
         except Exception as e:
             logger.exception(f"Error loading backends: {e}")
 
+    def _watch_display_name(self, backend_id: str, backend_type: str) -> None:
+        """Refresh the sidebar when this backend is renamed.
+
+        Renaming writes the instance's own display-name key, so it never
+        touches backend-instances and the list would otherwise keep showing
+        the old label until the next restart.
+        """
+        if backend_id in self._backend_settings:
+            return
+        try:
+            backend_gsettings = get_backend_settings(backend_type, backend_id)
+        except Exception as e:
+            logger.debug(f"Cannot watch {backend_id} for renames: {e}")
+            return
+        backend_gsettings.connect(
+            "changed::display-name", lambda *_: self._load_passwords()
+        )
+        self._backend_settings[backend_id] = backend_gsettings
+
     def _on_backends_changed(self, settings, key):
         """Handle backend configuration changes.
 
@@ -118,9 +147,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """
         logger.info("Backend configuration changed, reloading...")
 
-        # Clear current backends
+        # Shut the old manager down first; it owns a thread pool, and replacing
+        # it without doing so leaks four threads on every settings change.
+        self.backend_manager.shutdown()
         self.backend_manager = BackendManager()
         self.failed_backends = []
+        self.backend_types = {}
+        self._backend_settings = {}
 
         # Reload backends
         self._load_backends()
@@ -263,56 +296,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.placeholder_page.set_child(None)
 
     def _get_backend_display_name(self, backend_id: str) -> str:
-        """Get a user-friendly display name for a backend.
+        """Name to show for a configured backend instance.
 
-        Args:
-            backend_id: Backend identifier (e.g., "secretservice_1766234507")
-
-        Returns:
-            Friendly display name (e.g., "Secret Service" or "Demo 1")
+        Prefers the name the user typed in the settings dialog, falling back to
+        one derived from the backend type.
         """
-        # Extract backend type from ID
-        parts = backend_id.split("_")
-
-        if len(parts) >= 2 and parts[-1].isdigit():
-            # It's a generated ID like "demo_1766234611"
-            backend_type = "_".join(parts[:-1])
-
-            # Count how many of this type exist to give it a number
-            same_type_count = sum(
-                1
-                for bid in self.backend_manager.get_all_backends()
-                if bid.startswith(backend_type + "_")
-            )
-
-            # Map backend types to friendly names
-            type_names = {
-                "demo": "Demo",
-                "secretservice": "Secret Service",
-                "pass": "Pass",
-                "direct": "Direct GPG",
-            }
-            type_name = type_names.get(backend_type, backend_type.title())
-
-            # Return with number if there are multiple of the same type
-            if same_type_count > 1:
-                # Calculate this one's position
-                position = (
-                    sorted(
-                        [
-                            bid
-                            for bid in self.backend_manager.get_all_backends()
-                            if bid.startswith(backend_type + "_")
-                        ]
-                    ).index(backend_id)
-                    + 1
-                )
-                return f"{type_name} {position}"
-            else:
-                return type_name
-        else:
-            # It's a custom name, just clean it up
-            return backend_id.replace("_", " ").title()
+        backend_type = self.backend_types.get(backend_id, "")
+        return get_backend_display_name(backend_type, backend_id)
 
     def _show_configuration_prompt(self):
         """Show configuration prompt in main content area."""

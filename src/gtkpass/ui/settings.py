@@ -12,7 +12,12 @@ from gtkpass.backends.demo import DemoBackendSettings
 from gtkpass.backends.direct import DirectBackendSettings
 from gtkpass.backends.pass_cli import PassBackendSettings
 from gtkpass.backends.secretservice import SecretServiceBackendSettings
-from gtkpass.config import get_backend_settings, get_settings
+from gtkpass.config import (
+    get_backend_display_name,
+    get_backend_settings,
+    get_settings,
+    set_backend_display_name,
+)
 
 
 class BackendSettingsRow(Adw.PreferencesRow):
@@ -83,33 +88,12 @@ class BackendSettingsRow(Adw.PreferencesRow):
         self.set_child(box)
 
     def _get_friendly_name(self) -> str:
-        """Get a friendly display name for this backend.
-
-        Returns:
-            User-friendly name, extracting it from backend_id or creating default
-        """
-        # Try to extract a custom name from backend_id
-        # Format: backend_type_timestamp or custom_name
-        parts = self.backend_id.split("_")
-        if len(parts) >= 2 and parts[-1].isdigit():
-            # It's a generated ID like "demo_1766234611"
-            # Create a friendly name with a counter
-            count = len([k for k in self.backend_id if k == self.backend_type]) + 1
-            return f"{self.backend_type.title()} {count}"
-        else:
-            # It's already a custom name
-            return self.backend_id.replace("_", " ").title()
+        """Name to prefill the entry with: the stored one, or a derived one."""
+        return get_backend_display_name(self.backend_type, self.backend_id)
 
     def get_display_name(self) -> str:
-        """Get the current display name from the entry.
-
-        Returns:
-            The name to display in the UI
-        """
-        name = self.name_entry.get_text().strip()
-        if not name:
-            return f"{self.backend_type.title()} Backend"
-        return name
+        """Name currently typed in the entry, empty if the user cleared it."""
+        return self.name_entry.get_text().strip()
 
     def _get_default_settings(self) -> BackendSettings:
         """Get default settings for backend type."""
@@ -443,6 +427,9 @@ class SettingsWindow(Adw.PreferencesWindow):
             # Save settings for this backend
             self._save_backend_settings(
                 backend_id, row.backend_type, row.get_settings()
+            )
+            set_backend_display_name(
+                row.backend_type, backend_id, row.get_display_name()
             )
 
         # Save instance list
