@@ -23,47 +23,61 @@ template $GTKPassWindow : Adw.ApplicationWindow {
       }
     }
 
-    content: Adw.OverlaySplitView split_view {
-      sidebar-position: start;
-      show-sidebar: true;
-      min-sidebar-width: 250;
-      max-sidebar-width: 400;
+    // Wraps the split view so toasts appear over the whole window, which is
+    // the libadwaita convention.
+    content: Adw.ToastOverlay toast_overlay {
+      child: Adw.OverlaySplitView split_view {
+        sidebar-position: start;
+        show-sidebar: true;
+        min-sidebar-width: 250;
+        max-sidebar-width: 400;
 
-      sidebar: Box {
-        orientation: vertical;
+        sidebar: Box {
+          orientation: vertical;
 
-        SearchEntry search_entry {
-          placeholder-text: _("Search passwords...");
-          margin-top: 6;
-          margin-bottom: 6;
-          margin-start: 6;
-          margin-end: 6;
-        }
+          SearchEntry search_entry {
+            placeholder-text: _("Search passwords...");
+            margin-top: 6;
+            margin-bottom: 6;
+            margin-start: 6;
+            margin-end: 6;
+          }
 
-        $PasswordTreeView password_list {
-          vexpand: true;
-        }
-      };
+          $PasswordTreeView password_list {
+            vexpand: true;
+          }
+        };
 
-      content: Box {
-        orientation: vertical;
+        content: Stack content_stack {
+          transition-type: crossfade;
 
-        Adw.StatusPage placeholder_page {
-          title: _("GTKPass");
-          description: _("Loading...");
-          icon-name: "dialog-password-symbolic";
-          vexpand: true;
+          StackPage {
+            name: "placeholder";
 
-          // Only relevant when no backend is configured; shown on demand.
-          child: Button open_preferences_button {
-            label: _("Open Preferences");
-            action-name: "app.preferences";
-            halign: center;
-            visible: false;
+            child: Adw.StatusPage placeholder_page {
+              title: _("GTKPass");
+              description: _("Loading...");
+              icon-name: "dialog-password-symbolic";
+              vexpand: true;
 
-            styles ["suggested-action", "pill"]
-          };
-        }
+              // Only relevant when no backend is configured; shown on demand.
+              child: Button open_preferences_button {
+                label: _("Open Preferences");
+                action-name: "app.preferences";
+                halign: center;
+                visible: false;
+
+                styles ["suggested-action", "pill"]
+              };
+            };
+          }
+
+          StackPage {
+            name: "detail";
+
+            child: $PasswordDetailView password_detail {};
+          }
+        };
       };
     };
   }

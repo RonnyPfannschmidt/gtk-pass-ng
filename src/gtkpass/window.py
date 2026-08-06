@@ -20,9 +20,12 @@ from gtkpass.config import (
     get_settings,
 )
 
-# Imported for its side effect: the GType must be registered before the
+# Imported for their side effect: the GTypes must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
+from gtkpass.ui.password_detail import PasswordDetailView  # noqa: F401
 from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
+from gtkpass.utils.async_ui import on_ui_thread
+from gtkpass.utils.clipboard import ClipboardCopier
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
     search_entry = Gtk.Template.Child()
     placeholder_page = Gtk.Template.Child()
     open_preferences_button = Gtk.Template.Child()
+    toast_overlay = Gtk.Template.Child()
+    content_stack = Gtk.Template.Child()
+    password_detail = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -63,6 +69,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Kept alive deliberately: a Gio.Settings that gets collected stops
         # emitting, and these are what tell us a backend was renamed.
         self._backend_settings: dict[str, Gio.Settings] = {}
+        # Bumped per selection so a slow decrypt cannot overwrite a newer one.
+        self._detail_request = 0
+        self._clipboard = ClipboardCopier(self)
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -216,6 +225,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """Set up the password list."""
         # Connect selection handler
         self.password_list.connect_password_selected(self._on_password_selected)
+        self.password_detail.connect("copy-requested", self._on_copy_requested)
+        self.settings.bind(
+            "show-hidden-passwords",
+            self.password_detail.password_row,
+            "show-password",
+            Gio.SettingsBindFlags.GET,
+        )
 
         # Show warning for failed backends
         if len(self.failed_backends) > 0:
@@ -347,11 +363,51 @@ class GTKPassWindow(Adw.ApplicationWindow):
         builder.get_object("not_implemented_dialog").present(self)
 
     def _on_password_selected(self, backend_id: str, password_name: str):
-        """Handle password selection from the tree.
+        """Decrypt the selected entry and show it in the detail pane.
 
         Args:
             backend_id: ID of the backend containing the password
             password_name: Name of the selected password
         """
         logger.debug(f"Selected password: {password_name} from backend: {backend_id}")
-        # TODO: Show password details in the detail pane
+
+        self._detail_request += 1
+        request = self._detail_request
+
+        self.content_stack.set_visible_child_name("detail")
+        self.password_detail.show_loading(password_name)
+
+        def show(entry):
+            # Arrow-keying through the tree starts a decrypt per row; without
+            # this a slow one landing late would replace a newer selection.
+            if request != self._detail_request:
+                entry.clear_password()
+                return
+            self.password_detail.show_entry(entry)
+
+        def report(error):
+            if request != self._detail_request:
+                return
+            logger.error(f"Could not open {password_name}: {error}")
+            self.password_detail.clear()
+            self.content_stack.set_visible_child_name("placeholder")
+            self._toast(f"Could not open {password_name}: {error}")
+
+        try:
+            future = self.backend_manager.get_password_async(backend_id, password_name)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, show, report)
+
+    def _on_copy_requested(self, _view, field: str, value: str):
+        """Copy a field from the detail pane, clearing it again later."""
+        timeout = self.settings.get_int("clipboard-timeout")
+        self._clipboard.copy(value, timeout)
+        if timeout > 0:
+            self._toast(f"{field} copied, clearing in {timeout}s")
+        else:
+            self._toast(f"{field} copied")
+
+    def _toast(self, message: str) -> None:
+        self.toast_overlay.add_toast(Adw.Toast.new(message))

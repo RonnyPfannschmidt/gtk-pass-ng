@@ -5,6 +5,8 @@ its passwords.  That path was silently broken for months because nothing
 exercised it.
 """
 
+import time
+
 import pytest
 
 from gtkpass._gi import Adw, GLib
@@ -29,6 +31,25 @@ def run_in_application(callback):
 
     assert "value" in captured, "the application never activated"
     return captured["value"]
+
+
+def pump_until(condition, timeout_seconds: float = 10.0):
+    """Run the main loop until ``condition`` holds, or the deadline passes.
+
+    Background decryption delivers its result through GLib.idle_add, so the
+    loop has to turn before anything reaches the widgets. Bound this by wall
+    clock rather than by iteration count: a non-blocking iteration returns
+    immediately when nothing is pending, so a plain loop spins through long
+    before a worker thread has finished.
+    """
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        context.iteration(may_block=False)
+        time.sleep(0.005)
+    return condition()
 
 
 def walk_tree(model, parent=None):
@@ -137,3 +158,88 @@ class TestRenaming:
                 set_backend_display_name("demo", DEMO_BACKEND_ID, "")
 
         assert "Renamed Live" in run_in_application(rename_while_open)
+
+
+class TestShowingDetails:
+    """Selecting an entry decrypts it and shows it in the detail pane."""
+
+    def open_first_password(self, app):
+        """Build a window and select the first demo entry, synchronously."""
+        from gtkpass.window import GTKPassWindow
+
+        window = GTKPassWindow(application=app)
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        assert backend is not None
+        name = backend.list_passwords()[0].name
+
+        window._on_password_selected(DEMO_BACKEND_ID, name)
+        pump_until(
+            lambda: window.content_stack.get_visible_child_name() == "detail"
+            and window.password_detail.stack.get_visible_child_name() == "content"
+        )
+        return window, name
+
+    def test_the_detail_pane_is_shown(self, demo_backend_configured):
+        window, _ = run_in_application(self.open_first_password)
+
+        assert window.content_stack.get_visible_child_name() == "detail"
+
+    def test_the_entry_is_decrypted_and_displayed(self, demo_backend_configured):
+        window, name = run_in_application(self.open_first_password)
+
+        assert window.password_detail.name_row.get_subtitle() == name
+        assert window.password_detail.password_row.get_text()
+
+    def test_a_missing_entry_reports_instead_of_crashing(self, demo_backend_configured):
+        from gtkpass.window import GTKPassWindow
+
+        def select_nonsense(app):
+            window = GTKPassWindow(application=app)
+            window._on_password_selected(DEMO_BACKEND_ID, "no/such/entry")
+            pump_until(
+                lambda: window.content_stack.get_visible_child_name() == "placeholder"
+            )
+            return window.content_stack.get_visible_child_name()
+
+        assert run_in_application(select_nonsense) == "placeholder"
+
+    def test_a_stale_decrypt_cannot_overwrite_a_newer_selection(
+        self, demo_backend_configured
+    ):
+        """Arrow-keying through the tree starts one decrypt per row.
+
+        A slow one landing after a later selection must be discarded, or the
+        pane shows an entry the user has already moved off. The two futures are
+        resolved out of order here to force exactly that.
+        """
+        from concurrent.futures import Future
+
+        from gtkpass.window import GTKPassWindow
+
+        def select_twice(app):
+            window = GTKPassWindow(application=app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            assert backend is not None
+            first, second = (p.name for p in backend.list_passwords()[:2])
+
+            pending: list[tuple[str, Future]] = []
+
+            def capture(_backend_id, name):
+                pending.append((name, Future()))
+                return pending[-1][1]
+
+            # Hold both decrypts open so they can be resolved out of order.
+            window.backend_manager.get_password_async = capture  # type: ignore[assignment]
+
+            window._on_password_selected(DEMO_BACKEND_ID, first)
+            window._on_password_selected(DEMO_BACKEND_ID, second)
+
+            # Newer first, then the stale one arrives late.
+            for name, future in reversed(pending):
+                future.set_result(backend.get_password(name))
+
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return window.password_detail.name_row.get_subtitle(), second
+
+        shown, expected = run_in_application(select_twice)
+        assert shown == expected
