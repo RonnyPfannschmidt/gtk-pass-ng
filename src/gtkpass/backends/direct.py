@@ -16,7 +16,13 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Optional
-import gnupg
+
+try:
+    import gnupg
+except ImportError:
+    # A missing optional dependency must not break entry point loading for the
+    # whole backend; is_available() reports it instead.
+    gnupg = None  # type: ignore
 
 from gtkpass.backends import BackendMetadata, PasswordBackend, PasswordEntry, BackendSettings, PasswordMetadata, BackendError
 
@@ -67,6 +73,10 @@ class DirectBackend(PasswordBackend):
         Returns:
             True if password store directory exists and GPG is available
         """
+        if gnupg is None:
+            logger.debug("python-gnupg is not installed")
+            return False
+
         try:
             # Check for password store directory
             store_dir = os.environ.get('PASSWORD_STORE_DIR')

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <!-- Main application schema -->
-  <schema id="org.ronny_pfannschmidt.gtkpass" path="/org/ronny-pfannschmidt/gtkpass/">
+  <schema id="io.github.RonnyPfannschmidt.GTKPass" path="/io/github/RonnyPfannschmidt/GTKPass/">
     
     <!-- Backend instances list -->
     <key name="backend-instances" type="a(ss)">
@@ -62,7 +62,7 @@
   </schema>
   
   <!-- Demo backend schema (relocatable) -->
-  <schema id="org.ronny_pfannschmidt.gtkpass.backend.demo">
+  <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.demo">
     <key name="custom-data-path" type="s">
       <default>''</default>
       <summary>Custom demo data file path</summary>
@@ -73,7 +73,7 @@
   </schema>
   
   <!-- Secret Service backend schema (relocatable) -->
-  <schema id="org.ronny_pfannschmidt.gtkpass.backend.secretservice">
+  <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.secretservice">
     <key name="collection-name" type="s">
       <default>'Login'</default>
       <summary>Keyring collection name</summary>
@@ -84,7 +84,7 @@
   </schema>
   
   <!-- Pass CLI backend schema (relocatable) -->
-  <schema id="org.ronny_pfannschmidt.gtkpass.backend.pass">
+  <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.pass">
     <key name="password-store-dir" type="s">
       <default>''</default>
       <summary>Password store directory</summary>
@@ -103,7 +103,7 @@
   </schema>
   
   <!-- Direct GPG backend schema (relocatable) -->
-  <schema id="org.ronny_pfannschmidt.gtkpass.backend.direct">
+  <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.direct">
     <key name="password-store-dir" type="s">
       <default>''</default>
       <summary>Password store directory</summary>

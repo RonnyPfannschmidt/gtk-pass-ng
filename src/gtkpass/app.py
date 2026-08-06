@@ -11,6 +11,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, Gtk, GLib  # noqa: E402
 
+from gtkpass.config import APP_ID  # noqa: E402
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ class GTKPassApp(Adw.Application):
     def __init__(self, **kwargs):
         """Initialize the application."""
         super().__init__(
-            application_id="io.github.ronnypfannschmidt.GTKPass",
+            application_id=APP_ID,
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
             **kwargs,
         )
@@ -117,7 +119,7 @@ class GTKPassApp(Adw.Application):
         about = Adw.AboutWindow(
             transient_for=self.window,
             application_name="GTKPass",
-            application_icon="io.github.ronnypfannschmidt.GTKPass",
+            application_icon=APP_ID,
             developer_name="GTKPass Contributors",
             version="0.0.1",
             website="https://github.com/RonnyPfannschmidt/gtkpass",

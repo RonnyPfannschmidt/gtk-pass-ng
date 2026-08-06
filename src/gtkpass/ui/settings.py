@@ -18,6 +18,7 @@ from gtkpass.backends.secretservice import SecretServiceBackendSettings
 from gtkpass.backends.pass_cli import PassBackendSettings
 from gtkpass.backends.direct import DirectBackendSettings
 from gtkpass.backends.manager import BackendManager
+from gtkpass.config import get_backend_settings, get_settings
 
 
 class BackendSettingsRow(Adw.PreferencesRow):
@@ -262,7 +263,7 @@ class SettingsWindow(Adw.PreferencesWindow):
         self.set_default_size(600, 500)
         
         # GSettings
-        self.settings = Gio.Settings.new("org.ronny_pfannschmidt.gtkpass")
+        self.settings = get_settings()
         
         # Backend instances
         self.backend_instances: Dict[str, BackendSettings] = {}
@@ -364,10 +365,7 @@ class SettingsWindow(Adw.PreferencesWindow):
         """Load settings for a specific backend instance from GSettings."""
         try:
             # Create settings object for this backend path
-            path = f"/org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/"
-            schema_id = f"org.ronny_pfannschmidt.gtkpass.backend.{backend_type}"
-            
-            backend_gsettings = Gio.Settings.new_with_path(schema_id, path)
+            backend_gsettings = get_backend_settings(backend_type, backend_id)
             
             # Read settings based on backend type
             if backend_type == "demo":
@@ -415,10 +413,7 @@ class SettingsWindow(Adw.PreferencesWindow):
         """Save settings for a specific backend instance to GSettings."""
         try:
             # Create settings object for this backend path
-            path = f"/org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/"
-            schema_id = f"org.ronny_pfannschmidt.gtkpass.backend.{backend_type}"
-            
-            backend_gsettings = Gio.Settings.new_with_path(schema_id, path)
+            backend_gsettings = get_backend_settings(backend_type, backend_id)
             
             # Write settings based on backend type
             if isinstance(settings, DemoBackendSettings):
@@ -462,9 +457,7 @@ class SettingsWindow(Adw.PreferencesWindow):
         
         # Clear the backend's GSettings
         try:
-            path = f"/org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/"
-            schema_id = f"org.ronny_pfannschmidt.gtkpass.backend.{backend_type}"
-            backend_gsettings = Gio.Settings.new_with_path(schema_id, path)
+            backend_gsettings = get_backend_settings(backend_type, backend_id)
             
             # Reset all keys to defaults
             for key in backend_gsettings.list_keys():

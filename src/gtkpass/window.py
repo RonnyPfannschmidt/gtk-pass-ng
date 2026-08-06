@@ -1,5 +1,6 @@
 """Main application window."""
 
+import importlib.resources
 import logging
 import gi
 
@@ -17,10 +18,16 @@ from gtkpass.backends.secretservice import SecretServiceBackend, SecretServiceBa
 from gtkpass.backends.pass_cli import PassBackend, PassBackendSettings
 from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 from gtkpass.backends import BackendError
-from gtkpass.ui.password_list import PasswordTreeView
+from gtkpass.config import get_backend_settings, get_settings
+
+# Imported for its side effect: the GType must be registered before the
+# template below is parsed, or window.ui fails with "Invalid object type".
+from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
 
 
-@Gtk.Template(filename="src/gtkpass/ui/blueprints/window.ui")
+@Gtk.Template(filename=str(
+    importlib.resources.files("gtkpass.ui.blueprints") / "window.ui"
+))
 class GTKPassWindow(Adw.ApplicationWindow):
     """Main application window for GTKPass.
 
@@ -47,7 +54,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         
         # Initialize backend manager and GSettings
         self.backend_manager = BackendManager()
-        self.settings = Gio.Settings.new("org.ronny_pfannschmidt.gtkpass")
+        self.settings = get_settings()
         self.failed_backends = []  # Track backends that failed to load
         
         # Monitor backend-instances for changes
@@ -118,11 +125,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
     def _load_backend_settings(self, backend_id: str, backend_type: str):
         """Load settings for a specific backend instance."""
         try:
-            path = f"/org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/"
-            schema_id = f"org.ronny_pfannschmidt.gtkpass.backend.{backend_type}"
-            
-            backend_gsettings = Gio.Settings.new_with_path(schema_id, path)
-            
+            backend_gsettings = get_backend_settings(backend_type, backend_id)
+
             if backend_type == "demo":
                 custom_path = backend_gsettings.get_string("custom-data-path")
                 return DemoBackendSettings(
@@ -247,7 +251,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.placeholder_page.set_description(
                 "Your password store is empty.\n"
                 "Add a password to get started."
-    
+            )
+            self.placeholder_page.set_icon_name("dialog-password-symbolic")
+            # Drop the "Open Preferences" button that the configuration prompt
+            # installs; nothing else ever removes it.
+            self.placeholder_page.set_child(None)
+
     def _get_backend_display_name(self, backend_id: str) -> str:
         """Get a user-friendly display name for a backend.
         
@@ -288,7 +297,6 @@ class GTKPassWindow(Adw.ApplicationWindow):
         else:
             # It's a custom name, just clean it up
             return backend_id.replace('_', ' ').title()
-            )
 
     def _show_configuration_prompt(self):
         """Show configuration prompt in main content area."""
