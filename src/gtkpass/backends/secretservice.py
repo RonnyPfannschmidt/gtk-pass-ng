@@ -4,6 +4,8 @@ Provides integration with GNOME Keyring, KWallet, and other Secret Service
 compatible keyrings using the secretstorage library.
 """
 
+import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +22,13 @@ from . import (
     PasswordEntry,
     PasswordMetadata,
 )
+
+logger = logging.getLogger(__name__)
+
+#: is_available() runs on the UI thread while the window is being built, and the
+#: D-Bus round trip below has no timeout of its own: with no Secret Service on
+#: the bus it blocks indefinitely and the application never finishes starting.
+AVAILABILITY_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass
@@ -67,7 +76,7 @@ class SecretServiceBackend(PasswordBackend):
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if Secret Service backend is available.
+        """Whether a Secret Service is reachable, answering within a deadline.
 
         Returns:
             True if secretstorage is installed and Secret Service is accessible
@@ -75,18 +84,36 @@ class SecretServiceBackend(PasswordBackend):
         if secretstorage is None:
             return False
 
-        try:
-            connection = secretstorage.dbus_init()
-            secretstorage.get_default_collection(connection)
-            connection.close()
-            return True
-        except Exception as e:
-            # Log the reason for debugging
-            import logging
+        outcome: list[bool] = []
 
-            logger = logging.getLogger(__name__)
-            logger.debug(f"Secret Service not available: {type(e).__name__}: {e}")
+        def probe() -> None:
+            try:
+                connection = secretstorage.dbus_init()
+                try:
+                    secretstorage.get_default_collection(connection)
+                finally:
+                    connection.close()
+            except Exception as e:
+                logger.debug(
+                    "Secret Service not available: %s: %s", type(e).__name__, e
+                )
+                outcome.append(False)
+            else:
+                outcome.append(True)
+
+        # Daemon thread: if the bus call never returns there is nothing to
+        # cancel, but it must not keep the process alive either.
+        thread = threading.Thread(target=probe, daemon=True, name="secretservice-probe")
+        thread.start()
+        thread.join(AVAILABILITY_TIMEOUT_SECONDS)
+
+        if not outcome:
+            logger.warning(
+                "Secret Service did not respond within %ss; treating as unavailable",
+                AVAILABILITY_TIMEOUT_SECONDS,
+            )
             return False
+        return outcome[0]
 
     @classmethod
     def create(
@@ -133,23 +160,6 @@ class SecretServiceBackend(PasswordBackend):
             collection.unlock()
 
         return cls(connection=connection, collection=collection)
-
-    def _get_items(self, name: str | None = None) -> list:
-        """Check if Secret Service backend is available.
-
-        Returns:
-            True if secretstorage is installed and Secret Service is accessible
-        """
-        if secretstorage is None:
-            return False
-
-        try:
-            connection = secretstorage.dbus_init()
-            secretstorage.get_default_collection(connection)
-            connection.close()
-            return True
-        except Exception:
-            return False
 
     def _get_items(self, name: str | None = None) -> list:
         """Get items from collection.

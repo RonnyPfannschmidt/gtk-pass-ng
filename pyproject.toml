@@ -89,7 +89,6 @@ ignore_missing_imports = true
 module = [
     "gtkpass.backends",
     "gtkpass.backends.demo",
-    "gtkpass.backends.direct",
     "gtkpass.backends.manager",
     "gtkpass.backends.pass_cli",
     "gtkpass.backends.secretservice",

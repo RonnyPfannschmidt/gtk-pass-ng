@@ -34,7 +34,7 @@ help:
 	@echo "check    run every pre-commit hook (lint, format, types)"
 	@echo "test     run the test suite headless"
 	@echo "build    build the wheel and sdist"
-	@echo "run      launch the application"
+	@echo "run      launch the application (make run ARGS=\"--debug\")"
 	@echo "clean    remove build and cache artefacts"
 
 venv:
@@ -62,8 +62,9 @@ test-gui: schemas
 build:
 	uv build
 
+# Pass arguments through: make run ARGS="--debug"
 run:
-	./run_app.sh
+	./run_app.sh $(ARGS)
 
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
