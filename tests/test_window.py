@@ -52,13 +52,16 @@ def pump_until(condition, timeout_seconds: float = 10.0):
     return condition()
 
 
-def walk_tree(model, parent=None):
-    """Yield every row of a Gtk.TreeModel depth first."""
-    row = model.iter_children(parent)
-    while row is not None:
-        yield row
-        yield from walk_tree(model, row)
-        row = model.iter_next(row)
+def sidebar_names(window):
+    """Every name in the sidebar tree, depth first."""
+
+    def walk(store):
+        for index in range(store.get_n_items()):
+            node = store.get_item(index)
+            yield node.name
+            yield from walk(node.children)
+
+    return list(walk(window.password_list.root))
 
 
 #: Matches the ``<type>_<timestamp>`` form the settings UI generates, so the
@@ -95,12 +98,7 @@ class TestWindowWithDemoBackend:
         from gtkpass.window import GTKPassWindow
 
         def collect(app):
-            window = GTKPassWindow(application=app)
-            model = window.password_list.tree_view.get_model()
-            return [
-                model.get_value(row, window.password_list.COL_NAME)
-                for row in walk_tree(model)
-            ]
+            return sidebar_names(GTKPassWindow(application=app))
 
         return run_in_application(collect)
 
@@ -128,18 +126,11 @@ class TestRenaming:
         yield
         set_backend_display_name("demo", DEMO_BACKEND_ID, "")
 
-    def sidebar_names(self, window):
-        model = window.password_list.tree_view.get_model()
-        return [
-            model.get_value(row, window.password_list.COL_NAME)
-            for row in walk_tree(model)
-        ]
-
     def test_a_stored_name_is_shown(self, named_demo):
         from gtkpass.window import GTKPassWindow
 
         names = run_in_application(
-            lambda app: self.sidebar_names(GTKPassWindow(application=app))
+            lambda app: sidebar_names(GTKPassWindow(application=app))
         )
 
         assert "My Vault" in names
@@ -149,11 +140,11 @@ class TestRenaming:
 
         def rename_while_open(app):
             window = GTKPassWindow(application=app)
-            assert "Demo" in self.sidebar_names(window)
+            assert "Demo" in sidebar_names(window)
 
             set_backend_display_name("demo", DEMO_BACKEND_ID, "Renamed Live")
             try:
-                return self.sidebar_names(window)
+                return sidebar_names(window)
             finally:
                 set_backend_display_name("demo", DEMO_BACKEND_ID, "")
 

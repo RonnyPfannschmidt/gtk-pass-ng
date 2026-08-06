@@ -266,7 +266,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             display_name = self._get_backend_display_name(backend_id)
 
             # Add backend to tree
-            backend_iter = self.password_list.add_backend(
+            backend_node = self.password_list.add_backend(
                 backend_id=backend_id, backend_name=display_name, icon_name=icon_name
             )
 
@@ -280,11 +280,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
                 # Add passwords under the backend
                 for password in sorted(passwords, key=lambda p: p.name):
-                    self.password_list.add_password(
-                        backend_iter=backend_iter,
-                        name=password.name,
-                        full_path=password.name,
-                    )
+                    self.password_list.add_password(backend_node, password.name)
             except Exception as e:
                 logger.error(f"Error loading passwords from {backend_id}: {e}")
 

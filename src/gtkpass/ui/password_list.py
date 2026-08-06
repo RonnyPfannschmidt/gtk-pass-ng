@@ -1,13 +1,58 @@
 """Password list component for GTKPass.
 
-This module provides the password list view that displays passwords grouped
-by backend in a hierarchical tree structure.
+Displays passwords grouped by backend in a hierarchical tree: backends are the
+root rows, path components below them become folders, and the leaves are the
+entries themselves.
+
+The tree is a ``Gtk.ColumnView`` over a ``Gtk.TreeListModel`` of
+:class:`PasswordNode` objects. The nodes are the model the window populates and
+that selection reads back; the view only renders them.
 """
 
 import importlib.resources
 from collections.abc import Callable
 
-from gtkpass._gi import Gtk
+from gtkpass._gi import Gio, GObject, Gtk
+
+
+class PasswordNode(GObject.Object):
+    """One row in the sidebar: a backend, a folder, or an entry.
+
+    The row template in ``password_list.blp`` binds to these properties by
+    name, so the GType name here has to stay in step with the
+    ``$GTKPassPasswordNode`` casts over there.
+    """
+
+    __gtype_name__ = "GTKPassPasswordNode"
+
+    name = GObject.Property(type=str, default="")
+    icon_name = GObject.Property(type=str, default="")
+
+    def __init__(
+        self,
+        name: str,
+        icon_name: str = "",
+        backend_id: str = "",
+        password_name: str = "",
+    ) -> None:
+        super().__init__(name=name, icon_name=icon_name)
+        #: The backend this row belongs to. Every descendant carries it, so a
+        #: selected entry knows its backend without walking back up the tree.
+        self.backend_id = backend_id
+        #: Full path of the entry; empty on backend and folder rows, which is
+        #: what makes a row selectable as a password or not.
+        self.password_name = password_name
+        self.children: Gio.ListStore = Gio.ListStore(item_type=PasswordNode)
+
+
+def _children_of(node: PasswordNode) -> Gio.ListStore | None:
+    """Child model for a row, or None for one that cannot have children.
+
+    Decided by what the row *is* rather than by whether it happens to be empty
+    yet: the tree model caches this answer the first time it renders a row, and
+    the window fills a backend in only after adding it.
+    """
+    return None if node.password_name else node.children
 
 
 @Gtk.Template(
@@ -18,59 +63,45 @@ from gtkpass._gi import Gtk
 class PasswordTreeView(Gtk.ScrolledWindow):
     """Password tree view widget.
 
-    Displays passwords organized by backend in a tree structure.
-    Backends appear as root nodes with their own icons and loading indicators.
+    Displays passwords organized by backend in a tree structure, with backends
+    as root nodes carrying their own icons.
     """
 
     __gtype_name__ = "PasswordTreeView"
 
-    # Template children
-    tree_view: Gtk.TreeView = Gtk.Template.Child()
-    icon_renderer: Gtk.CellRendererPixbuf = Gtk.Template.Child()
-    spinner_renderer: Gtk.CellRendererSpinner = Gtk.Template.Child()
-    text_renderer: Gtk.CellRendererText = Gtk.Template.Child()
-
-    # Column indices in TreeStore
-    COL_NAME = 0  # Display name (backend name or password name)
-    COL_ICON = 1  # Icon name
-    COL_BACKEND_ID = 2  # Backend ID (for root nodes) or None
-    COL_PASSWORD = 3  # Password name (for password entries) or None
-    COL_LOADING = 4  # True if loading, False otherwise
+    column_view: Gtk.ColumnView = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the password tree view."""
         super().__init__(**kwargs)
 
-        # Create tree store: name, icon, backend_id, password_name, loading
-        self.store = Gtk.TreeStore(str, str, str, str, bool)
-        self.tree_view.set_model(self.store)
+        #: Backend rows. Everything else hangs below one of them.
+        self.root: Gio.ListStore = Gio.ListStore(item_type=PasswordNode)
+        self.tree_model = Gtk.TreeListModel.new(
+            self.root,
+            passthrough=False,
+            autoexpand=False,
+            create_func=_children_of,
+        )
+        # Nothing is selected until the user picks something: autoselect would
+        # fire the selection handler for whichever row happened to load first,
+        # decrypting an entry nobody asked for.
+        self.selection = Gtk.SingleSelection(
+            model=self.tree_model, autoselect=False, can_unselect=True
+        )
+        self.column_view.set_model(self.selection)
 
-        # Get the column from the tree view
-        column = self.tree_view.get_column(0)
+        self._on_password_selected: Callable[[str, str], None] | None = None
+        self.selection.connect("notify::selected-item", self._selection_changed)
 
-        # Configure renderers
-        column.add_attribute(self.icon_renderer, "icon-name", self.COL_ICON)
-        column.add_attribute(self.text_renderer, "text", self.COL_NAME)
-
-        # Set spinner data func
-        column.set_cell_data_func(self.spinner_renderer, self._spinner_data_func)
-
-        # Configure selection
-        selection = self.tree_view.get_selection()
-        selection.set_mode(Gtk.SelectionMode.SINGLE)
-
-        # Callbacks
-        self._on_password_selected: Callable | None = None
-
-    def _spinner_data_func(self, column, cell, model, iter, data):
-        """Update spinner visibility and state based on loading flag."""
-        loading = model.get_value(iter, self.COL_LOADING)
-        cell.set_property("visible", loading)
-        cell.set_property("active", loading)
+    def _selection_changed(self, *_args) -> None:
+        selected = self.get_selected_password()
+        if selected and self._on_password_selected:
+            self._on_password_selected(*selected)
 
     def add_backend(
         self, backend_id: str, backend_name: str, icon_name: str
-    ) -> Gtk.TreeIter:
+    ) -> PasswordNode:
         """Add a backend as a root node.
 
         Args:
@@ -79,136 +110,79 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             icon_name: Icon name
 
         Returns:
-            TreeIter for the backend node
+            The node, to be passed back as the parent of its entries.
         """
-        return self.store.append(
-            None,
-            [
-                backend_name,
-                icon_name,
-                backend_id,
-                None,
-                False,  # Not loading initially
-            ],
+        node = PasswordNode(
+            name=backend_name, icon_name=icon_name, backend_id=backend_id
         )
+        self.root.append(node)
+        return node
 
-    def set_backend_loading(self, backend_iter: Gtk.TreeIter, loading: bool):
-        """Set loading state for a backend.
-
-        Args:
-            backend_iter: Backend tree iter
-            loading: True to show spinner, False to hide
-        """
-        self.store.set_value(backend_iter, self.COL_LOADING, loading)
-        self.store.set_value(backend_iter, self.COL_ICON, "" if loading else None)
-
-    def add_password(self, backend_iter: Gtk.TreeIter, name: str, full_path: str):
-        """Add a password entry under a backend.
+    def add_password(self, backend: PasswordNode, path: str) -> PasswordNode:
+        """Add an entry under a backend, creating folder rows as needed.
 
         Args:
-            backend_iter: Parent backend tree iter
-            name: Password display name (just the final component)
-            full_path: Full password path
-        """
-        # For hierarchical paths like "work/email", create nested structure
-        parts = full_path.split("/")
-        current_parent = backend_iter
-        current_path = []
-
-        for i, part in enumerate(parts):
-            current_path.append(part)
-            path_str = "/".join(current_path)
-
-            # Check if this node already exists
-            existing = self._find_child(current_parent, part)
-
-            if existing:
-                current_parent = existing
-            else:
-                # Create new node
-                is_leaf = i == len(parts) - 1
-                icon = "" if is_leaf else "folder-symbolic"
-                password_name = path_str if is_leaf else None
-
-                new_iter = self.store.append(
-                    current_parent,
-                    [
-                        part,
-                        icon,
-                        None,  # Not a backend
-                        password_name,
-                        False,  # Not loading
-                    ],
-                )
-                current_parent = new_iter
-
-    def _find_child(self, parent_iter: Gtk.TreeIter, name: str) -> Gtk.TreeIter | None:
-        """Find a child node by name.
-
-        Args:
-            parent_iter: Parent iterator
-            name: Child name to find
+            backend: Node returned by :meth:`add_backend`
+            path: Full entry path, ``work/mail`` style
 
         Returns:
-            TreeIter if found, None otherwise
+            The leaf node for the entry.
         """
-        child_iter = self.store.iter_children(parent_iter)
-        while child_iter:
-            child_name = self.store.get_value(child_iter, self.COL_NAME)
-            if child_name == name:
-                return child_iter
-            child_iter = self.store.iter_next(child_iter)
+        parent = backend
+        parts = path.split("/")
+
+        for depth, part in enumerate(parts):
+            existing = self._child_named(parent, part)
+            if existing is not None:
+                parent = existing
+                continue
+
+            is_leaf = depth == len(parts) - 1
+            node = PasswordNode(
+                name=part,
+                icon_name="" if is_leaf else "folder-symbolic",
+                backend_id=backend.backend_id,
+                password_name="/".join(parts[: depth + 1]) if is_leaf else "",
+            )
+            parent.children.append(node)
+            parent = node
+
+        return parent
+
+    @staticmethod
+    def _child_named(parent: PasswordNode, name: str) -> PasswordNode | None:
+        """Find a child row by name, so a shared folder is created once."""
+        for index in range(parent.children.get_n_items()):
+            child = parent.children.get_item(index)
+            if child.name == name:
+                return child
         return None
 
-    def clear_backend_passwords(self, backend_iter: Gtk.TreeIter):
-        """Remove all password entries under a backend.
+    def clear_backend_passwords(self, backend: PasswordNode) -> None:
+        """Remove all entries under a backend."""
+        backend.children.remove_all()
 
-        Args:
-            backend_iter: Backend tree iter
-        """
-        # Remove all children
-        while True:
-            child = self.store.iter_children(backend_iter)
-            if not child:
-                break
-            self.store.remove(child)
-
-    def clear_all(self):
+    def clear_all(self) -> None:
         """Clear all backends and passwords."""
-        self.store.clear()
+        self.root.remove_all()
 
     def get_selected_password(self) -> tuple[str, str] | None:
         """Get the currently selected password.
 
         Returns:
-            Tuple of (backend_id, password_name) or None if no password selected
+            Tuple of (backend_id, password_name), or None when the selection is
+            a backend, a folder, or nothing at all.
         """
-        selection = self.tree_view.get_selection()
-        model, iter = selection.get_selected()
-
-        if not iter:
+        row = self.selection.get_selected_item()
+        if row is None:
             return None
 
-        # Check if this is a password (leaf node)
-        password_name = model.get_value(iter, self.COL_PASSWORD)
-        if not password_name:
-            return None  # It's a backend or folder, not a password
+        node = row.get_item()
+        if not node.password_name:
+            return None
+        return (node.backend_id, node.password_name)
 
-        # Find parent backend
-        backend_id = None
-        current = iter
-        while current:
-            bid = model.get_value(current, self.COL_BACKEND_ID)
-            if bid:
-                backend_id = bid
-                break
-            current = model.iter_parent(current)
-
-        if backend_id:
-            return (backend_id, password_name)
-        return None
-
-    def connect_password_selected(self, callback: Callable[[str, str], None]):
+    def connect_password_selected(self, callback: Callable[[str, str], None]) -> None:
         """Connect callback for password selection.
 
         Args:
@@ -216,27 +190,23 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         """
         self._on_password_selected = callback
 
-        def on_selection_changed(selection):
-            result = self.get_selected_password()
-            if result and self._on_password_selected:
-                backend_id, password_name = result
-                self._on_password_selected(backend_id, password_name)
+    def expand_first_level(self) -> None:
+        """Expand all backend nodes, leaving their folders closed."""
+        self._expand(lambda row: row.get_depth() == 0)
 
-        selection = self.tree_view.get_selection()
-        selection.connect("changed", on_selection_changed)
-
-    def expand_first_level(self):
-        """Expand all backend nodes (first level)."""
-        iter = self.store.get_iter_first()
-        while iter:
-            path = self.store.get_path(iter)
-            self.tree_view.expand_row(path, False)
-            iter = self.store.iter_next(iter)
-
-    def expand_all(self):
+    def expand_all(self) -> None:
         """Expand all nodes recursively."""
-        self.tree_view.expand_all()
+        self._expand(lambda row: True)
 
+    def _expand(self, wanted: Callable[[Gtk.TreeListRow], bool]) -> None:
+        """Expand matching rows, including any they reveal on the way.
 
-# Backwards compatibility aliases
-PasswordList = PasswordTreeView
+        The model grows as rows open, so the bound is re-read every step rather
+        than taken once up front.
+        """
+        index = 0
+        while index < self.tree_model.get_n_items():
+            row = self.tree_model.get_row(index)
+            if row is not None and wanted(row):
+                row.set_expanded(True)
+            index += 1

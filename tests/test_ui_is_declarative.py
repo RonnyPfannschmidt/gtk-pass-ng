@@ -18,7 +18,9 @@ NON_WIDGET_TYPES = {
     "Adjustment",
     "Template",  # the decorator that loads a .blp-derived .ui
     "ListStore",
+    "SingleSelection",
     "StringList",
+    "TreeListModel",
     "TreeStore",
     "Variant",
     "SimpleAction",
