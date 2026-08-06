@@ -1,5 +1,5 @@
-# Development entry points. CI invokes these same targets, so there is one
-# definition of what "check the project" means.
+# Development entry points, and the one definition of what "check the project"
+# means. There is no CI; the pre-commit hook and these targets are the gate.
 
 BLUEPRINTS := src/gtkpass/ui/blueprints
 
@@ -29,7 +29,7 @@ FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
 
 .PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev \
-	devstore flatpak flatpak-run flatpak-lint clean
+	devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -45,6 +45,7 @@ help:
 	@echo "flatpak  build and install the Flatpak for the current user"
 	@echo "flatpak-run   run the installed Flatpak"
 	@echo "flatpak-lint  check the manifest against Flathub's rules"
+	@echo "flatpak-lint-repo  build to a repo and run Flathub's repo checks"
 	@echo "clean    remove build and cache artefacts"
 
 venv:
@@ -118,15 +119,22 @@ flatpak:
 flatpak-run:
 	flatpak run --no-documents-portal $(FLATPAK_ID) $(ARGS)
 
-# Flathub runs this on submission; it catches permission and metadata problems
-# that only show up during review.
+# Flathub runs these on submission; they catch permission and metadata problems
+# that would otherwise surface during review. The repo check needs a build, and
+# sees things the manifest check cannot -- missing screenshots, for one.
 flatpak-lint:
 	flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest \
 		$(FLATPAK_MANIFEST)
 
+flatpak-lint-repo:
+	flatpak-builder --force-clean --user --repo=.flatpak-repo \
+		.flatpak-build $(FLATPAK_MANIFEST)
+	flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo \
+		.flatpak-repo
+
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
-	rm -rf .flatpak-build/ .flatpak-builder/
+	rm -rf .flatpak-build/ .flatpak-builder/ .flatpak-repo/
 	rm -f data/gschemas.compiled
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
 	rm -rf .dev/

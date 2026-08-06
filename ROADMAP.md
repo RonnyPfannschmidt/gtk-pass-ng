@@ -27,25 +27,39 @@ application; none of its dates survived contact with the work.
 - Decryption off the UI thread, with stale results discarded
 - Copy to clipboard, cleared again after a timeout
 - Editing an entry and writing it back through its backend
+- Showing a password rather than dotting it out, from the preference
+
+**Packaging**
+- Desktop entry, AppStream component and icon, all named after the app id and
+  held to it by a test
+- A Flatpak that builds and installs, bundling pass, tree and git so the
+  sandbox needs no host access; see [docs/FLATPAK.md](docs/FLATPAK.md)
 
 ## Next
 
 Roughly in the order that would make the application usable day to day.
 
+- **Search.** The entry box sits in the sidebar and nothing is connected to it,
+  so typing does nothing at all. The tree is already in memory, so this is a
+  filter over the model rather than backend work.
 - **Adding an entry.** The `+` button still opens a "not implemented" dialog.
   The backends implement `add_password`; the dialog is most of what is missing.
 - **Deleting an entry**, with a confirmation, and pruning the emptied folders.
-- **Search.** The entry box exists in the sidebar and nothing is connected to
-  it. `search()` is already part of the backend contract.
 - **Renaming and moving**, on top of `move_password`.
-- **The "show hidden passwords" preference.** It is in the schema and in the
-  settings dialog, but bound to a property `Adw.PasswordEntryRow` does not
-  have, so it does nothing and logs a `GLib-GIO-CRITICAL` at startup.
 - **Password generation** when adding an entry.
-- **Packaging**: a Flatpak, and the desktop and AppStream metadata to go with
-  it. Nothing is installable today.
+- **Submitting to Flathub.** The Flatpak builds locally but is not release
+  ready: no screenshots, no release tag, a placeholder icon and a manifest that
+  builds from the working directory. See
+  [docs/FLATHUB.md](docs/FLATHUB.md).
 - **CI.** There is none. `make check` and `make test` are the entire gate, and
   they only run when someone remembers.
+
+Smaller things, worth doing when passing:
+
+- `examples/` is stale: an old application id, and a `SettingsWindow` call that
+  no longer matches the class.
+- `secretstorage` is not in the Flatpak, so the Secret Service backend reports
+  itself unavailable there. It needs `cryptography`, which is a Rust build.
 
 ## Not planned
 

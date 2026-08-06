@@ -154,6 +154,8 @@ modules:
         SETUPTOOLS_SCM_PRETEND_VERSION: '0.1.0'
     build-commands:
       - pip3 install --verbose --no-deps --no-build-isolation --prefix=${FLATPAK_DEST} .
+      # Flathub requires the licence to be installed here.
+      - install -Dm644 LICENSE ${FLATPAK_DEST}/share/licenses/${FLATPAK_ID}/LICENSE
       - install -Dm644 data/${FLATPAK_ID}.desktop
         ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 data/${FLATPAK_ID}.metainfo.xml

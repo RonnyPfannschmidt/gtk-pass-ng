@@ -94,6 +94,8 @@ it is, and does not generate codes.
 - [AGENTS.md](AGENTS.md) — how to work on this project
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it is put together
 - [ROADMAP.md](ROADMAP.md) — what is done and what is next
+- [docs/FLATPAK.md](docs/FLATPAK.md) — the Flatpak, and its sandbox permissions
+- [docs/FLATHUB.md](docs/FLATHUB.md) — what publishing it would take
 - [SECURITY.md](SECURITY.md) — threat model and reporting
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
 

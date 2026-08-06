@@ -251,6 +251,9 @@ afterwards, and states exactly which git is in the bundle.
 
 ## Still missing before this could go to Flathub
 
+The submission process itself, and the permission exceptions it needs, are in
+[FLATHUB.md](FLATHUB.md).
+
 - A stable release tag; the manifest builds from the working directory
   (`type: dir`) and pins the version with `SETUPTOOLS_SCM_PRETEND_VERSION`. A
   submission needs a `type: git` source at a tag with a commit hash.

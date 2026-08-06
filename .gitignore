@@ -38,6 +38,7 @@ data/gschemas.compiled
 # Throwaway development store and GPG home
 .dev/
 
-# Flatpak build tree and flatpak-builder's download cache
+# Flatpak build tree, ostree repo, and flatpak-builder's download cache
 .flatpak-build/
 .flatpak-builder/
+.flatpak-repo/
