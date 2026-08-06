@@ -63,6 +63,18 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                     <property name="description" translatable="yes">Loading...</property>
                     <property name="icon-name">dialog-password-symbolic</property>
                     <property name="vexpand">true</property>
+                    <property name="child">
+                      <object class="GtkButton" id="open_preferences_button">
+                        <property name="label" translatable="yes">Open Preferences</property>
+                        <property name="action-name">app.preferences</property>
+                        <property name="halign">3</property>
+                        <property name="visible">false</property>
+                        <style>
+                          <class name="suggested-action"/>
+                          <class name="pill"/>
+                        </style>
+                      </object>
+                    </property>
                   </object>
                 </child>
               </object>

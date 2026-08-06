@@ -1,0 +1,78 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $SettingsWindow : Adw.PreferencesDialog {
+  title: _("Settings");
+  content-width: 640;
+  content-height: 520;
+
+  Adw.PreferencesPage {
+    title: _("Backends");
+    icon-name: "network-server-symbolic";
+
+    Adw.PreferencesGroup backends_group {
+      title: _("Active Backends");
+      description: _("Manage password backend instances");
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Add New Backend");
+
+      Adw.ComboRow backend_combo {
+        title: _("Backend Type");
+        subtitle: _("Select the type of backend to add");
+
+        model: StringList {
+          strings [_("Demo"), _("Secret Service"), _("Pass"), _("Direct GPG")]
+        };
+      }
+
+      Adw.ActionRow {
+        [suffix]
+        Button add_backend_button {
+          label: _("Add Backend");
+          halign: start;
+          valign: center;
+          clicked => $_on_add_backend();
+
+          styles ["suggested-action"]
+        }
+      }
+    }
+  }
+
+  Adw.PreferencesPage {
+    title: _("General");
+    icon-name: "preferences-other-symbolic";
+
+    Adw.PreferencesGroup {
+      title: _("Security");
+
+      Adw.SwitchRow show_hidden_row {
+        title: _("Reveal Passwords by Default");
+        subtitle: _("Show password text without pressing the reveal button");
+      }
+
+      Adw.SpinRow clipboard_timeout_row {
+        title: _("Clipboard Timeout");
+        subtitle: _("Seconds before a copied password is cleared (0 = never)");
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 300;
+          step-increment: 5;
+          page-increment: 30;
+        };
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Search");
+
+      Adw.SwitchRow search_as_you_type_row {
+        title: _("Search as You Type");
+        subtitle: _("Filter the list on every keystroke instead of on Enter");
+      }
+    }
+  }
+}

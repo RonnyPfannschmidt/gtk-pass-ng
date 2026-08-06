@@ -8,8 +8,8 @@ sidebar kept showing a name derived from the instance id.
 import pytest
 
 from gtkpass.config import (
-    get_backend_settings,
     get_backend_display_name,
+    get_backend_settings,
     set_backend_display_name,
 )
 

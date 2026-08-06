@@ -49,6 +49,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     password_list = Gtk.Template.Child()
     search_entry = Gtk.Template.Child()
     placeholder_page = Gtk.Template.Child()
+    open_preferences_button = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -291,9 +292,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 "Your password store is empty.\nAdd a password to get started."
             )
             self.placeholder_page.set_icon_name("dialog-password-symbolic")
-            # Drop the "Open Preferences" button that the configuration prompt
-            # installs; nothing else ever removes it.
-            self.placeholder_page.set_child(None)
+            # The configuration prompt reveals this and nothing else hides it.
+            self.open_preferences_button.set_visible(False)
 
     def _get_backend_display_name(self, backend_id: str) -> str:
         """Name to show for a configured backend instance.
@@ -313,13 +313,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             "Choose a backend in Preferences to get started."
         )
         self.placeholder_page.set_icon_name("preferences-system-symbolic")
-
-        # Add a button to the status page
-        prefs_button = Gtk.Button(label="Open Preferences")
-        prefs_button.add_css_class("suggested-action")
-        prefs_button.add_css_class("pill")
-        prefs_button.set_action_name("app.preferences")
-        self.placeholder_page.set_child(prefs_button)
+        self.open_preferences_button.set_visible(True)
 
     def _show_backend_errors(self):
         """Show a toast notification for failed backends."""
@@ -344,14 +338,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _on_add_password(self, action, param):
         """Handle add password button click."""
-        # Placeholder - will be implemented in future
-        dialog = Adw.MessageDialog(
-            transient_for=self,
-            heading="Add Password",
-            body="Password creation UI will be implemented in the next phase.",
+        builder = Gtk.Builder.new_from_file(
+            str(
+                importlib.resources.files("gtkpass.ui.blueprints")
+                / "not_implemented.ui"
+            )
         )
-        dialog.add_response("ok", "OK")
-        dialog.present()
+        builder.get_object("not_implemented_dialog").present(self)
 
     def _on_password_selected(self, backend_id: str, password_name: str):
         """Handle password selection from the tree.

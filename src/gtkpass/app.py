@@ -101,26 +101,16 @@ class GTKPassApp(Adw.Application):
         self.add_action(about_action)
 
     def _on_preferences_action(self, action: Gio.SimpleAction, param):
-        """Show the preferences window."""
+        """Show the preferences dialog."""
         from gtkpass.ui.settings import SettingsWindow
 
-        settings_window = SettingsWindow(transient_for=self.window)
-        settings_window.present()
+        SettingsWindow().present(self.window)
 
     def _on_about_action(self, action: Gio.SimpleAction, param):
         """Show the about dialog."""
-        about = Adw.AboutWindow(
-            transient_for=self.window,
-            application_name="GTKPass",
-            application_icon=APP_ID,
-            developer_name="GTKPass Contributors",
-            version="0.0.1",
-            website="https://github.com/RonnyPfannschmidt/gtkpass",
-            issue_url="https://github.com/RonnyPfannschmidt/gtkpass/issues",
-            license_type=Gtk.License.GPL_3_0,
-            copyright="© 2024 GTKPass Contributors",
-        )
-        about.present()
+        from gtkpass.ui.about import build_about_dialog
+
+        build_about_dialog().present(self.window)
 
 
 def main():

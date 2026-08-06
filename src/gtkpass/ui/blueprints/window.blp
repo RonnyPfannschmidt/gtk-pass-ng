@@ -53,6 +53,16 @@ template $GTKPassWindow : Adw.ApplicationWindow {
           description: _("Loading...");
           icon-name: "dialog-password-symbolic";
           vexpand: true;
+
+          // Only relevant when no backend is configured; shown on demand.
+          child: Button open_preferences_button {
+            label: _("Open Preferences");
+            action-name: "app.preferences";
+            halign: center;
+            visible: false;
+
+            styles ["suggested-action", "pill"]
+          };
         }
       };
     };

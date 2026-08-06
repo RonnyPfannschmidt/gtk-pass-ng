@@ -55,7 +55,7 @@ class TestRenamingThroughTheDialog:
         from gtkpass.config import get_backend_display_name
 
         row = dialog.backend_rows[self.BACKEND_ID]
-        row.name_entry.set_text("Team Vault")
+        row.name_row.set_text("Team Vault")
 
         assert get_backend_display_name("demo", self.BACKEND_ID) == "Team Vault"
 
@@ -68,6 +68,58 @@ class TestRenamingThroughTheDialog:
         reopened = SettingsWindow()
 
         assert (
-            reopened.backend_rows[self.BACKEND_ID].name_entry.get_text()
-            == "Preexisting"
+            reopened.backend_rows[self.BACKEND_ID].name_row.get_text() == "Preexisting"
         )
+
+
+class TestAddingAndRemoving:
+    """The add flow reads the combo row's selection index, not a string id."""
+
+    @pytest.fixture
+    def dialog(self):
+        from gtkpass._gi import GLib
+        from gtkpass.config import get_settings
+        from gtkpass.ui.settings import SettingsWindow
+
+        settings = get_settings()
+        previous = settings.get_value("backend-instances")
+        settings.set_value("backend-instances", GLib.Variant("a(ss)", []))
+        yield SettingsWindow()
+        settings.set_value("backend-instances", previous)
+
+    def test_the_combo_offers_every_backend_type(self, dialog):
+        from gtkpass.ui.settings import BACKEND_TYPES
+
+        assert dialog.backend_combo.get_model().get_n_items() == len(BACKEND_TYPES)
+
+    def test_adding_uses_the_selected_type(self, dialog):
+        from gtkpass.ui.settings import BACKEND_TYPES
+
+        dialog.backend_combo.set_selected(BACKEND_TYPES.index("pass"))
+        dialog._on_add_backend(None)
+
+        (row,) = dialog.backend_rows.values()
+        assert row.backend_type == "pass"
+        assert row.pass_store_row.get_visible()
+        assert not row.demo_path_row.get_visible()
+
+    def test_added_backends_are_recorded(self, dialog):
+        from gtkpass.config import get_settings
+
+        dialog.backend_combo.set_selected(0)
+        dialog._on_add_backend(None)
+
+        recorded = list(get_settings().get_value("backend-instances"))
+        assert [backend_type for _, backend_type in recorded] == ["demo"]
+
+    def test_removing_forgets_the_backend(self, dialog):
+        from gtkpass.config import get_settings
+
+        dialog.backend_combo.set_selected(0)
+        dialog._on_add_backend(None)
+        (row,) = list(dialog.backend_rows.values())
+
+        dialog._on_remove_backend(row)
+
+        assert dialog.backend_rows == {}
+        assert list(get_settings().get_value("backend-instances")) == []

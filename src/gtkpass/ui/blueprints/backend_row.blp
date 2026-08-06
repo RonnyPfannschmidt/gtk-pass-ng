@@ -1,0 +1,59 @@
+using Gtk 4.0;
+using Adw 1;
+
+// One row per configured backend instance. Every backend type's settings are
+// declared here and the ones that do not apply are hidden, which keeps all
+// widget construction declarative instead of branching in Python.
+template $BackendSettingsRow : Adw.ExpanderRow {
+  [suffix]
+  Button remove_button {
+    icon-name: "user-trash-symbolic";
+    valign: center;
+    tooltip-text: _("Remove this backend");
+    clicked => $_on_remove_clicked();
+
+    styles ["destructive-action", "flat"]
+  }
+
+  Adw.EntryRow name_row {
+    title: _("Name");
+    changed => $_on_settings_changed();
+  }
+
+  Adw.EntryRow demo_path_row {
+    title: _("Custom Data Path");
+    visible: false;
+    changed => $_on_settings_changed();
+  }
+
+  Adw.EntryRow secretservice_collection_row {
+    title: _("Keyring Collection");
+    visible: false;
+    changed => $_on_settings_changed();
+  }
+
+  Adw.EntryRow pass_store_row {
+    title: _("Password Store Directory");
+    visible: false;
+    changed => $_on_settings_changed();
+  }
+
+  Adw.SwitchRow pass_git_row {
+    title: _("Enable Git");
+    subtitle: _("Use git for version control of the store");
+    visible: false;
+    notify::active => $_on_settings_changed();
+  }
+
+  Adw.EntryRow direct_store_row {
+    title: _("Password Store Directory");
+    visible: false;
+    changed => $_on_settings_changed();
+  }
+
+  Adw.EntryRow direct_gpg_home_row {
+    title: _("GPG Home Directory");
+    visible: false;
+    changed => $_on_settings_changed();
+  }
+}
