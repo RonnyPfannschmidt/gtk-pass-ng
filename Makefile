@@ -25,10 +25,11 @@ export UV_NO_SYNC := 1
 # from the developer's real keyring.
 HEADLESS := xvfb-run -a dbus-run-session --
 
-.PHONY: help venv sync ui schemas check test test-gui build run run-dev devstore clean
+.PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev devstore clean
 
 help:
-	@echo "sync     create the environment and install dependencies"
+	@echo "sync     create the environment, install dependencies and git hooks"
+	@echo "hooks    install the pre-commit hook into .git"
 	@echo "ui       compile Blueprint .blp sources to .ui"
 	@echo "schemas  compile the GSettings schema"
 	@echo "check    run every pre-commit hook (lint, format, types)"
@@ -44,6 +45,12 @@ venv:
 
 sync: venv
 	UV_NO_SYNC=0 uv sync --all-extras $(NO_INSTALL)
+	$(MAKE) hooks
+
+# `check` only tells you about a problem after it is committed. This runs the
+# same hooks on the way in, which is the point at which they are still cheap.
+hooks:
+	uv run pre-commit install
 
 # Never hand-edit a .ui file: it is generated. Edit the .blp and run this.
 ui:
