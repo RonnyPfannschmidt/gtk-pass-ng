@@ -107,16 +107,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Coverage is a CI concern; forcing it here makes pytest-cov a hard dependency
+# of running a single test and writes htmlcov/ on every invocation.
 addopts = [
-    "-v",
+    "-ra",
     "--strict-markers",
-    "--cov=gtkpass",
-    "--cov-report=term-missing",
-    "--cov-report=html",
+    "--strict-config",
 ]
+xfail_strict = true
 markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
-    "acceptance: Acceptance tests",
+    "gui: Requires a display (run under xvfb)",
     "slow: Slow running tests",
+    "requires_gpg: Needs a working gpg binary",
+    "requires_pass: Needs the pass CLI",
 ]

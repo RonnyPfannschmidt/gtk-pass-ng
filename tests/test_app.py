@@ -1,20 +1,15 @@
-"""Unit tests for the main application."""
+"""Tests for the application object."""
 
 import pytest
 
+pytestmark = pytest.mark.gui
 
-@pytest.mark.unit
+
 class TestGTKPassApp:
-    """Test cases for the GTKPass application."""
-
-    @pytest.mark.skipif(
-        not pytest.importorskip("gi.repository.Gtk", minversion="4.0"),
-        reason="GTK4 not available",
-    )
-    def test_app_initialization(self):
-        """Test that the GTKPass application can be initialized."""
+    def test_can_be_constructed(self):
+        """Constructing the app must not create a window yet."""
         from gtkpass.app import GTKPassApp
 
         app = GTKPassApp()
-        assert app is not None
-        assert app.window is None  # Window not created until activated
+
+        assert app.window is None
