@@ -165,6 +165,39 @@ the whole home directory is exactly the thing a sandbox is meant to prevent.
 flatpak override --user --filesystem=/path/to/store io.github.RonnyPfannschmidt.GTKPass
 ```
 
+## The document portal
+
+GTKPass does not use it. There is no file chooser and nothing is exported
+through a portal: the store path comes from GSettings and the files are opened
+directly, which is what `--filesystem=~/.password-store` is for.
+
+Flatpak mounts it anyway. `flatpak run` binds
+`$XDG_RUNTIME_DIR/doc/by-app/$FLATPAK_ID` into every sandbox unconditionally —
+even a bare `flatpak run --command=sh org.gnome.Platform//50`, which has no
+filesystem permissions at all, fails when that path is missing. So it is not
+something the application asks for and not something it can decline.
+
+Two consequences, and neither is hypothetical:
+
+- Every document any application has exported through the portal is visible
+  inside a password manager, for no purpose.
+- If the portal is unavailable — its service running but its FUSE mount
+  absent, as happened here — **the application does not start**, with
+  `bwrap: Can't find source path .../doc/by-app/...` and nothing else.
+
+The only lever is `flatpak run --no-documents-portal`, which works; `make
+flatpak-run` passes it. It cannot be baked in:
+
+- `flatpak build-finish` has no such option, so it cannot go in `finish-args`.
+- `flatpak override` does not accept it either.
+- `X-Flatpak-RunOptions=--no-documents-portal` in the desktop file does not
+  work. Tested against flatpak 1.18.0: the key reaches the installed
+  application, is stripped during export, and the exported `Exec` is unchanged
+  — a plain `flatpak run` still mounts the portal.
+
+Anyone launching GTKPass from a desktop menu therefore gets the portal
+regardless. Changing that needs a flatpak feature that does not exist yet.
+
 ## The Secret Service backend
 
 `--talk-name=org.freedesktop.secrets` is granted, and `libsecret` is in the

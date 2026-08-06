@@ -110,8 +110,13 @@ flatpak:
 	flatpak-builder --force-clean --user --install --install-deps-from=flathub \
 		.flatpak-build $(FLATPAK_MANIFEST)
 
+# --no-documents-portal because this application opens no file chooser and
+# exports no document, so the portal is other applications' files mounted into
+# a password manager for nothing -- and one more thing whose absence stops it
+# launching. It has to be passed per run: no manifest or override option
+# expresses it, and X-Flatpak-RunOptions in the desktop file does not either.
 flatpak-run:
-	flatpak run $(FLATPAK_ID) $(ARGS)
+	flatpak run --no-documents-portal $(FLATPAK_ID) $(ARGS)
 
 # Flathub runs this on submission; it catches permission and metadata problems
 # that only show up during review.
