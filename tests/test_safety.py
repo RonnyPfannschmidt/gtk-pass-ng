@@ -17,8 +17,9 @@ SECRET = "correct-horse-battery-staple"
 
 
 def entry(content: str | None = SECRET) -> PasswordEntry:
-    return PasswordEntry(name="email/work", path=Path("/store/email/work.gpg"),
-                         content=content)
+    return PasswordEntry(
+        name="email/work", path=Path("/store/email/work.gpg"), content=content
+    )
 
 
 class TestSecretsStayOutOfText:
