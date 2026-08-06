@@ -31,9 +31,10 @@ manifest short:
 | `libsecret`, `libgpgme` | yes |
 | **`git`** | **no** |
 | **`libgit2`, `libssh2`** | **no** |
-| **`pass`** | **no** |
+| **`pass`**, **`tree`** | **no** |
 
-So GPG and SSH need permissions but no bundling. Git needs both.
+So GPG and SSH need permissions but no bundling. `pass`, `tree` and `git` are
+bundled as modules; see below.
 
 ## GPG
 
@@ -65,6 +66,24 @@ closest existing application, does. The whole of `~/.gnupg` is deliberately not
 granted: it holds `private-keys-v1.d`, which is exactly what the agent socket
 exists to keep out of reach.
 
+Both spellings of the keyring are granted because both are in the field.
+GnuPG 2.4 and later default to **keyboxd**, where `common.conf` says
+`use-keyboxd`, the keys live in `public-keys.d/pubring.db`, and `gpg` does not
+read that file directly at all — it asks the keyboxd daemon over a socket.
+Older setups keep a plain `pubring.kbx` that `gpg` reads itself. Flatpak skips
+a grant whose file does not exist, so listing both costs nothing.
+
+The keyboxd case works because `--socket=gpg-agent` turns out to expose the
+whole of `/run/user/$UID/gnupg`, `S.keyboxd` included, not just `S.gpg-agent`
+as its name and the documentation suggest. Verified in the built sandbox:
+`gpg --list-keys` returns the host's keys, served by the host's keyboxd.
+
+One consequence worth knowing when testing: you cannot point `GNUPGHOME` at a
+*different* keyring inside the sandbox. `gpg` then wants its own agent, and
+tries to create a socket under `/run/user/$UID/gnupg`, which is bound read-only
+from the host. It hangs rather than failing. Test against the real home, or
+outside the sandbox.
+
 Read-only works for GTKPass because `DirectBackend._encrypt_to_file` encrypts
 with `always_trust=True`, so `gpg` never has to write the trust database. An
 application that manages keys cannot get away with this;
@@ -73,7 +92,8 @@ application that manages keys cannot get away with this;
 
 ## SSH
 
-Only relevant once something talks to a remote, which today nothing does.
+Relevant because the bundled `pass` can drive `git` against a remote, though
+nothing in the interface asks it to yet.
 
 `--socket=ssh-auth` exposes `$SSH_AUTH_SOCK`, so an agent on the host does the
 authentication and the private key never enters the sandbox — the same shape as
@@ -87,37 +107,55 @@ Keys not loaded into an agent cannot be used without that filesystem grant.
 
 ## Git
 
-`git` is not in the runtime, so there are three ways to get it, in descending
-order of preference:
+`git` is not in the runtime. Three ways to get it, in descending order of
+preference:
 
-1. **Bundle libgit2** and drive it from Python (`pygit2`), which is what `gitg`
-   does. No subprocess, no PATH, and the library is small. `pygit2` needs
-   `libgit2` built as a module first.
-2. **Bundle the `git` binary** as a module. Straightforward — its dependencies
-   (curl, expat, zlib, openssl) are all in the runtime — but it is a large
-   module to maintain for what a password store actually needs, which is
-   `add`, `commit`, `pull` and `push`.
+1. **Bundle the `git` binary** as a module. Its dependencies (curl, expat,
+   zlib, openssl) are all in the runtime, so it is a plain autotools build.
+   This is what the manifest does, because `pass` drives `git` as a command and
+   nothing else would satisfy it.
+2. **Bundle libgit2** and drive it from Python (`pygit2`), which is what `gitg`
+   does. Smaller and subprocess-free, and the right choice if GTKPass ever
+   grows its own git support rather than delegating to `pass`.
 3. **`flatpak-spawn --host git`**, which needs
    `--talk-name=org.freedesktop.Flatpak`. Do not. See below.
 
-Either way `--share=network` is required, and ssh remotes additionally need the
-SSH permissions above.
+Either way `--share=network` is required to reach a remote, and ssh remotes
+additionally need the SSH permissions above.
+
+## Bundling pass, rather than borrowing the host's
+
+The Pass backend needs the `pass` executable, which is not in the runtime.
+There are two ways to get one, and they are not close in cost.
+
+`flatpak-spawn --host pass` asks the host to run it. That needs
+`--talk-name=org.freedesktop.Flatpak`, which is not a narrow hole for one
+command: it permits running *any* command on the host, outside the sandbox. For
+a password manager that is the end of the sandbox, and it is refused here.
+
+So `pass` is bundled and runs inside. It brings two dependencies of its own:
+
+- **`tree`**, because `pass ls` shells out to it. Without it, listing — the
+  backend's most basic operation — fails.
+- **`git`**, because `pass` commits to the store's repository by itself
+  whenever one is present. Without it, every write to a git-backed store fails.
+
+Both are small. `pass` itself is a bash script, and it uses the `gpg` and `ssh`
+already in the runtime, so nothing crosses the sandbox boundary except through
+the agent sockets.
+
+This is what makes `--socket=ssh-auth` and `--share=network` worth granting:
+`pass git push` reaches a remote over ssh, authenticated by the host's agent,
+with the private key never entering the sandbox. The interface has no sync
+button yet, so nothing triggers that today.
 
 ## What is refused, and why
 
-**`--talk-name=org.freedesktop.Flatpak`.** This is the one worth being explicit
-about. It permits `flatpak-spawn --host`, which runs arbitrary commands on the
-host outside the sandbox — it is not a narrow escape hatch, it is the end of
-the sandbox. `PassBackend` is written to use exactly this (`_is_flatpak()`
-switches it to `flatpak-spawn --host pass`), so **the Pass backend does not
-work in the packaged application**, by choice.
+**`--talk-name=org.freedesktop.Flatpak`**, as above.
 
-That costs little: `DirectBackend` reads and writes the same passwordstore
-format natively, using the `gpg` already in the runtime. The Pass backend
-remains useful outside the sandbox, where `pass` is on `PATH`.
-
-**`--share=network`.** Nothing in the application opens a socket. It becomes
-necessary the day git sync exists, and not before.
+**`--filesystem=~/.ssh:ro`.** It would provide `known_hosts`, but hands over
+every private key in the same grant; `~/.ssh` mixes both and there is no
+narrower spelling. The agent socket authenticates without them.
 
 **`--filesystem=home` or `--filesystem=host`.** A password manager asking for
 the whole home directory is exactly the thing a sandbox is meant to prevent.
@@ -149,6 +187,34 @@ every backend fails to load. A test asserts the manifest contains it.
 
 The guard protects developers from their own scratch code. It is not what
 protects the user's data in a packaged build — the sandbox is.
+
+## Why everything is built from source
+
+There is no way to install a prebuilt `git` or `openssh` into a Flatpak and
+share it between applications. The mechanism that would do it exists —
+**runtime extensions**, declared as `[Extension ...]` points in a runtime's
+metadata and mounted into the sandbox at a fixed directory — and it is how
+Mesa, VAAPI, GStreamer codecs, the icon themes and the whole
+`org.freedesktop.Sdk.Extension.*` family of toolchains are distributed once and
+used by many applications.
+
+Nobody publishes one for git or ssh. Flathub carries extensions for `golang`,
+`llvm`, `dotnet`, `node`, `haskell`, `mono`, `mingw-w64` and similar; a search
+for a git or openssh extension returns nothing. Creating one means publishing
+and maintaining a runtime extension of your own, which is only worth it with
+several consumers.
+
+`org.gnome.Sdk` *does* ship git, and its binaries do link only against
+libraries the Platform has (checked: libz, libpcre2, libcurl, libgcc_s, libc).
+Copying them into the application at build time would work today. It is still
+the wrong trade: the SDK is a build environment, not a redistribution channel,
+so nothing promises the next one stays Platform-compatible, and the failure
+would appear at runtime on a user's machine rather than during the build. The
+manifest would also stop describing what it ships — no version, no hash, and
+nothing for Flathub's update checker to follow.
+
+Building from source costs build time once, is cached by flatpak-builder
+afterwards, and states exactly which git is in the bundle.
 
 ## Still missing before this could go to Flathub
 

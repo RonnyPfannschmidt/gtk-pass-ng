@@ -1,7 +1,9 @@
 """Pass CLI backend for GTKPass.
 
-Delegates password operations to the `pass` command-line tool. Supports
-running in flatpak containers by using `flatpak-spawn --host pass`.
+Delegates password operations to the `pass` command-line tool, taken from PATH.
+The packaged application bundles its own copy, so a sandbox is not a special
+case: reaching the host's one would have meant `flatpak-spawn --host`, and the
+permission that allows is arbitrary command execution outside the sandbox.
 """
 
 import os
@@ -60,28 +62,20 @@ class PassBackend(PasswordBackend):
         """Initialize Pass backend.
 
         Args:
-            pass_cmd: Command to invoke pass (may include flatpak-spawn prefix)
+            pass_cmd: Command to invoke pass
             env: Environment variables for pass command
         """
         self._pass_cmd = pass_cmd
         self._env = env
-
-    @staticmethod
-    def _is_flatpak() -> bool:
-        """Check if running inside flatpak container."""
-        return os.path.exists("/.flatpak-info")
 
     @classmethod
     def is_available(cls) -> bool:
         """Check if Pass backend is available.
 
         Returns:
-            True if pass command is available (directly or via flatpak-spawn)
+            True if the pass command is on PATH
         """
-        if cls._is_flatpak():
-            return shutil.which("flatpak-spawn") is not None
-        else:
-            return shutil.which("pass") is not None
+        return shutil.which("pass") is not None
 
     @classmethod
     def create(cls, settings: PassBackendSettings | None = None) -> "PassBackend":
@@ -104,15 +98,13 @@ class PassBackend(PasswordBackend):
 
         ensure_store_allowed(settings.password_store_dir or default_store_dir())
 
-        # Detect environment and build command
-        if cls._is_flatpak():
-            if not shutil.which("flatpak-spawn"):
-                raise BackendError("flatpak-spawn not available")
-            pass_cmd = ["flatpak-spawn", "--host", "pass"]
-        else:
-            if not shutil.which("pass"):
-                raise BackendError("pass command not available")
-            pass_cmd = ["pass"]
+        # Always the pass on PATH. The packaged application bundles its own, so
+        # a sandbox needs no special case; asking the host to run it through
+        # `flatpak-spawn --host` would have meant granting arbitrary command
+        # execution outside the sandbox, which is the whole sandbox.
+        if not shutil.which("pass"):
+            raise BackendError("pass command not available")
+        pass_cmd = ["pass"]
 
         # Set up environment for pass command
         env = os.environ.copy()

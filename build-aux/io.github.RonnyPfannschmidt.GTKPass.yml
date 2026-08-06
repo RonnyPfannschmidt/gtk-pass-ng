@@ -43,6 +43,11 @@ finish-args:
   # The Secret Service backend talks to the session keyring.
   - --talk-name=org.freedesktop.secrets
 
+  # pass commits to the store's git repository when there is one, and reaches a
+  # remote over ssh. The key stays in the host's agent, as with GPG.
+  - --socket=ssh-auth
+  - --share=network
+
   # A packaged build is the application actually being used, so it opts in to
   # the guard in src/gtkpass/safety.py. Without this it would refuse its own
   # store and every backend would fail to load: the guard defaults to closed,
@@ -52,13 +57,14 @@ finish-args:
   # Deliberately NOT granted:
   #   --talk-name=org.freedesktop.Flatpak
   #     would let the Pass backend run `flatpak-spawn --host pass`, which is
-  #     arbitrary command execution on the host and undoes the sandbox
-  #     entirely. The Direct backend reads the same stores natively.
-  #   --share=network
-  #     nothing here talks to the network. Git sync would need it, and does not
-  #     exist yet.
-  #   --socket=ssh-auth, --filesystem=~/.ssh:ro
-  #     only useful once git over ssh exists.
+  #     arbitrary command execution on the host: not a hole in the sandbox but
+  #     the end of it. pass is bundled below instead, so it runs inside.
+  #   --filesystem=~/.ssh:ro
+  #     would hand over the private keys along with known_hosts. The agent
+  #     socket above does the authentication without them.
+  #   --filesystem=home, --filesystem=host
+  #     a password manager asking for the whole home directory is the thing a
+  #     sandbox exists to prevent.
 
 cleanup:
   - /include
@@ -86,6 +92,58 @@ modules:
   # and would pull an SDK extension in for one optional backend. Without it the
   # Secret Service backend reports itself unavailable, which it already handles.
   # See docs/FLATPAK.md.
+
+  # `pass ls` runs `tree`, which the runtime does not have. Without this the
+  # Pass backend cannot list anything, which is its most basic operation.
+  - name: tree
+    buildsystem: simple
+    build-commands:
+      - make PREFIX=${FLATPAK_DEST} MANDIR=${FLATPAK_DEST}/share/man install
+    sources:
+      - type: archive
+        url: https://gitlab.com/OldManProgrammer/unix-tree/-/archive/2.3.2/unix-tree-2.3.2.tar.gz
+        sha256: 513a53cbc42ca1f4ea06af2bab1f5283524a3848266b1d162416f8033afc4985
+
+  # git is not in the runtime either. pass commits to the store's repository by
+  # itself whenever one is present, so without git those writes fail on any
+  # git-backed store.
+  #
+  # NO_RUST is required, not an optimisation: git 2.55 builds libgitcore with
+  # cargo, and the GNOME SDK has no Rust toolchain. Without it the build stops
+  # at "cargo: command not found".
+  #
+  # The rest is trimming. pass drives only core git -- init, add, commit, rm,
+  # mv, push, pull -- so git-svn, git-p4, git-send-email and gitk are dead
+  # weight in the bundle.
+  - name: git
+    buildsystem: simple
+    build-commands:
+      - make configure
+      - ./configure --prefix=${FLATPAK_DEST} --without-tcltk --with-curl
+        --with-expat
+      - make NO_RUST=1 NO_PERL=1 NO_PYTHON=1 NO_TCLTK=1
+        -j$FLATPAK_BUILDER_N_JOBS all
+      - make NO_RUST=1 NO_PERL=1 NO_PYTHON=1 NO_TCLTK=1 install
+    sources:
+      - type: archive
+        url: https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz
+        sha256: 457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357
+        x-checker-data:
+          type: html
+          url: https://www.kernel.org/pub/software/scm/git/
+          version-pattern: git-([0-9.]+)\.tar\.xz
+
+  # pass itself: a bash script. It uses the gpg and the ssh in the runtime, and
+  # the tree and git above, so it runs entirely inside the sandbox.
+  - name: pass
+    buildsystem: simple
+    build-commands:
+      - make PREFIX=${FLATPAK_DEST} WITH_BASHCOMP=no WITH_ZSHCOMP=no
+        WITH_FISHCOMP=no install
+    sources:
+      - type: archive
+        url: https://git.zx2c4.com/password-store/snapshot/password-store-1.7.4.tar.xz
+        sha256: 4c2d0a8b99df8915a87099607a8d912fd05d30651b6f014745c14e4ca8dbbfb7
 
   - name: gtkpass
     buildsystem: simple

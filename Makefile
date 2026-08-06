@@ -100,7 +100,13 @@ run-dev: devstore
 
 # Builds against org.gnome.Sdk, which --install-deps-from pulls from Flathub on
 # the first run. That is a substantial download.
+#
+# The remote has to exist in the *user* installation: a system-wide flathub is
+# not visible to `--user --install-deps-from=flathub`, which fails with "No
+# remote refs found" however well configured the system one is.
 flatpak:
+	flatpak remote-add --user --if-not-exists \
+		flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 	flatpak-builder --force-clean --user --install --install-deps-from=flathub \
 		.flatpak-build $(FLATPAK_MANIFEST)
 
