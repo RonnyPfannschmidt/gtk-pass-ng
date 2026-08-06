@@ -2,22 +2,27 @@
 
 import importlib.resources
 import logging
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, Gtk, GLib  # noqa: E402
 from pathlib import Path
+
+from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-from gtkpass.backends.manager import BackendManager
-from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
-from gtkpass.backends.secretservice import SecretServiceBackend, SecretServiceBackendSettings
-from gtkpass.backends.pass_cli import PassBackend, PassBackendSettings
-from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 from gtkpass.backends import BackendError
+from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
+from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
+from gtkpass.backends.manager import BackendManager
+from gtkpass.backends.pass_cli import PassBackend, PassBackendSettings
+from gtkpass.backends.secretservice import (
+    SecretServiceBackend,
+    SecretServiceBackendSettings,
+)
 from gtkpass.config import get_backend_settings, get_settings
 
 # Imported for its side effect: the GType must be registered before the
@@ -25,9 +30,9 @@ from gtkpass.config import get_backend_settings, get_settings
 from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
 
 
-@Gtk.Template(filename=str(
-    importlib.resources.files("gtkpass.ui.blueprints") / "window.ui"
-))
+@Gtk.Template(
+    filename=str(importlib.resources.files("gtkpass.ui.blueprints") / "window.ui")
+)
 class GTKPassWindow(Adw.ApplicationWindow):
     """Main application window for GTKPass.
 
@@ -51,15 +56,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         """Initialize the main window."""
         super().__init__(**kwargs)
-        
+
         # Initialize backend manager and GSettings
         self.backend_manager = BackendManager()
         self.settings = get_settings()
         self.failed_backends = []  # Track backends that failed to load
-        
+
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
-        
+
         self._setup_actions()
         self._load_backends()
         self._setup_password_list()
@@ -70,18 +75,18 @@ class GTKPassWindow(Adw.ApplicationWindow):
         add_action = Gio.SimpleAction.new("add-password", None)
         add_action.connect("activate", self._on_add_password)
         self.add_action(add_action)
-    
+
     def _load_backends(self):
         """Load backend instances from GSettings."""
         try:
             instances = self.settings.get_value("backend-instances")
-            
+
             if len(instances) == 0:
                 logger.info("No backends configured in GSettings")
                 return
-            
+
             logger.info(f"Loading {len(instances)} backend(s)...")
-            
+
             for backend_id, backend_type in instances:
                 try:
                     logger.debug(f"Loading backend: {backend_id} ({backend_type})")
@@ -92,36 +97,44 @@ class GTKPassWindow(Adw.ApplicationWindow):
                             self.backend_manager.add_backend(backend_id, backend)
                             logger.info(f"Successfully loaded backend: {backend_id}")
                         else:
-                            logger.warning(f"Backend not available: {backend_id} ({backend_type})")
-                            self.failed_backends.append((backend_id, backend_type, "Backend not available"))
+                            logger.warning(
+                                f"Backend not available: {backend_id} ({backend_type})"
+                            )
+                            self.failed_backends.append(
+                                (backend_id, backend_type, "Backend not available")
+                            )
                     else:
-                        logger.error(f"Failed to load settings for backend: {backend_id}")
-                        self.failed_backends.append((backend_id, backend_type, "Failed to load settings"))
+                        logger.error(
+                            f"Failed to load settings for backend: {backend_id}"
+                        )
+                        self.failed_backends.append(
+                            (backend_id, backend_type, "Failed to load settings")
+                        )
                 except Exception as e:
                     logger.exception(f"Exception loading backend {backend_id}: {e}")
                     self.failed_backends.append((backend_id, backend_type, str(e)))
         except Exception as e:
             logger.exception(f"Error loading backends: {e}")
-    
+
     def _on_backends_changed(self, settings, key):
         """Handle backend configuration changes.
-        
+
         Args:
             settings: GSettings instance
             key: Changed key (backend-instances)
         """
         logger.info("Backend configuration changed, reloading...")
-        
+
         # Clear current backends
         self.backend_manager = BackendManager()
         self.failed_backends = []
-        
+
         # Reload backends
         self._load_backends()
-        
+
         # Refresh the password list
         self._load_passwords()
-    
+
     def _load_backend_settings(self, backend_id: str, backend_type: str):
         """Load settings for a specific backend instance."""
         try:
@@ -140,19 +153,21 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 use_git = backend_gsettings.get_boolean("use-git")
                 return PassBackendSettings(
                     password_store_dir=Path(store_dir) if store_dir else None,
-                    use_git=use_git
+                    use_git=use_git,
                 )
             elif backend_type == "direct":
                 store_dir = backend_gsettings.get_string("password-store-dir")
                 gpg_home = backend_gsettings.get_string("gpg-home")
                 return DirectBackendSettings(
                     password_store_dir=Path(store_dir) if store_dir else None,
-                    gpg_home=Path(gpg_home) if gpg_home else None
+                    gpg_home=Path(gpg_home) if gpg_home else None,
                 )
         except Exception as e:
-            logger.error(f"Error loading settings for {backend_type} backend {backend_id}: {e}")
+            logger.error(
+                f"Error loading settings for {backend_type} backend {backend_id}: {e}"
+            )
         return None
-    
+
     def _create_backend(self, backend_type: str, settings):
         """Create a backend instance from settings."""
         try:
@@ -174,64 +189,62 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """Set up the password list."""
         # Connect selection handler
         self.password_list.connect_password_selected(self._on_password_selected)
-        
+
         # Show warning for failed backends
         if len(self.failed_backends) > 0:
             self._show_backend_errors()
-        
+
         # Load passwords from backends
         self._load_passwords()
-    
+
     def _load_passwords(self):
         """Load passwords from all backends and display them."""
         # Clear existing tree
         self.password_list.clear_all()
-        
+
         # Get all backends (loaded and failed)
         loaded_backends = self.backend_manager.get_all_backends()
-        
+
         # Check if we have any backends configured
         if len(loaded_backends) == 0 and len(self.failed_backends) == 0:
             # No backends configured - show configuration prompt
             self._show_configuration_prompt()
             return
-        
+
         has_any_passwords = False
-        
+
         # Add each loaded backend as a root node
         for backend_id, backend in loaded_backends.items():
             # Determine icon based on backend type
             # Using green checkmark for available/healthy backends
             icon_name = "emblem-default-symbolic"  # Green checkmark
-            
+
             # Create friendly display name
             display_name = self._get_backend_display_name(backend_id)
-            
+
             # Add backend to tree
             backend_iter = self.password_list.add_backend(
-                backend_id=backend_id,
-                backend_name=display_name,
-                icon_name=icon_name
+                backend_id=backend_id, backend_name=display_name, icon_name=icon_name
             )
-            
+
             # Load passwords from this backend
             try:
                 passwords = list(backend.list_passwords())
                 logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
-                
+
                 if len(passwords) > 0:
                     has_any_passwords = True
-                    
+
                 # Add passwords under the backend
                 for password in sorted(passwords, key=lambda p: p.name):
                     self.password_list.add_password(
                         backend_iter=backend_iter,
                         name=password.name,
-                        full_path=password.name
+                        full_path=password.name,
                     )
             except Exception as e:
                 logger.error(f"Error loading passwords from {backend_id}: {e}")
-        
+
         # Add failed backends with error icon
         for backend_id, backend_type, error_msg in self.failed_backends:
             icon_name = "dialog-error-symbolic"  # Red error icon for unavailable
@@ -239,18 +252,17 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.password_list.add_backend(
                 backend_id=backend_id,
                 backend_name=f"{display_name} (unavailable)",
-                icon_name=icon_name
+                icon_name=icon_name,
             )
-        
+
         # Expand all backend nodes
         self.password_list.expand_first_level()
-        
+
         if not has_any_passwords and len(loaded_backends) > 0:
             # Backends loaded but no passwords
             self.placeholder_page.set_title("No Passwords Found")
             self.placeholder_page.set_description(
-                "Your password store is empty.\n"
-                "Add a password to get started."
+                "Your password store is empty.\nAdd a password to get started."
             )
             self.placeholder_page.set_icon_name("dialog-password-symbolic")
             # Drop the "Open Preferences" button that the configuration prompt
@@ -259,44 +271,55 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _get_backend_display_name(self, backend_id: str) -> str:
         """Get a user-friendly display name for a backend.
-        
+
         Args:
             backend_id: Backend identifier (e.g., "secretservice_1766234507")
-        
+
         Returns:
             Friendly display name (e.g., "Secret Service" or "Demo 1")
         """
         # Extract backend type from ID
-        parts = backend_id.split('_')
-        
+        parts = backend_id.split("_")
+
         if len(parts) >= 2 and parts[-1].isdigit():
             # It's a generated ID like "demo_1766234611"
-            backend_type = '_'.join(parts[:-1])
-            
+            backend_type = "_".join(parts[:-1])
+
             # Count how many of this type exist to give it a number
-            same_type_count = sum(1 for bid in self.backend_manager.get_all_backends().keys()
-                                if bid.startswith(backend_type + '_'))
-            
+            same_type_count = sum(
+                1
+                for bid in self.backend_manager.get_all_backends().keys()
+                if bid.startswith(backend_type + "_")
+            )
+
             # Map backend types to friendly names
             type_names = {
-                'demo': 'Demo',
-                'secretservice': 'Secret Service',
-                'pass': 'Pass',
-                'direct': 'Direct GPG'
+                "demo": "Demo",
+                "secretservice": "Secret Service",
+                "pass": "Pass",
+                "direct": "Direct GPG",
             }
             type_name = type_names.get(backend_type, backend_type.title())
-            
+
             # Return with number if there are multiple of the same type
             if same_type_count > 1:
                 # Calculate this one's position
-                position = sorted([bid for bid in self.backend_manager.get_all_backends().keys()
-                                 if bid.startswith(backend_type + '_')]).index(backend_id) + 1
+                position = (
+                    sorted(
+                        [
+                            bid
+                            for bid in self.backend_manager.get_all_backends().keys()
+                            if bid.startswith(backend_type + "_")
+                        ]
+                    ).index(backend_id)
+                    + 1
+                )
                 return f"{type_name} {position}"
             else:
                 return type_name
         else:
             # It's a custom name, just clean it up
-            return backend_id.replace('_', ' ').title()
+            return backend_id.replace("_", " ").title()
 
     def _show_configuration_prompt(self):
         """Show configuration prompt in main content area."""
@@ -307,30 +330,30 @@ class GTKPassWindow(Adw.ApplicationWindow):
             "Choose a backend in Preferences to get started."
         )
         self.placeholder_page.set_icon_name("preferences-system-symbolic")
-        
+
         # Add a button to the status page
         prefs_button = Gtk.Button(label="Open Preferences")
         prefs_button.add_css_class("suggested-action")
         prefs_button.add_css_class("pill")
         prefs_button.set_action_name("app.preferences")
         self.placeholder_page.set_child(prefs_button)
-    
+
     def _show_backend_errors(self):
         """Show a toast notification for failed backends."""
         if len(self.failed_backends) == 0:
             return
-        
+
         # Create error message
         if len(self.failed_backends) == 1:
             backend_id, backend_type, error = self.failed_backends[0]
             message = f"Backend '{backend_id}' ({backend_type}) failed: {error}"
         else:
             message = f"{len(self.failed_backends)} backend(s) failed to load"
-        
+
         # Show toast
         toast = Adw.Toast.new(message)
         toast.set_timeout(5)  # Show for 5 seconds
-        
+
         # Log the errors
         logger.warning(f"Failed backends: {message}")
         for backend_id, backend_type, error in self.failed_backends:
@@ -349,7 +372,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _on_password_selected(self, backend_id: str, password_name: str):
         """Handle password selection from the tree.
-        
+
         Args:
             backend_id: ID of the backend containing the password
             password_name: Name of the selected password

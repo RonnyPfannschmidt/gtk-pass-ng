@@ -1,15 +1,14 @@
 """Main GTKPass application class."""
 
-import sys
 import logging
-from typing import Optional
+import sys
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, Gtk, GLib  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from gtkpass.config import APP_ID  # noqa: E402
 
@@ -27,8 +26,8 @@ class GTKPassApp(Adw.Application):
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
             **kwargs,
         )
-        self.window: Optional[Gtk.ApplicationWindow] = None
-        
+        self.window: Gtk.ApplicationWindow | None = None
+
         # Add command-line options
         self.add_main_option(
             "debug",
@@ -46,29 +45,29 @@ class GTKPassApp(Adw.Application):
             "Set log level (DEBUG, INFO, WARNING, ERROR)",
             "LEVEL",
         )
-    
+
     def do_handle_local_options(self, options):
         """Handle command-line options."""
         # Configure logging based on options
         log_level = logging.INFO
-        
+
         if options.contains("debug"):
             log_level = logging.DEBUG
         elif options.contains("log-level"):
             level_str = options.lookup_value("log-level").get_string().upper()
             log_level = getattr(logging, level_str, logging.INFO)
-        
+
         logging.basicConfig(
             level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%H:%M:%S",
         )
-        
+
         logger.info("Starting GTKPass application")
         logger.debug(f"Log level: {logging.getLevelName(log_level)}")
-        
+
         return -1  # Continue processing
-    
+
     def do_command_line(self, command_line):
         """Handle command line."""
         self.activate()
@@ -110,7 +109,7 @@ class GTKPassApp(Adw.Application):
     def _on_preferences_action(self, action: Gio.SimpleAction, param):
         """Show the preferences window."""
         from gtkpass.ui.settings import SettingsWindow
-        
+
         settings_window = SettingsWindow(transient_for=self.window)
         settings_window.present()
 

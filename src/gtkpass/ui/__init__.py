@@ -1,6 +1,6 @@
 """UI components for GTKPass."""
 
-from gtkpass.ui.password_list import PasswordTreeView
 from gtkpass.ui.password_detail import PasswordDetailView
+from gtkpass.ui.password_list import PasswordTreeView
 
-__all__ = ["PasswordTreeView", "PasswordDetailView"]
+__all__ = ["PasswordDetailView", "PasswordTreeView"]

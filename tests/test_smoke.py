@@ -14,8 +14,7 @@ import pytest
 import gtkpass
 
 MODULE_NAMES = sorted(
-    module.name
-    for module in pkgutil.walk_packages(gtkpass.__path__, prefix="gtkpass.")
+    module.name for module in pkgutil.walk_packages(gtkpass.__path__, prefix="gtkpass.")
 )
 
 

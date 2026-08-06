@@ -9,14 +9,16 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
-from typing import Optional
 import importlib.resources
 
+from gi.repository import Adw, Gtk  # noqa: E402
 
-@Gtk.Template(filename=str(
-    importlib.resources.files("gtkpass.ui.blueprints") / "password_detail.ui"
-))
+
+@Gtk.Template(
+    filename=str(
+        importlib.resources.files("gtkpass.ui.blueprints") / "password_detail.ui"
+    )
+)
 class PasswordDetailView(Gtk.Box):
     """Password detail view widget.
 
@@ -27,13 +29,13 @@ class PasswordDetailView(Gtk.Box):
     - URL
     - Notes
     - Copy buttons for each field
-    
+
     Supports async loading with spinner and clears password from memory
     when view loses focus or selection changes.
     """
-    
+
     __gtype_name__ = "PasswordDetailView"
-    
+
     # Template children
     stack: Gtk.Stack = Gtk.Template.Child()
     spinner_box: Gtk.Box = Gtk.Template.Child()
@@ -51,12 +53,12 @@ class PasswordDetailView(Gtk.Box):
     def __init__(self, **kwargs):
         """Initialize the password detail view."""
         super().__init__(**kwargs)
-        
+
         # Set initial stack state
         self.stack.set_visible_child_name("content")
-        
+
         # Track current password entry for clearing
-        self._current_entry: Optional[object] = None  # PasswordEntry object
+        self._current_entry: object | None = None  # PasswordEntry object
 
     def show_loading(self):
         """Show loading spinner."""
@@ -90,33 +92,32 @@ class PasswordDetailView(Gtk.Box):
         self.password_row.set_text(password)
         self.url_row.set_subtitle(url or "—")
         self.notes_label.set_text(notes or "No notes")
-        
+
         self.hide_loading()
 
-    def set_password_entry(self, entry: Optional[object]):
+    def set_password_entry(self, entry: object | None):
         """Set the current password entry (for later clearing).
-        
+
         Args:
             entry: PasswordEntry object or None
         """
         # Clear previous entry if exists
-        if self._current_entry and hasattr(self._current_entry, 'clear_password'):
+        if self._current_entry and hasattr(self._current_entry, "clear_password"):
             self._current_entry.clear_password()
-        
+
         self._current_entry = entry
 
     def clear(self):
         """Clear all displayed password data and clear from memory."""
         # Clear from memory first
-        if self._current_entry and hasattr(self._current_entry, 'clear_password'):
+        if self._current_entry and hasattr(self._current_entry, "clear_password"):
             self._current_entry.clear_password()
         self._current_entry = None
-        
+
         # Clear UI
         self.set_password_data("", "", "", "", "")
-        
+
     def on_focus_lost(self):
         """Called when view loses focus - clears password from memory."""
-        if self._current_entry and hasattr(self._current_entry, 'clear_password'):
+        if self._current_entry and hasattr(self._current_entry, "clear_password"):
             self._current_entry.clear_password()
-

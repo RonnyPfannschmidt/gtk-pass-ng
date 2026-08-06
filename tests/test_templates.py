@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
 import pytest
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw  # noqa: E402
 
 from gtkpass.ui.password_detail import PasswordDetailView
 from gtkpass.ui.password_list import PasswordTreeView

@@ -1,23 +1,40 @@
 [project]
 name = "gtkpass"
-version = "0.0.1"
-description = "replacement for qtpass/pass-otp"
+description = "A GTK4/Libadwaita frontend for pluggable password backends"
 readme = "README.md"
-requires-python = ">=3.10"
-license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.11"
+license = "MPL-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Ronny Pfannschmidt", email = "opensource@ronnypfannschmidt.de"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dynamic = ["version"]
 dependencies = [
     "PyGObject>=3.42.0",
     "secretstorage>=3.3.0",
     "python-gnupg>=0.5.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/RonnyPfannschmidt/gtkpass"
+Issues = "https://github.com/RonnyPfannschmidt/gtkpass/issues"
+
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.0.0",
     "mypy>=1.0.0",
-    "ruff>=0.1.0",
+    "ruff==0.14.10",
+    "blueprint-compiler>=0.22.2",
 ]
 
 [project.scripts]
@@ -30,77 +47,44 @@ pass = "gtkpass.backends.pass_cli:PassBackend"
 direct = "gtkpass.backends.direct:DirectBackend"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools_scm]
+version_file = "src/gtkpass/_version.py"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The .ui files and demo.json are loaded at runtime via importlib.resources;
+# without these they are absent from the built wheel and the app fails on import.
+[tool.setuptools.package-data]
+"gtkpass.ui.blueprints" = ["*.ui", "*.blp"]
+"gtkpass.backends.data" = ["*.json"]
+
 [tool.ruff]
-# Exclude a variety of commonly ignored directories.
-exclude = [
-    ".bzr",
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".git-rewrite",
-    ".hg",
-    ".ipynb_checkpoints",
-    ".mypy_cache",
-    ".nox",
-    ".pants.d",
-    ".pyenv",
-    ".pytest_cache",
-    ".pytype",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    ".vscode",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "build",
-    "dist",
-    "node_modules",
-    "site-packages",
-    "venv",
-]
-
-# Same as Black.
 line-length = 88
-indent-width = 4
-
-# Assume Python 3.10
-target-version = "py310"
+target-version = "py311"
+extend-exclude = ["src/gtkpass/_version.py"]
 
 [tool.ruff.lint]
-# Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
-select = ["E", "F"]
-ignore = []
-
-# Allow fix for all enabled rules (when `--fix`) is provided.
-fixable = ["ALL"]
-unfixable = []
-
-# Allow unused variables when underscore-prefixed.
-dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
-
-[tool.ruff.format]
-# Like Black, use double quotes for strings.
-quote-style = "double"
-
-# Like Black, indent with spaces, rather than tabs.
-indent-style = "space"
-
-# Like Black, respect magic trailing commas.
-skip-magic-trailing-comma = false
-
-# Like Black, automatically detect the appropriate line ending.
-line-ending = "auto"
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 
 [tool.mypy]
-python_version = "3.10"
-warn_return_any = true
+python_version = "3.11"
+files = ["src", "tests", "examples"]
 warn_unused_configs = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+# Ratchet target; the tree is not clean enough for this yet.
 disallow_untyped_defs = false
+
+# None of these ship type information. Declaring them here is also what lets the
+# pre-commit hook run in its own isolated environment without PyGObject.
+[[tool.mypy.overrides]]
+module = ["gi.*", "gnupg.*", "secretstorage.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
