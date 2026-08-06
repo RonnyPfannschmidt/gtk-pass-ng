@@ -16,12 +16,22 @@ glib-compile-schemas data/ || exit 1
 # In devcontainer, the host runtime is mounted to /tmp/host-runtime
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/tmp/host-runtime/bus}"
 
-# This is the application actually being used, so it may open the real store.
-# Nothing else should: see src/gtkpass/safety.py.
-export GTKPASS_ALLOW_REAL_STORE=1
+# This is the application actually being used, so it may open the real store
+# and the keyring. Nothing else should: see src/gtkpass/safety.py.
+#
+# Defaulted rather than assigned, so a caller can turn it back off. `make
+# run-dev` passes 0: it launches through this script, and without the default
+# form it would inherit the opt-in and run with the guard disabled.
+export GTKPASS_ALLOW_REAL_STORE="${GTKPASS_ALLOW_REAL_STORE:-1}"
 
 # Unbuffer Python output for better logging visibility
 export PYTHONUNBUFFERED=1
+
+# Reuse the environment as-is. Without this uv re-resolves it and tries to build
+# PyGObject and pycairo from source, which fails: they are taken from the
+# distribution. The Makefile exports the same thing, so this only matters when
+# the script is run directly -- which the documentation tells people to do.
+export UV_NO_SYNC=1
 
 # Run the application with uv
 # Use --debug or -d for debug logging

@@ -83,9 +83,13 @@ DEV_GNUPGHOME := .dev/gnupg
 devstore:
 	./scripts/make-dev-store.sh $(DEV_STORE) $(DEV_GNUPGHOME)
 
+# The 0 matters. This launches through run_app.sh, which opts in to the real
+# store by default; without turning it back off the development run would have
+# the guard disabled. The scratch store is opened on its own merits -- it is
+# marked as throwaway -- and everything else stays refused.
 run-dev: devstore
 	PASSWORD_STORE_DIR=$(PWD)/$(DEV_STORE) GNUPGHOME=$(PWD)/$(DEV_GNUPGHOME) \
-		GTKPASS_ALLOW_REAL_STORE=1 ./run_app.sh $(ARGS)
+		GTKPASS_ALLOW_REAL_STORE=0 ./run_app.sh $(ARGS)
 
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/

@@ -152,9 +152,16 @@ entry it did not understand is preserved verbatim through an edit.
 
 The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
 
-- `safety.py` refuses `~/.password-store` and `$PASSWORD_STORE_DIR` unless
-  `GTKPASS_ALLOW_REAL_STORE` is set. Only `run_app.sh` sets it. The test suite
+- `safety.py` refuses `~/.password-store`, `$PASSWORD_STORE_DIR` and the
+  session keyring unless `GTKPASS_ALLOW_REAL_STORE` is set. `run_app.sh`
+  defaults it to 1, being the application actually being used; the test suite
   clears it, so an exported value cannot re-enable it for a run.
+- A store carrying a `.gtkpass-scratch-store` marker is not treated as real,
+  which is how `make run-dev` opens its own throwaway store without disabling
+  the guard for everything else. The default store location cannot be marked.
+- The keyring has no scratch equivalent: the Secret Service is whichever one
+  the session bus offers, so `is_available()` reports unavailable rather than
+  probing it, and `create()` refuses.
 - `PasswordEntry.__repr__` is redacted and `content` is excluded from it. The
   generated dataclass repr would have put plaintext into every log line,
   traceback and pytest assertion diff that rendered an entry.

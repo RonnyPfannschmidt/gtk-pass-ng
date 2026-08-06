@@ -72,10 +72,21 @@ The Makefile exports it for you.
 own GPG key, and `make run-dev` launches against it. Use those for manual
 testing and screenshots.
 
-The backends refuse `~/.password-store` and `$PASSWORD_STORE_DIR` unless
-`GTKPASS_ALLOW_REAL_STORE=1` is set. Only `run_app.sh` sets it, because that is
-the application actually being used. `conftest.py` clears it, so an exported
-value in your shell cannot re-enable it for a test run.
+The backends refuse `~/.password-store`, `$PASSWORD_STORE_DIR` and the session
+keyring unless `GTKPASS_ALLOW_REAL_STORE=1` is set. `run_app.sh` defaults it to
+1, because that is the application actually being used. `conftest.py` clears
+it, so an exported value in your shell cannot re-enable it for a test run.
+
+The development store is exempt on its own merits rather than by disabling the
+guard: `make devstore` writes a `.gtkpass-scratch-store` marker into it, and a
+marked directory is not treated as a real store even when `PASSWORD_STORE_DIR`
+points at it. That is why `make run-dev` passes `GTKPASS_ALLOW_REAL_STORE=0` —
+it launches through `run_app.sh` and has to turn the default back off, or the
+one command meant to be safe would be the one running unguarded. Delete the
+marker and the directory becomes a real store again.
+
+`~/.password-store` can never be marked scratch; a stray marker there would
+otherwise disarm the guard completely.
 
 Never print a decrypted value, and do not defeat the redacted
 `PasswordEntry.__repr__`.

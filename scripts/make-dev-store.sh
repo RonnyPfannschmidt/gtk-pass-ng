@@ -9,12 +9,23 @@ STORE="${1:-.dev/store}"
 GNUPG="${2:-.dev/gnupg}"
 KEY="gtkpass-dev@example.invalid"
 
+mkdir -p "$STORE" "$GNUPG"
+
+# Written before anything else and on every run, so a store created before this
+# marker existed picks it up too. It says outright that the store is disposable,
+# which is what lets the guard in src/gtkpass/safety.py open it even though
+# `make run-dev` points PASSWORD_STORE_DIR here. Without it the development
+# launcher had to disable the guard entirely, and then nothing was guarded.
+cat > "$STORE/.gtkpass-scratch-store" <<'MARKER'
+Created by scripts/make-dev-store.sh. Everything here is invented.
+Delete this file and gtkpass will treat the directory as a real store.
+MARKER
+
 if [ -f "$STORE/.gpg-id" ]; then
     echo "Development store already present at $STORE"
     exit 0
 fi
 
-mkdir -p "$STORE" "$GNUPG"
 chmod 700 "$GNUPG"
 export GNUPGHOME="$(cd "$GNUPG" && pwd)"
 

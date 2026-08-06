@@ -81,11 +81,20 @@ refuse a clear requested by an application that is not focused.
 
 ### Development safeguards
 
-Development and test code is blocked from opening the real store. The backends
-refuse `~/.password-store` and `$PASSWORD_STORE_DIR` unless
-`GTKPASS_ALLOW_REAL_STORE` is set, which only `run_app.sh` does; the test suite
-clears it. This exists because a decrypted password that reaches a terminal, a
-CI log or an AI assistant's transcript cannot be un-disclosed.
+Development and test code is blocked from opening the real store or the
+keyring. The backends refuse `~/.password-store`, `$PASSWORD_STORE_DIR` and the
+session Secret Service unless `GTKPASS_ALLOW_REAL_STORE` is set, which
+`run_app.sh` does by default; the test suite clears it. This exists because a
+decrypted password that reaches a terminal, a CI log or an AI assistant's
+transcript cannot be un-disclosed.
+
+The development store carries a marker file that exempts it, so the guard stays
+armed during a development run rather than being switched off wholesale. The
+default store location cannot be exempted this way.
+
+Note that this is a guard against mistakes by people working on GTKPass, not a
+security boundary. It is an environment variable: anything running as the user
+can set it.
 
 ### Not implemented
 

@@ -14,6 +14,8 @@ try:
 except ImportError:
     secretstorage = None  # type: ignore
 
+from gtkpass.safety import ensure_keyring_allowed, opted_in
+
 from . import (
     BackendError,
     BackendMetadata,
@@ -84,6 +86,15 @@ class SecretServiceBackend(PasswordBackend):
         if secretstorage is None:
             return False
 
+        # Probing opens the user's default collection, which is real secrets and
+        # may prompt them to unlock. Availability has to answer rather than
+        # raise, so this reports unavailable instead.
+        if not opted_in():
+            logger.debug(
+                "Not probing the keyring: %s is not set", "GTKPASS_ALLOW_REAL_STORE"
+            )
+            return False
+
         outcome: list[bool] = []
 
         def probe() -> None:
@@ -129,7 +140,13 @@ class SecretServiceBackend(PasswordBackend):
 
         Raises:
             BackendError: If backend is not available or initialization fails
+            RealStoreBlocked: If this is not the application being used
         """
+        # Before is_available(), which reports rather than raises: a caller that
+        # should not be here deserves to be told why, not left with a bland
+        # "not available".
+        ensure_keyring_allowed()
+
         if not cls.is_available():
             raise BackendError(f"{cls.metadata.name} backend is not available")
 

@@ -12,13 +12,24 @@ print lands in a terminal, a CI log, or an AI assistant's transcript, and a
 decrypted password cannot be un-disclosed.
 
 - `make devstore` creates a throwaway store under `.dev/` with invented
-  passwords and its own GPG key. Use it for manual testing and screenshots.
-- `make run-dev` launches the application against that store.
-- The backends refuse the real store unless `GTKPASS_ALLOW_REAL_STORE=1` is set.
-  Only `run_app.sh` sets it, because that is the application actually being
-  used. If you are reaching for that variable in anything else, stop.
+  passwords and its own GPG key. Use it for manual testing and screenshots. It
+  drops a `.gtkpass-scratch-store` marker, which is what lets the guard open
+  that store while still refusing everything else.
+- `make run-dev` launches against it **with the guard still armed**. It passes
+  `GTKPASS_ALLOW_REAL_STORE=0` on purpose: it goes through `run_app.sh`, which
+  opts in by default, and without turning that back off the development run
+  would be the one thing running unguarded.
+- The backends refuse the real store, and the keyring, unless
+  `GTKPASS_ALLOW_REAL_STORE=1`. `run_app.sh` defaults it to 1 because that is
+  the application actually being used. If you are reaching for that variable in
+  anything else, stop.
 - The test suite clears the variable in `conftest.py`, so an exported value in
   your shell cannot re-enable it for a run.
+
+The keyring is covered too, not just the file stores.
+`SecretServiceBackend.is_available()` opens the user's default collection and
+can prompt them to unlock it, so without the opt-in it reports unavailable
+instead of probing, and `create()` refuses outright.
 
 Never print a decrypted value. `PasswordEntry.__repr__` is redacted on purpose:
 the generated dataclass repr would have put plaintext into every log line,
