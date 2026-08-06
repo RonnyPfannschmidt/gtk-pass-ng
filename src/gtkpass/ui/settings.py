@@ -3,15 +3,10 @@
 Provides UI for configuring backends and application settings.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 from pathlib import Path
+from typing import ClassVar
 
-from gi.repository import Adw, GObject, Gtk
-
+from gtkpass._gi import Adw, GLib, GObject, Gtk
 from gtkpass.backends import BackendSettings
 from gtkpass.backends.demo import DemoBackendSettings
 from gtkpass.backends.direct import DirectBackendSettings
@@ -23,7 +18,7 @@ from gtkpass.config import get_backend_settings, get_settings
 class BackendSettingsRow(Adw.PreferencesRow):
     """Row for managing backend instance settings."""
 
-    __gsignals__ = {
+    __gsignals__: ClassVar[dict] = {
         "remove-backend": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "settings-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
@@ -451,8 +446,6 @@ class SettingsWindow(Adw.PreferencesWindow):
             )
 
         # Save instance list
-        from gi.repository import GLib
-
         variant = GLib.Variant("a(ss)", instances)
         self.settings.set_value("backend-instances", variant)
 

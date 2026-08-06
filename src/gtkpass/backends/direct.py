@@ -40,7 +40,8 @@ class DirectBackendSettings(BackendSettings):
     """Settings for direct GPG backend.
 
     Attributes:
-        password_store_dir: Path to password store (None = use $PASSWORD_STORE_DIR or ~/.password-store)
+        password_store_dir: Path to password store
+            (None = use $PASSWORD_STORE_DIR or ~/.password-store)
         gpg_home: Optional GPG home directory (None = use default)
     """
 

@@ -160,8 +160,8 @@ class SecretServiceBackend(PasswordBackend):
         Returns:
             List of secret items
         """
-        # Get all items from the collection instead of filtering by application
-        # This allows us to see all passwords in the keyring, not just gtkpass-created ones
+        # Get all items from the collection instead of filtering by application.
+        # This shows every keyring password, not only gtkpass-created ones.
         if name:
             # If a specific name is requested, search for it
             attributes = {"application": self.APPLICATION_NAME, "name": name}
@@ -204,7 +204,7 @@ class SecretServiceBackend(PasswordBackend):
                     results.append(metadata)
 
         except Exception as e:
-            raise BackendError(f"Failed to list passwords: {e}")
+            raise BackendError(f"Failed to list passwords: {e}") from e
 
         return sorted(results, key=lambda x: x.name)
 
@@ -252,7 +252,7 @@ class SecretServiceBackend(PasswordBackend):
         except FileNotFoundError:
             raise
         except Exception as e:
-            raise BackendError(f"Failed to get password '{name}': {e}")
+            raise BackendError(f"Failed to get password '{name}': {e}") from e
 
     def add_password(self, name: str, content: str, commit: bool = True) -> None:
         """Add a new password entry.
@@ -302,7 +302,7 @@ class SecretServiceBackend(PasswordBackend):
         except FileExistsError:
             raise
         except Exception as e:
-            raise BackendError(f"Failed to add password '{name}': {e}")
+            raise BackendError(f"Failed to add password '{name}': {e}") from e
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         """Edit an existing password entry.
@@ -351,7 +351,7 @@ class SecretServiceBackend(PasswordBackend):
         except FileNotFoundError:
             raise
         except Exception as e:
-            raise BackendError(f"Failed to edit password '{name}': {e}")
+            raise BackendError(f"Failed to edit password '{name}': {e}") from e
 
     def delete_password(self, name: str, commit: bool = True) -> None:
         """Delete a password entry.
@@ -376,7 +376,7 @@ class SecretServiceBackend(PasswordBackend):
         except FileNotFoundError:
             raise
         except Exception as e:
-            raise BackendError(f"Failed to delete password '{name}': {e}")
+            raise BackendError(f"Failed to delete password '{name}': {e}") from e
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         """Move/rename a password entry.
@@ -412,7 +412,7 @@ class SecretServiceBackend(PasswordBackend):
         except (FileNotFoundError, FileExistsError):
             raise
         except Exception as e:
-            raise BackendError(f"Failed to move password: {e}")
+            raise BackendError(f"Failed to move password: {e}") from e
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         """Copy a password entry.

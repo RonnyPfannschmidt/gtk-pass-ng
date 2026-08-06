@@ -3,14 +3,8 @@
 import logging
 import sys
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
-
-from gtkpass.config import APP_ID  # noqa: E402
+from gtkpass._gi import Adw, Gio, GLib, Gtk
+from gtkpass.config import APP_ID
 
 # Setup logging
 logger = logging.getLogger(__name__)

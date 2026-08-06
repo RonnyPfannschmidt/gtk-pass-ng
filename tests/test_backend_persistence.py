@@ -5,13 +5,9 @@ conformance suite in ``test_backend_contract.py``, which runs it against every
 registered backend rather than one hand-picked implementation.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 import pytest
-from gi.repository import Adw  # noqa: E402
+
+from gtkpass._gi import Adw
 
 pytestmark = pytest.mark.gui
 

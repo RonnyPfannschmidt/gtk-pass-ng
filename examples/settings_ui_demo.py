@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Quick test script for settings UI."""
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 import sys
 
-from gi.repository import Adw
-
+from gtkpass._gi import Adw
 from gtkpass.ui.settings import SettingsWindow
 
 

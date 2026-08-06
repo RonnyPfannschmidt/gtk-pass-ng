@@ -5,11 +5,7 @@ file, the icon, the AppStream component, the WM class — has to be one and the
 same string, so it is defined once here.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-
-from gi.repository import Gio  # noqa: E402
+from gtkpass._gi import Gio
 
 #: Reverse-DNS application identifier, following the GNOME/Flathub convention.
 APP_ID = "io.github.RonnyPfannschmidt.GTKPass"

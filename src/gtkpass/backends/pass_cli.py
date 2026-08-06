@@ -25,7 +25,8 @@ class PassBackendSettings(BackendSettings):
     """Settings for Pass CLI backend.
 
     Attributes:
-        password_store_dir: Optional path to password store (None = use $PASSWORD_STORE_DIR or ~/.password-store)
+        password_store_dir: Optional path to password store
+            (None = use $PASSWORD_STORE_DIR or ~/.password-store)
         use_git: Whether to enable git operations (default: True)
     """
 
@@ -146,9 +147,9 @@ class PassBackend(PasswordBackend):
             )
             return result
         except subprocess.CalledProcessError as e:
-            raise BackendError(f"pass command failed: {e.stderr}")
+            raise BackendError(f"pass command failed: {e.stderr}") from e
         except Exception as e:
-            raise BackendError(f"Failed to run pass: {e}")
+            raise BackendError(f"Failed to run pass: {e}") from e
 
     def list_passwords(self, prefix: str = "") -> list[PasswordMetadata]:
         """List all passwords, optionally filtered by prefix.
@@ -194,7 +195,7 @@ class PassBackend(PasswordBackend):
         except BackendError:
             raise
         except Exception as e:
-            raise BackendError(f"Failed to list passwords: {e}")
+            raise BackendError(f"Failed to list passwords: {e}") from e
 
     def get_password(self, name: str) -> PasswordEntry:
         """Get a specific password entry.
@@ -221,7 +222,7 @@ class PassBackend(PasswordBackend):
 
         except BackendError as e:
             if "is not in the password store" in str(e):
-                raise FileNotFoundError(f"Password '{name}' not found")
+                raise FileNotFoundError(f"Password '{name}' not found") from e
             raise
 
     def add_password(self, name: str, content: str, commit: bool = True) -> None:
@@ -239,7 +240,7 @@ class PassBackend(PasswordBackend):
         try:
             # pass insert uses stdin
             result = subprocess.run(
-                self._pass_cmd + ["insert", "-m", name],
+                [*self._pass_cmd, "insert", "-m", name],
                 input=content,
                 capture_output=True,
                 text=True,
@@ -253,7 +254,7 @@ class PassBackend(PasswordBackend):
         except (FileExistsError, BackendError):
             raise
         except Exception as e:
-            raise BackendError(f"Failed to add password '{name}': {e}")
+            raise BackendError(f"Failed to add password '{name}': {e}") from e
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         """Edit an existing password entry.
@@ -270,7 +271,7 @@ class PassBackend(PasswordBackend):
         # pass doesn't have a direct edit command, use insert with force
         try:
             result = subprocess.run(
-                self._pass_cmd + ["insert", "-m", "-f", name],
+                [*self._pass_cmd, "insert", "-m", "-f", name],
                 input=content,
                 capture_output=True,
                 text=True,
@@ -284,7 +285,7 @@ class PassBackend(PasswordBackend):
         except (FileNotFoundError, BackendError):
             raise
         except Exception as e:
-            raise BackendError(f"Failed to edit password '{name}': {e}")
+            raise BackendError(f"Failed to edit password '{name}': {e}") from e
 
     def delete_password(self, name: str, commit: bool = True) -> None:
         """Delete a password entry.
@@ -306,7 +307,7 @@ class PassBackend(PasswordBackend):
         except (FileNotFoundError, BackendError):
             raise
         except Exception as e:
-            raise BackendError(f"Failed to delete password '{name}': {e}")
+            raise BackendError(f"Failed to delete password '{name}': {e}") from e
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         """Move/rename a password entry.
@@ -330,7 +331,7 @@ class PassBackend(PasswordBackend):
         except (FileNotFoundError, BackendError):
             raise
         except Exception as e:
-            raise BackendError(f"Failed to move password: {e}")
+            raise BackendError(f"Failed to move password: {e}") from e
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         """Copy a password entry.
@@ -354,7 +355,7 @@ class PassBackend(PasswordBackend):
         except (FileNotFoundError, BackendError):
             raise
         except Exception as e:
-            raise BackendError(f"Failed to copy password: {e}")
+            raise BackendError(f"Failed to copy password: {e}") from e
 
     def search(self, query: str) -> list[PasswordMetadata]:
         """Search for passwords matching query.
@@ -383,4 +384,4 @@ class PassBackend(PasswordBackend):
             return sorted(passwords, key=lambda x: x.name)
 
         except Exception as e:
-            raise BackendError(f"Search failed: {e}")
+            raise BackendError(f"Search failed: {e}") from e

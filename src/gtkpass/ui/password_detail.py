@@ -4,14 +4,9 @@ This module provides the detail view that displays full password information
 when a password is selected from the list.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 import importlib.resources
 
-from gi.repository import Adw, Gtk  # noqa: E402
+from gtkpass._gi import Adw, Gtk
 
 
 @Gtk.Template(

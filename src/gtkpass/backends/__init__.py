@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 
 @dataclass
@@ -148,7 +147,9 @@ class PasswordBackend(ABC):
         try:
             return cls(settings=settings)
         except Exception as e:
-            raise BackendError(f"Failed to initialize {cls.metadata.name} backend: {e}")
+            raise BackendError(
+                f"Failed to initialize {cls.metadata.name} backend: {e}"
+            ) from e
 
     @abstractmethod
     def list_passwords(self, prefix: str = "") -> list[PasswordMetadata]:

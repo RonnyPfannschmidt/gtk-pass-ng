@@ -14,13 +14,9 @@ os.environ["GSETTINGS_SCHEMA_DIR"] = os.path.join(
     os.path.dirname(__file__), "..", "data"
 )
 
-import gi
-
-gi.require_version("Gio", "2.0")
 from pathlib import Path
 
-from gi.repository import Gio, GLib
-
+from gtkpass._gi import Gio, GLib
 from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
 from gtkpass.backends.manager import BackendManager
 

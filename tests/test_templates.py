@@ -6,14 +6,9 @@ half-works: it starts, and blows up later on whichever code path touches the
 missing widget.  These tests turn that into an import-time-ish failure.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 import pytest
-from gi.repository import Adw  # noqa: E402
 
+from gtkpass._gi import Adw
 from gtkpass.ui.password_detail import PasswordDetailView
 from gtkpass.ui.password_list import PasswordTreeView
 

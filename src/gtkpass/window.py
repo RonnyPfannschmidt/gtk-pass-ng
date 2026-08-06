@@ -2,18 +2,9 @@
 
 import importlib.resources
 import logging
-
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 from pathlib import Path
 
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
-
-logger = logging.getLogger(__name__)
-
+from gtkpass._gi import Adw, Gio, Gtk
 from gtkpass.backends import BackendError
 from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
 from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
@@ -28,6 +19,8 @@ from gtkpass.config import get_backend_settings, get_settings
 # Imported for its side effect: the GType must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
 from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
 @Gtk.Template(
@@ -246,7 +239,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 logger.error(f"Error loading passwords from {backend_id}: {e}")
 
         # Add failed backends with error icon
-        for backend_id, backend_type, error_msg in self.failed_backends:
+        for backend_id, _backend_type, _error in self.failed_backends:
             icon_name = "dialog-error-symbolic"  # Red error icon for unavailable
             display_name = self._get_backend_display_name(backend_id)
             self.password_list.add_backend(
@@ -288,7 +281,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             # Count how many of this type exist to give it a number
             same_type_count = sum(
                 1
-                for bid in self.backend_manager.get_all_backends().keys()
+                for bid in self.backend_manager.get_all_backends()
                 if bid.startswith(backend_type + "_")
             )
 
@@ -308,7 +301,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                     sorted(
                         [
                             bid
-                            for bid in self.backend_manager.get_all_backends().keys()
+                            for bid in self.backend_manager.get_all_backends()
                             if bid.startswith(backend_type + "_")
                         ]
                     ).index(backend_id)

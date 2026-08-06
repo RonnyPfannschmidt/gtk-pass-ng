@@ -119,7 +119,7 @@ class BackendManager:
         """
         return [
             self._backend_classes[backend_id]
-            for backend_id in self._backends.keys()
+            for backend_id in self._backends
             if backend_id in self._backend_classes
         ]
 

@@ -5,14 +5,9 @@ its passwords.  That path was silently broken for months because nothing
 exercised it.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 import pytest
-from gi.repository import Adw, GLib  # noqa: E402
 
+from gtkpass._gi import Adw, GLib
 from gtkpass.config import get_settings
 
 pytestmark = pytest.mark.gui

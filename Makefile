@@ -2,14 +2,33 @@
 # definition of what "check the project" means.
 
 BLUEPRINTS := src/gtkpass/ui/blueprints
+
+# PyGObject and pycairo ship as source distributions only, so uv would compile
+# them -- which needs cairo, girepository and GTK development headers, and fails
+# on a machine that has the runtime but not the -devel packages. Take them from
+# the distribution instead: they are already built against the system GTK, which
+# is the version the application actually runs on.
+#
+# Two things are required for that to work. The environment has to be created
+# against the *system* interpreter, because a uv-managed Python's site-packages
+# does not contain the distribution's bindings. And the packages have to be
+# excluded from the sync explicitly.
+SYSTEM_PROVIDED := pygobject pycairo
+NO_INSTALL := $(foreach package,$(SYSTEM_PROVIDED),--no-install-package $(package))
+SYSTEM_PYTHON ?= /usr/bin/python3
+
+# Every target below reuses the environment as-is rather than re-resolving it;
+# without this `uv run` re-syncs and tries to build the excluded packages again.
+export UV_NO_SYNC := 1
+
 # GTK4 has no usable headless backend, and a private bus keeps the tests away
 # from the developer's real keyring.
 HEADLESS := xvfb-run -a dbus-run-session --
 
-.PHONY: help sync ui schemas check test test-gui build run clean
+.PHONY: help venv sync ui schemas check test test-gui build run clean
 
 help:
-	@echo "sync     install the project and its dev dependencies"
+	@echo "sync     create the environment and install dependencies"
 	@echo "ui       compile Blueprint .blp sources to .ui"
 	@echo "schemas  compile the GSettings schema"
 	@echo "check    run every pre-commit hook (lint, format, types)"
@@ -18,8 +37,11 @@ help:
 	@echo "run      launch the application"
 	@echo "clean    remove build and cache artefacts"
 
-sync:
-	uv sync --all-extras
+venv:
+	uv venv --system-site-packages --python $(SYSTEM_PYTHON)
+
+sync: venv
+	UV_NO_SYNC=0 uv sync --all-extras $(NO_INSTALL)
 
 # Never hand-edit a .ui file: it is generated. Edit the .blp and run this.
 ui:

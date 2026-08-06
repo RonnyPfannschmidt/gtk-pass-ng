@@ -4,15 +4,10 @@ This module provides the password list view that displays passwords grouped
 by backend in a hierarchical tree structure.
 """
 
-import gi
-
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-
 import importlib.resources
 from collections.abc import Callable
 
-from gi.repository import Gtk  # noqa: E402
+from gtkpass._gi import Gtk
 
 
 @Gtk.Template(
