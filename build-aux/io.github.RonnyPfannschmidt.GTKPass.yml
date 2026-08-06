@@ -1,0 +1,112 @@
+# Flatpak manifest for GTKPass.
+#
+# Build and install locally:
+#   make flatpak
+#   make flatpak-run
+#
+# Every permission below is deliberate; docs/FLATPAK.md explains the reasoning
+# and what was rejected. A password manager should be able to justify each one.
+app-id: io.github.RonnyPfannschmidt.GTKPass
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: gtkpass
+
+finish-args:
+  # Display and input.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+
+  # The store. Its whole purpose is this directory, so it is granted by
+  # default; :create because adding an entry may have to make it first. A store
+  # kept elsewhere needs an override:
+  #   flatpak override --user --filesystem=/path/to/store io.github.RonnyPfannschmidt.GTKPass
+  - --filesystem=~/.password-store:create
+
+  # Decryption happens in the host's gpg-agent, reached over this socket. No
+  # private key ever enters the sandbox, and the passphrase prompt is the
+  # host's own pinentry. Requires a running agent; systemd socket activation
+  # normally sees to that.
+  - --socket=gpg-agent
+
+  # gpg still has to read the public keyring to resolve recipients by name.
+  # Read-only, and only the files that answer that question -- not the whole of
+  # ~/.gnupg, which holds the private keys the agent is there to keep away.
+  # Writing is not needed: the backend encrypts with always_trust, so gpg never
+  # updates the trust database.
+  - --filesystem=~/.gnupg/pubring.kbx:ro
+  - --filesystem=~/.gnupg/public-keys.d/pubring.db:ro
+  - --filesystem=~/.gnupg/common.conf:ro
+
+  # The Secret Service backend talks to the session keyring.
+  - --talk-name=org.freedesktop.secrets
+
+  # A packaged build is the application actually being used, so it opts in to
+  # the guard in src/gtkpass/safety.py. Without this it would refuse its own
+  # store and every backend would fail to load: the guard defaults to closed,
+  # and only run_app.sh sets this in a checkout.
+  - --env=GTKPASS_ALLOW_REAL_STORE=1
+
+  # Deliberately NOT granted:
+  #   --talk-name=org.freedesktop.Flatpak
+  #     would let the Pass backend run `flatpak-spawn --host pass`, which is
+  #     arbitrary command execution on the host and undoes the sandbox
+  #     entirely. The Direct backend reads the same stores natively.
+  #   --share=network
+  #     nothing here talks to the network. Git sync would need it, and does not
+  #     exist yet.
+  #   --socket=ssh-auth, --filesystem=~/.ssh:ro
+  #     only useful once git over ssh exists.
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - '*.la'
+  - '*.a'
+
+modules:
+  # Pure Python, built from the sdist. The only runtime dependency that is not
+  # already in the runtime: PyGObject and pycairo ship with org.gnome.Platform.
+  - name: python3-gnupg
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-build-isolation --prefix=${FLATPAK_DEST} .
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/42/d0/72a14a79f26c6119b281f6ccc475a787432ef155560278e60df97ce68a86/python-gnupg-0.5.5.tar.gz
+        sha256: 3fdcaf76f60a1b948ff8e37dc398d03cf9ce7427065d583082b92da7a4ff5a63
+        x-checker-data:
+          type: pypi
+          name: python-gnupg
+
+  # secretstorage is not bundled: it needs cryptography, which is a Rust build
+  # and would pull an SDK extension in for one optional backend. Without it the
+  # Secret Service backend reports itself unavailable, which it already handles.
+  # See docs/FLATPAK.md.
+
+  - name: gtkpass
+    buildsystem: simple
+    build-options:
+      env:
+        # setuptools-scm reads the version from git tags, and the build sandbox
+        # has no repository to read.
+        SETUPTOOLS_SCM_PRETEND_VERSION: '0.1.0'
+    build-commands:
+      - pip3 install --verbose --no-deps --no-build-isolation --prefix=${FLATPAK_DEST} .
+      - install -Dm644 data/${FLATPAK_ID}.desktop
+        ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 data/${FLATPAK_ID}.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+      - install -Dm644 data/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      # GLib reads the compiled blob and ignores the XML, so the schema has to
+      # be installed and compiled or every settings lookup aborts the process.
+      - install -Dm644 data/${FLATPAK_ID}.gschema.xml
+        ${FLATPAK_DEST}/share/glib-2.0/schemas/${FLATPAK_ID}.gschema.xml
+      - glib-compile-schemas ${FLATPAK_DEST}/share/glib-2.0/schemas
+    sources:
+      - type: dir
+        path: ..

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.RonnyPfannschmidt.GTKPass</id>
+  <launchable type="desktop-id">io.github.RonnyPfannschmidt.GTKPass.desktop</launchable>
+
+  <name>GTKPass</name>
+  <summary>Browse and edit your password store</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MPL-2.0</project_license>
+
+  <developer id="io.github.ronnypfannschmidt">
+    <name>Ronny Pfannschmidt</name>
+  </developer>
+
+  <description>
+    <p>
+      GTKPass is a GTK4 and Libadwaita frontend for password stores. It stores
+      nothing itself and owns no format: a backend does that, and GTKPass shows
+      the result.
+    </p>
+    <p>
+      Entries are read through pluggable backends, so a store written by pass
+      stays readable by pass. Several can be configured at once and appear side
+      by side.
+    </p>
+    <p>Supported backends:</p>
+    <ul>
+      <li>GPG-encrypted files in the passwordstore layout, handled natively</li>
+      <li>The pass command line tool</li>
+      <li>The Secret Service keyring offered by GNOME or KDE</li>
+      <li>A demo backend of invented entries, for trying the interface out</li>
+    </ul>
+    <p>
+      Decryption runs off the interface thread and secrets are dropped again
+      when the view moves on. Copying a field clears the clipboard after a
+      configurable delay.
+    </p>
+  </description>
+
+  <content_rating type="oars-1.1"/>
+
+  <url type="homepage">https://github.com/RonnyPfannschmidt/gtkpass</url>
+  <url type="bugtracker">https://github.com/RonnyPfannschmidt/gtkpass/issues</url>
+  <url type="vcs-browser">https://github.com/RonnyPfannschmidt/gtkpass</url>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#c0bfbc</color>
+    <color type="primary" scheme_preference="dark">#3d3846</color>
+  </branding>
+
+  <releases>
+    <release version="0.1.0" type="development" date="2026-08-06">
+      <description>
+        <p>
+          Early development build. Browsing, opening and editing entries work;
+          adding and deleting them do not yet.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

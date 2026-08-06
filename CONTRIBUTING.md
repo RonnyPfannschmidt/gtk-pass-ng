@@ -204,7 +204,8 @@ Security is critical. Follow these practices:
 
 All contributions go through code review:
 
-1. **Automated Checks**: CI runs tests, linting, type checking
+1. **Automated Checks**: the pre-commit hook runs lint, format and types on
+   the way in. There is no CI, so `make test` is run by hand.
 2. **Manual Review**: Maintainers review code quality and design
 3. **Testing**: Reviewers may test functionality manually
 4. **Feedback**: Address review comments and update PR
@@ -226,7 +227,7 @@ Contributors will be:
 
 ## License
 
-By contributing to GTKPass, you agree that your contributions will be licensed under the GPL-3.0 License.
+By contributing to GTKPass, you agree that your contributions will be licensed under the MPL-2.0 License.
 
 ## Getting Help
 

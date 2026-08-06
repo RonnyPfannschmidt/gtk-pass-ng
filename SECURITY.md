@@ -183,7 +183,7 @@ For security concerns, contact the maintainers through:
 ## Related Security Documentation
 
 - [REQUIREMENTS.md - Security Requirements](REQUIREMENTS.md#2-security-and-safety)
-- [ARCHITECTURE.md - Security Architecture](ARCHITECTURE.md#security-architecture)
+- [ARCHITECTURE.md - Handling secrets](ARCHITECTURE.md#handling-secrets)
 - [passwordstore security](https://www.passwordstore.org/)
 - [GPG Best Practices](https://riseup.net/en/security/message-security/openpgp/best-practices)
 
@@ -218,8 +218,8 @@ Security researchers who report vulnerabilities responsibly will be acknowledged
 
 ## License
 
-This security policy is part of GTKPass and is licensed under GPL-3.0.
+This security policy is part of GTKPass and is licensed under MPL-2.0.
 
 ---
 
-**Last Updated**: December 2024
+**Last Updated**: August 2026

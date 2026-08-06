@@ -99,7 +99,7 @@ it is, and does not generate codes.
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+MPL-2.0. See [LICENSE](LICENSE).
 
 ## Acknowledgments
 

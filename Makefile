@@ -25,7 +25,11 @@ export UV_NO_SYNC := 1
 # from the developer's real keyring.
 HEADLESS := xvfb-run -a dbus-run-session --
 
-.PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev devstore clean
+FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
+FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
+
+.PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev \
+	devstore flatpak flatpak-run flatpak-lint clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -38,6 +42,9 @@ help:
 	@echo "run      launch the application (make run ARGS=\"--debug\")"
 	@echo "devstore create a throwaway store with fake passwords"
 	@echo "run-dev  launch against the throwaway store, never the real one"
+	@echo "flatpak  build and install the Flatpak for the current user"
+	@echo "flatpak-run   run the installed Flatpak"
+	@echo "flatpak-lint  check the manifest against Flathub's rules"
 	@echo "clean    remove build and cache artefacts"
 
 venv:
@@ -91,8 +98,24 @@ run-dev: devstore
 	PASSWORD_STORE_DIR=$(PWD)/$(DEV_STORE) GNUPGHOME=$(PWD)/$(DEV_GNUPGHOME) \
 		GTKPASS_ALLOW_REAL_STORE=0 ./run_app.sh $(ARGS)
 
+# Builds against org.gnome.Sdk, which --install-deps-from pulls from Flathub on
+# the first run. That is a substantial download.
+flatpak:
+	flatpak-builder --force-clean --user --install --install-deps-from=flathub \
+		.flatpak-build $(FLATPAK_MANIFEST)
+
+flatpak-run:
+	flatpak run $(FLATPAK_ID) $(ARGS)
+
+# Flathub runs this on submission; it catches permission and metadata problems
+# that only show up during review.
+flatpak-lint:
+	flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest \
+		$(FLATPAK_MANIFEST)
+
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
+	rm -rf .flatpak-build/ .flatpak-builder/
 	rm -f data/gschemas.compiled
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
 	rm -rf .dev/

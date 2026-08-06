@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dc8add"/>
+      <stop offset="1" stop-color="#9141ac"/>
+    </linearGradient>
+    <linearGradient id="key" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f9f06b"/>
+      <stop offset="1" stop-color="#f5c211"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The store: a card standing in for the encrypted file it represents. -->
+  <rect x="16" y="24" width="96" height="80" rx="12" fill="url(#card)"/>
+  <rect x="16" y="24" width="96" height="80" rx="12" fill="none"
+        stroke="#613583" stroke-width="2" opacity="0.6"/>
+  <rect x="16" y="40" width="96" height="6" fill="#613583" opacity="0.35"/>
+
+  <!-- The key: bow, shank and two bits, the usual shorthand for a secret. -->
+  <g fill="url(#key)" stroke="#a06816" stroke-width="1.5">
+    <circle cx="52" cy="74" r="16"/>
+    <rect x="52" y="68" width="44" height="12" rx="3"/>
+    <rect x="80" y="80" width="8" height="12" rx="2"/>
+    <rect x="92" y="80" width="8" height="10" rx="2"/>
+  </g>
+  <circle cx="52" cy="74" r="6" fill="#613583"/>
+</svg>

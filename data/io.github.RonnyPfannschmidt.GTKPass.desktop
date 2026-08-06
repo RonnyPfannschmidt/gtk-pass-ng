@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=GTKPass
+GenericName=Password Manager
+Comment=Browse and edit your password store
+Exec=gtkpass
+Icon=io.github.RonnyPfannschmidt.GTKPass
+Terminal=false
+Type=Application
+Categories=GTK;GNOME;Utility;Security;
+Keywords=password;pass;passwordstore;gpg;secret;keyring;
+StartupNotify=true
+StartupWMClass=io.github.RonnyPfannschmidt.GTKPass
