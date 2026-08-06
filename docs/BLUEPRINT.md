@@ -17,7 +17,7 @@ Blueprint syntax is more concise and readable than GTK UI XML or Python code for
 template $MyWindow : Adw.ApplicationWindow {
   title: "My App";
   default-width: 800;
-  
+
   Adw.HeaderBar {
     [end]
     MenuButton {
@@ -34,7 +34,7 @@ class MyWindow(Adw.ApplicationWindow):
         super().__init__()
         self.set_title("My App")
         self.set_default_width(800)
-        
+
         header = Adw.HeaderBar()
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name("open-menu-symbolic")

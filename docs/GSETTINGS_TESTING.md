@@ -42,16 +42,16 @@ manager = BackendManager()
 for backend_id, backend_type in settings.get_value("backend-instances").unpack():
     path = f"/org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/"
     schema_id = f"org.ronny_pfannschmidt.gtkpass.backend.demo"
-    
+
     backend_gsettings = Gio.Settings.new_with_path(schema_id, path)
     custom_path = backend_gsettings.get_string("custom-data-path")
     settings_obj = DemoBackendSettings(
         custom_data_path=Path(custom_path) if custom_path else None
     )
-    
+
     backend = DemoBackend.create(settings_obj)
     manager.add_backend(backend_id, backend)
-    
+
     passwords = list(backend.list_passwords())
     print(f"✅ Backend '{backend_id}' loaded with {len(passwords)} passwords", file=sys.stderr)
 EOF
@@ -65,7 +65,7 @@ This will output:
 ## What Works
 
 - ✅ Backend loading from GSettings within a process
-- ✅ Password listing from loaded backends  
+- ✅ Password listing from loaded backends
 - ✅ GSettings schema structure (main + relocatable backend schemas)
 - ✅ Settings UI saving to GSettings
 - ✅ Main window loading backends from GSettings

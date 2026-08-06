@@ -18,7 +18,7 @@ using Adw 1;
 
 template $MyWindow : Adw.ApplicationWindow {
   title: "My App";
-  
+
   Adw.HeaderBar {
     // Header content
   }

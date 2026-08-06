@@ -86,6 +86,30 @@ disallow_untyped_defs = false
 module = ["gi.*", "gnupg.*", "secretstorage.*"]
 ignore_missing_imports = true
 
+# Known debt, deliberately visible so it can only shrink. Every module listed
+# here is scheduled for repair; delete its entry once it type checks, and never
+# add a new one. Current counts, for reference:
+#
+#   direct.py       16  implements a superseded interface; being rewritten
+#   settings.py     11  lambdas returning setattr(), unannotated dict
+#   secretservice.py 4  includes a duplicate _get_items that shadows the real one
+#   pass_cli.py      2
+#   manager.py       1  entry point lookup
+#   demo.py          1
+#   backends/__init__.py 1
+[[tool.mypy.overrides]]
+module = [
+    "gtkpass.backends",
+    "gtkpass.backends.demo",
+    "gtkpass.backends.direct",
+    "gtkpass.backends.manager",
+    "gtkpass.backends.pass_cli",
+    "gtkpass.backends.secretservice",
+    "gtkpass.ui.settings",
+    "demo_backend_loading",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

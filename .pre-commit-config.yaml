@@ -17,8 +17,13 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # The .ui files are blueprint-compiler output and are byte-for-byte
+      # compared against a fresh compile in CI. blueprint-compiler emits no
+      # trailing newline, so "fixing" one here would break that check forever.
       - id: trailing-whitespace
+        exclude: ^src/gtkpass/ui/blueprints/.*\.ui$
       - id: end-of-file-fixer
+        exclude: ^src/gtkpass/ui/blueprints/.*\.ui$
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict
@@ -41,6 +46,9 @@ repos:
         # This hook runs in its own environment, which has no PyGObject in it.
         # It works anyway because pyproject.toml declares ignore_missing_imports
         # for gi.*, so mypy treats the bindings as Any and still checks our code.
-        additional_dependencies: []
+        # pytest is pure Python and installs here happily; without it, things
+        # like pytest.skip() lose their NoReturn typing and the tests type check
+        # against Any.
+        additional_dependencies: [pytest]
         # mypy resolves its own file list from pyproject.toml.
         pass_filenames: false

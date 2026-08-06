@@ -272,7 +272,7 @@ class Password:
     url: Optional[str] = None
     notes: Optional[str] = None
     otp_secret: Optional[str] = None
-    
+
     def clear(self) -> None:
         """Clear sensitive data from memory."""
         self.password = ""
@@ -288,18 +288,18 @@ from gi.repository import Gtk, Adw
 @Gtk.Template(resource_path='/org/gnome/gtkpass/ui/password_editor.ui')
 class PasswordEditor(Adw.Dialog):
     """Dialog for editing password entries."""
-    
+
     __gtype_name__ = 'PasswordEditor'
-    
+
     password_entry = Gtk.Template.Child()
     username_entry = Gtk.Template.Child()
-    
+
     def __init__(self, password: Optional[Password] = None):
         super().__init__()
         self._password = password
         if password:
             self._load_password()
-    
+
     @Gtk.Template.Callback()
     def on_save_clicked(self, button: Gtk.Button) -> None:
         """Handle save button click."""
@@ -316,27 +316,27 @@ import gnupg
 
 class GPGService(Protocol):
     """Interface for GPG operations."""
-    
+
     def encrypt(self, data: str, recipients: list[str]) -> str:
         """Encrypt data for recipients."""
         ...
-    
+
     def decrypt(self, encrypted_data: str) -> str:
         """Decrypt data."""
         ...
 
 class GnuPGService:
     """Implementation using python-gnupg."""
-    
+
     def __init__(self, gnupg_home: Optional[Path] = None):
         self.gpg = gnupg.GPG(gnupghome=str(gnupg_home) if gnupg_home else None)
-    
+
     def encrypt(self, data: str, recipients: list[str]) -> str:
         encrypted = self.gpg.encrypt(data, recipients, always_trust=False)
         if not encrypted.ok:
             raise EncryptionError(encrypted.status)
         return str(encrypted)
-    
+
     def decrypt(self, encrypted_data: str) -> str:
         decrypted = self.gpg.decrypt(encrypted_data)
         if not decrypted.ok:
@@ -354,7 +354,7 @@ template $PasswordEditor : Adw.Dialog {
   title: _("Edit Password");
   content-width: 400;
   content-height: 500;
-  
+
   Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
@@ -363,7 +363,7 @@ template $PasswordEditor : Adw.Dialog {
         label: _("Cancel");
         action-name: "window.close";
       }
-      
+
       [end]
       Button save_button {
         label: _("Save");
@@ -371,23 +371,23 @@ template $PasswordEditor : Adw.Dialog {
         clicked => $on_save_clicked();
       }
     }
-    
+
     content: Adw.PreferencesPage {
       Adw.PreferencesGroup {
         title: _("Password Details");
-        
+
         Adw.EntryRow name_entry {
           title: _("Name");
         }
-        
+
         Adw.PasswordEntryRow password_entry {
           title: _("Password");
         }
-        
+
         Adw.EntryRow username_entry {
           title: _("Username");
         }
-        
+
         Adw.EntryRow url_entry {
           title: _("URL");
         }

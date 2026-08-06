@@ -2,7 +2,7 @@
 <schemalist>
   <!-- Main application schema -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass" path="/io/github/RonnyPfannschmidt/GTKPass/">
-    
+
     <!-- Backend instances list -->
     <key name="backend-instances" type="a(ss)">
       <default>[]</default>
@@ -12,29 +12,29 @@
         Each instance has settings stored at /org/ronny-pfannschmidt/gtkpass/backends/{backend_id}/
       </description>
     </key>
-    
+
     <!-- Window state -->
     <key name="window-width" type="i">
       <default>800</default>
       <summary>Window width</summary>
     </key>
-    
+
     <key name="window-height" type="i">
       <default>600</default>
       <summary>Window height</summary>
     </key>
-    
+
     <key name="window-maximized" type="b">
       <default>false</default>
       <summary>Window maximized state</summary>
     </key>
-    
+
     <!-- UI settings -->
     <key name="show-hidden-passwords" type="b">
       <default>false</default>
       <summary>Show hidden passwords by default</summary>
     </key>
-    
+
     <key name="search-as-you-type" type="b">
       <default>true</default>
       <summary>Search as you type</summary>
@@ -42,7 +42,7 @@
         Enable live search filtering as user types.
       </description>
     </key>
-    
+
     <!-- Security settings -->
     <key name="clipboard-timeout" type="i">
       <default>45</default>
@@ -51,7 +51,7 @@
         Seconds before automatically clearing clipboard. 0 to disable.
       </description>
     </key>
-    
+
     <key name="auto-lock-timeout" type="i">
       <default>300</default>
       <summary>Auto-lock timeout</summary>
@@ -60,7 +60,7 @@
       </description>
     </key>
   </schema>
-  
+
   <!-- Demo backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.demo">
     <key name="custom-data-path" type="s">
@@ -71,7 +71,7 @@
       </description>
     </key>
   </schema>
-  
+
   <!-- Secret Service backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.secretservice">
     <key name="collection-name" type="s">
@@ -82,7 +82,7 @@
       </description>
     </key>
   </schema>
-  
+
   <!-- Pass CLI backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.pass">
     <key name="password-store-dir" type="s">
@@ -92,7 +92,7 @@
         Path to password store directory. If empty, uses PASSWORD_STORE_DIR environment variable or ~/.password-store.
       </description>
     </key>
-    
+
     <key name="use-git" type="b">
       <default>true</default>
       <summary>Enable git integration</summary>
@@ -101,7 +101,7 @@
       </description>
     </key>
   </schema>
-  
+
   <!-- Direct GPG backend schema (relocatable) -->
   <schema id="io.github.RonnyPfannschmidt.GTKPass.backend.direct">
     <key name="password-store-dir" type="s">
@@ -111,7 +111,7 @@
         Path to password store directory. If empty, uses PASSWORD_STORE_DIR environment variable or ~/.password-store.
       </description>
     </key>
-    
+
     <key name="gpg-home" type="s">
       <default>''</default>
       <summary>GPG home directory</summary>
@@ -120,5 +120,5 @@
       </description>
     </key>
   </schema>
-  
+
 </schemalist>

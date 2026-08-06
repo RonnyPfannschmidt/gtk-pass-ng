@@ -67,7 +67,7 @@ All tests passing (3 passed, 1 skipped).
 
 **Cause**: dconf database not properly initialized for custom schema locations.
 
-**Impact**: 
+**Impact**:
 - ❌ Settings lost when app closes
 - ✅ Settings work within a single app session
 - ✅ All code is functionally correct

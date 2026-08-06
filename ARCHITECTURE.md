@@ -177,7 +177,7 @@ class Password:
     otp_secret: Optional[str]
     created_at: datetime
     modified_at: datetime
-    
+
     def to_passwordstore_format() -> str
     def from_passwordstore_format(content: str) -> 'Password'
     def clear_sensitive_data() -> None
@@ -190,7 +190,7 @@ class PasswordStore:
     store_path: Path
     gpg_service: GPGService
     git_service: Optional[GitService]
-    
+
     def initialize() -> None
     def get_password(path: Path) -> Password
     def list_passwords(prefix: Optional[Path]) -> list[Path]
@@ -526,7 +526,7 @@ except Exception as e:
 ```python
 class PasswordStorePlugin(Protocol):
     """Plugin interface for extending functionality."""
-    
+
     def on_password_save(password: Password) -> None: ...
     def on_password_load(password: Password) -> Password: ...
     def get_menu_items() -> list[MenuItem]: ...

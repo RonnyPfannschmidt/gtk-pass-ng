@@ -64,4 +64,3 @@ src/gtkpass/ui/settings.py          0%  ⚠️  Settings UI not tested (GTK segf
 2. Update `_setup_password_list` to display backend data
 3. Add test: `test_window_loads_backends_on_startup`
 4. Add test: `test_window_displays_passwords_from_backend`
-

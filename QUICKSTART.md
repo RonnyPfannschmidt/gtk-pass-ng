@@ -307,7 +307,7 @@ template $MainWindow : Adw.ApplicationWindow {
   title: "GTKPass";
   default-width: 800;
   default-height: 600;
-  
+
   Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
@@ -315,10 +315,10 @@ template $MainWindow : Adw.ApplicationWindow {
         title: "GTKPass";
       };
     }
-    
+
     content: Gtk.Box {
       orientation: vertical;
-      
+
       Gtk.Label {
         label: "Hello, GTKPass!";
       }
@@ -364,7 +364,7 @@ class Password:
 class PasswordStore:
     def __init__(self, gpg_service: GPGService):
         self.gpg = gpg_service
-    
+
     def decrypt(self, data: str) -> str:
         return self.gpg.decrypt(data)
 
@@ -384,10 +384,10 @@ from gi.repository import Gtk, Adw
 @Gtk.Template(resource_path='/org/gnome/gtkpass/ui/window.ui')
 class MainWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'MainWindow'
-    
+
     # Bind template widgets
     content_box = Gtk.Template.Child()
-    
+
     @Gtk.Template.Callback()
     def on_button_clicked(self, button):
         """Handle button click from template."""

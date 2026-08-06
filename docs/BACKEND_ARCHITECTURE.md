@@ -31,61 +31,61 @@ class PasswordEntry:
     name: str  # Relative path without .gpg extension
     path: Path  # Full path to the .gpg file
     content: Optional[str] = None  # Decrypted content (if loaded)
-    
+
 @dataclass
 class PasswordMetadata:
     """Metadata about a password entry."""
     name: str
     path: Path
     modified: float  # Timestamp
-    
+
 class PasswordBackend(ABC):
     """Abstract base class for password storage backends."""
-    
+
     @classmethod
     @abstractmethod
     def initialize(cls, password_store_dir: Path, gpg_id: Optional[str] = None) -> "PasswordBackend":
         """Initialize the backend with password store location.
-        
+
         Returns an initialized backend instance.
         """
         pass
-    
+
     @abstractmethod
     def list_passwords(self, prefix: str = "") -> List[PasswordMetadata]:
         """List all passwords, optionally filtered by prefix."""
         pass
-    
+
     @abstractmethod
     def get_password(self, name: str) -> PasswordEntry:
         """Get a specific password entry (decrypted)."""
         pass
-    
+
     @abstractmethod
     def add_password(self, name: str, content: str, commit: bool = True) -> None:
         """Add a new password entry."""
         pass
-    
+
     @abstractmethod
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         """Edit an existing password entry."""
         pass
-    
+
     @abstractmethod
     def delete_password(self, name: str, commit: bool = True) -> None:
         """Delete a password entry."""
         pass
-    
+
     @abstractmethod
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         """Move/rename a password entry."""
         pass
-    
+
     @abstractmethod
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         """Copy a password entry."""
         pass
-    
+
     @abstractmethod
     def search(self, query: str) -> List[PasswordMetadata]:
         """Search for passwords matching query."""
@@ -136,14 +136,14 @@ class DirectBackend(PasswordBackend):
         self.gpg_id: Optional[str] = None
         self.gpg = gnupg.GPG()
         self.git_enabled = False
-        
+
     @classmethod
     def initialize(cls, password_store_dir: Path, gpg_id: Optional[str] = None) -> "DirectBackend":
         """Create and initialize a DirectBackend instance."""
         backend = cls()
         backend.store_dir = password_store_dir
         backend.store_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Read .gpg-id file if not provided
         if gpg_id is None:
             gpg_id_file = backend.store_dir / ".gpg-id"
@@ -151,25 +151,25 @@ class DirectBackend(PasswordBackend):
                 backend.gpg_id = gpg_id_file.read_text().strip()
         else:
             backend.gpg_id = gpg_id
-            
+
         # Check if git repo exists
         git_dir = backend.store_dir / ".git"
         backend.git_enabled = git_dir.exists()
-        
+
         return backend
-        
+
     def get_password(self, name: str) -> PasswordEntry:
         path = self.store_dir / f"{name}.gpg"
         if not path.exists():
             raise FileNotFoundError(f"Password '{name}' not found")
-            
+
         # Decrypt file
         with open(path, 'rb') as f:
             decrypted = self.gpg.decrypt_file(f)
-            
+
         if not decrypted.ok:
             raise RuntimeError(f"GPG decryption failed: {decrypted.stderr}")
-            
+
         return PasswordEntry(
             name=name,
             path=path,
@@ -207,7 +207,7 @@ class PassBackend(PasswordBackend):
         self.pass_command = pass_command
         self.store_dir: Optional[Path] = None
         self._use_host_spawn = self._detect_container()
-        
+
     def _detect_container(self) -> bool:
         """Detect if running in a container."""
         return (
@@ -215,39 +215,39 @@ class PassBackend(PasswordBackend):
             os.path.exists("/.dockerenv") or
             os.path.exists("/run/.containerenv")
         )
-        
+
     @classmethod
-    def initialize(cls, password_store_dir: Path, gpg_id: Optional[str] = None, 
+    def initialize(cls, password_store_dir: Path, gpg_id: Optional[str] = None,
                    pass_command: str = "pass") -> "PassBackend":
         """Create and initialize a PassBackend instance."""
         backend = cls(pass_command)
         backend.store_dir = password_store_dir
-        
+
         # Set PASSWORD_STORE_DIR environment variable
         os.environ['PASSWORD_STORE_DIR'] = str(password_store_dir)
         if gpg_id:
             os.environ['PASSWORD_STORE_GPG_OPTS'] = f"--default-recipient {gpg_id}"
-            
+
         return backend
-        
+
     def _run_pass(self, args: List[str]) -> subprocess.CompletedProcess:
         """Run pass command, using host spawn if in container."""
         if self._use_host_spawn and shutil.which("flatpak-spawn"):
             cmd = ["flatpak-spawn", "--host", self.pass_command] + args
         else:
             cmd = [self.pass_command] + args
-            
+
         return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             env={**os.environ, "PASSWORD_STORE_DIR": str(self.store_dir)}
         )
-            
+
     def get_password(self, name: str) -> PasswordEntry:
         # Run: pass show name
         result = self._run_pass(["show", name])
-            
+
         return PasswordEntry(
             name=name,
             path=Path(os.environ['PASSWORD_STORE_DIR']) / f"{name}.gpg",
@@ -267,7 +267,7 @@ class PassBackend(PasswordBackend):
         self.pass_command = pass_command
         self.store_dir: Optional[Path] = None
         self._use_host_spawn = self._detect_container()
-        
+
     def _detect_container(self) -> bool:
         """Detect if running in a container that supports flatpak-spawn."""
         return (
@@ -275,7 +275,7 @@ class PassBackend(PasswordBackend):
             os.path.exists("/.dockerenv") or
             os.path.exists("/run/.containerenv")
         )
-        
+
     def _run_pass(self, args: List[str]) -> subprocess.CompletedProcess:
         """Run pass command, using host if in container."""
         if self._use_host_spawn and shutil.which("flatpak-spawn"):
@@ -284,7 +284,7 @@ class PassBackend(PasswordBackend):
         else:
             # Run locally
             cmd = [self.pass_command] + args
-            
+
         return subprocess.run(
             cmd,
             capture_output=True,
@@ -350,7 +350,7 @@ Users can select their preferred backend through:
    ```toml
    [backend]
    type = "direct"  # or "pass"
-   
+
    [backend.pass]
    command = "/usr/local/bin/host-pass"
    use_host = true
