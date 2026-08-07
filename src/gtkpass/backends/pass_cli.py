@@ -58,15 +58,22 @@ class PassBackend(PasswordBackend):
         description="Delegate to pass command",
     )
 
-    def __init__(self, pass_cmd: list[str], env: dict):
+    def __init__(
+        self,
+        pass_cmd: list[str],
+        env: dict,
+        password_store_dir: Path,
+    ):
         """Initialize Pass backend.
 
         Args:
             pass_cmd: Command to invoke pass
             env: Environment variables for pass command
+            password_store_dir: The store this instance was configured with
         """
         self._pass_cmd = pass_cmd
         self._env = env
+        self.password_store_dir = password_store_dir
 
     @classmethod
     def is_available(cls) -> bool:
@@ -96,7 +103,8 @@ class PassBackend(PasswordBackend):
         if settings is None:
             settings = PassBackendSettings()
 
-        ensure_store_allowed(settings.password_store_dir or default_store_dir())
+        store_dir = settings.password_store_dir or default_store_dir()
+        ensure_store_allowed(store_dir)
 
         # Always the pass on PATH. The packaged application bundles its own, so
         # a sandbox needs no special case; asking the host to run it through
@@ -106,14 +114,44 @@ class PassBackend(PasswordBackend):
             raise BackendError("pass command not available")
         pass_cmd = ["pass"]
 
-        # Set up environment for pass command
+        # Set up environment for pass command. This is the only thing that
+        # tells pass where the store is, so every subprocess has to carry it.
+        #
+        # settings.use_git deliberately does not appear here. It used to set
+        # PASSWORD_STORE_ENABLE_EXTENSIONS, which is the extensions knob and
+        # has nothing to do with git, so it never disabled anything. pass
+        # decides to commit by whether the store has a .git and there is no
+        # environment variable for it; the preference now means "offer to sync
+        # this store", which GTKPass reads rather than pass.
         env = os.environ.copy()
         if settings.password_store_dir:
             env["PASSWORD_STORE_DIR"] = str(settings.password_store_dir)
-        if not settings.use_git:
-            env["PASSWORD_STORE_ENABLE_EXTENSIONS"] = "false"
 
-        return cls(pass_cmd=pass_cmd, env=env)
+        return cls(
+            pass_cmd=pass_cmd,
+            env=env,
+            password_store_dir=store_dir,
+        )
+
+    # -- paths ---------------------------------------------------------------
+
+    def _path_for(self, name: str) -> Path:
+        """Resolve an entry name to its file, refusing to escape the store.
+
+        An entry name is a path fragment, and it reaches a subprocess. Without
+        this, `../../secrets` addressed whatever sat above the store.
+        """
+        candidate = (self.password_store_dir / f"{name}.gpg").resolve()
+        root = self.password_store_dir.resolve()
+        if not candidate.is_relative_to(root):
+            raise BackendError(f"'{name}' is outside the password store")
+        return candidate
+
+    def _existing(self, name: str) -> Path:
+        path = self._path_for(name)
+        if not path.is_file():
+            raise FileNotFoundError(f"Password '{name}' not found")
+        return path
 
     def _run_pass(
         self, args: list[str], input_data: str | None = None
@@ -148,50 +186,33 @@ class PassBackend(PasswordBackend):
             raise BackendError(f"Failed to run pass: {e}") from e
 
     def list_passwords(self, prefix: str = "") -> list[PasswordMetadata]:
-        """List all passwords, optionally filtered by prefix.
+        """List the store's entries by reading its directory tree.
 
-        Args:
-            prefix: Optional prefix to filter results
+        `pass ls` is a user interface, not an integration point. It renders the
+        store as `tree` art: box-drawing characters, non-breaking-space indents,
+        and nesting expressed as indentation, so `bank/checking` arrives as
+        `checking` with no way back to its folder. The parser that tried to
+        undo that also skipped every line containing a horizontal rule, which
+        is every entry line, so this method returned nothing for any store.
 
-        Returns:
-            List of password metadata
+        Entry names are filenames. Reading them needs no GPG and no subprocess,
+        so pass keeps the operations that do.
         """
-        try:
-            result = self._run_pass(["ls", prefix] if prefix else ["ls"])
-
-            passwords = []
-            for line in result.stdout.split("\n"):
-                line = line.strip()
-
-                # Skip empty lines and tree decoration
-                if not line or line.startswith("Password Store") or "──" in line:
-                    continue
-
-                # Remove tree characters and .gpg extension
-                name = line
-                for char in ["├──", "└──", "│", "─", " "]:
-                    name = name.replace(char, "")
-
-                if name.endswith(".gpg"):
-                    name = name[:-4]
-
-                if name:
-                    # Construct path (we don't have actual file access in flatpak)
-                    path = Path(f"pass://{name}")
-                    passwords.append(
-                        PasswordMetadata(
-                            name=name,
-                            path=path,
-                            modified=0.0,  # pass doesn't provide timestamps easily
-                        )
-                    )
-
-            return sorted(passwords, key=lambda x: x.name)
-
-        except BackendError:
-            raise
-        except Exception as e:
-            raise BackendError(f"Failed to list passwords: {e}") from e
+        entries = []
+        for gpg_file in sorted(self.password_store_dir.rglob("*.gpg")):
+            relative = gpg_file.relative_to(self.password_store_dir)
+            # Skip repository internals; .git can hold .gpg objects of its own.
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            name = str(relative)[: -len(".gpg")]
+            if prefix and not name.startswith(prefix):
+                continue
+            entries.append(
+                PasswordMetadata(
+                    name=name, path=gpg_file, modified=gpg_file.stat().st_mtime
+                )
+            )
+        return entries
 
     def get_password(self, name: str) -> PasswordEntry:
         """Get a specific password entry.
@@ -206,20 +227,14 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If retrieval fails
         """
-        try:
-            result = self._run_pass(["show", name])
-            content = result.stdout.rstrip("\n")
+        path = self._existing(name)
+        result = self._run_pass(["show", name])
 
-            return PasswordEntry(
-                name=name,
-                path=Path(f"pass://{name}"),
-                content=content,
-            )
-
-        except BackendError as e:
-            if "is not in the password store" in str(e):
-                raise FileNotFoundError(f"Password '{name}' not found") from e
-            raise
+        return PasswordEntry(
+            name=name,
+            path=path,
+            content=result.stdout.rstrip("\n"),
+        )
 
     def add_password(self, name: str, content: str, commit: bool = True) -> None:
         """Add a new password entry.
@@ -233,24 +248,13 @@ class PassBackend(PasswordBackend):
             FileExistsError: If password already exists
             BackendError: If creation fails
         """
-        try:
-            # pass insert uses stdin
-            result = subprocess.run(
-                [*self._pass_cmd, "insert", "-m", name],
-                input=content,
-                capture_output=True,
-                text=True,
-            )
+        if self._path_for(name).exists():
+            raise FileExistsError(f"Password '{name}' already exists")
 
-            if result.returncode != 0:
-                if "already exists" in result.stderr:
-                    raise FileExistsError(f"Password '{name}' already exists")
-                raise BackendError(f"Failed to add password: {result.stderr}")
-
-        except (FileExistsError, BackendError):
-            raise
-        except Exception as e:
-            raise BackendError(f"Failed to add password '{name}': {e}") from e
+        # Through _run_pass, which is the only thing that carries the store
+        # location. Calling subprocess.run here directly meant a configured
+        # PASSWORD_STORE_DIR was read from but written to ~/.password-store.
+        self._run_pass(["insert", "-m", name], input_data=content)
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         """Edit an existing password entry.
@@ -264,24 +268,11 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If update fails
         """
-        # pass doesn't have a direct edit command, use insert with force
-        try:
-            result = subprocess.run(
-                [*self._pass_cmd, "insert", "-m", "-f", name],
-                input=content,
-                capture_output=True,
-                text=True,
-            )
+        self._existing(name)
 
-            if result.returncode != 0:
-                if "is not in the password store" in result.stderr:
-                    raise FileNotFoundError(f"Password '{name}' not found")
-                raise BackendError(f"Failed to edit password: {result.stderr}")
-
-        except (FileNotFoundError, BackendError):
-            raise
-        except Exception as e:
-            raise BackendError(f"Failed to edit password '{name}': {e}") from e
+        # pass has no edit-in-place command, so this is insert with force.
+        # Through _run_pass for the same reason as add_password.
+        self._run_pass(["insert", "-m", "-f", name], input_data=content)
 
     def delete_password(self, name: str, commit: bool = True) -> None:
         """Delete a password entry.
@@ -294,16 +285,8 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If deletion fails
         """
-        try:
-            result = self._run_pass(["rm", "-f", name])
-
-            if "is not in the password store" in result.stderr:
-                raise FileNotFoundError(f"Password '{name}' not found")
-
-        except (FileNotFoundError, BackendError):
-            raise
-        except Exception as e:
-            raise BackendError(f"Failed to delete password '{name}': {e}") from e
+        self._existing(name)
+        self._run_pass(["rm", "-f", name])
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         """Move/rename a password entry.
@@ -318,16 +301,12 @@ class PassBackend(PasswordBackend):
             FileExistsError: If new name already exists
             BackendError: If move fails
         """
-        try:
-            result = self._run_pass(["mv", "-f", old_name, new_name])
+        self._existing(old_name)
+        self._path_for(new_name)
 
-            if "is not in the password store" in result.stderr:
-                raise FileNotFoundError(f"Password '{old_name}' not found")
-
-        except (FileNotFoundError, BackendError):
-            raise
-        except Exception as e:
-            raise BackendError(f"Failed to move password: {e}") from e
+        # pass, not a filesystem move: crossing into a subtree with its own
+        # .gpg-id has to re-encrypt to that subtree's recipients.
+        self._run_pass(["mv", "-f", old_name, new_name])
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         """Copy a password entry.
@@ -342,42 +321,20 @@ class PassBackend(PasswordBackend):
             FileExistsError: If destination already exists
             BackendError: If copy fails
         """
-        try:
-            result = self._run_pass(["cp", "-f", source, dest])
-
-            if "is not in the password store" in result.stderr:
-                raise FileNotFoundError(f"Password '{source}' not found")
-
-        except (FileNotFoundError, BackendError):
-            raise
-        except Exception as e:
-            raise BackendError(f"Failed to copy password: {e}") from e
+        self._existing(source)
+        self._path_for(dest)
+        self._run_pass(["cp", "-f", source, dest])
 
     def search(self, query: str) -> list[PasswordMetadata]:
-        """Search for passwords matching query.
+        """Match names only, as DirectBackend does.
 
-        Args:
-            query: Search query
-
-        Returns:
-            List of matching password metadata entries
+        This used to run `pass grep`, which decrypts every entry in the store
+        to grep its plaintext: it prompts for the passphrase, prints matching
+        lines, and defeats the point of the store being encrypted at rest. It
+        also passed a `check` argument _run_pass does not take, so every search
+        raised TypeError and the method had never once returned a result.
         """
-        try:
-            result = self._run_pass(["grep", "-l", query], check=False)
-
-            passwords = []
-            for line in result.stdout.split("\n"):
-                name = line.strip()
-                if name:
-                    passwords.append(
-                        PasswordMetadata(
-                            name=name,
-                            path=Path(f"pass://{name}"),
-                            modified=0.0,
-                        )
-                    )
-
-            return sorted(passwords, key=lambda x: x.name)
-
-        except Exception as e:
-            raise BackendError(f"Search failed: {e}") from e
+        lowered = query.lower()
+        return [
+            entry for entry in self.list_passwords() if lowered in entry.name.lower()
+        ]

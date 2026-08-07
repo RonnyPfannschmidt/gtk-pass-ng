@@ -7,6 +7,9 @@ arbitrary command execution outside the sandbox, which is not a trade a
 password manager should make.
 """
 
+import shutil
+import subprocess
+
 import pytest
 
 from gtkpass.backends import BackendError
@@ -22,10 +25,43 @@ def store(tmp_path):
 
 
 @pytest.fixture
+def recorded_runs(monkeypatch):
+    """Capture every `pass` invocation, without running one.
+
+    The backend has more than one call site, and the bug this exists to catch is
+    one of them passing a different environment than the others.
+
+    Only pass is intercepted. `pass_cli.subprocess` is the subprocess module
+    itself, so a blanket replacement also swallowed the git commands GitStore
+    runs while probing the store -- which both hid real behaviour and put
+    unrelated entries in this list.
+    """
+    calls = []
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if not cmd or "pass" not in str(cmd[0]):
+            return real_run(cmd, **kwargs)
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("gtkpass.backends.pass_cli.subprocess.run", fake_run)
+    return calls
+
+
+@pytest.fixture
 def pass_on_path(monkeypatch):
+    """Pretend pass is installed, and tell the truth about everything else.
+
+    `pass_cli.shutil` is the shutil module itself, so patching `which` through
+    it replaces it for every importer -- including GitStore, which asks the same
+    question about git. Answering None for git there made a git-backed store
+    report itself unsyncable for a reason that had nothing to do with the test.
+    """
+    real_which = shutil.which
     monkeypatch.setattr(
         "gtkpass.backends.pass_cli.shutil.which",
-        lambda command: "/usr/bin/pass" if command == "pass" else None,
+        lambda command: "/usr/bin/pass" if command == "pass" else real_which(command),
     )
 
 
@@ -85,3 +121,260 @@ class TestInvocation:
     def test_the_configured_store_is_passed_through(self, pass_on_path, store):
         """pass reads the location from the environment, not an argument."""
         assert self.create(store)._env["PASSWORD_STORE_DIR"] == str(store)
+
+
+class TestEveryCallSeesTheConfiguredStore:
+    """pass locates the store from the environment and nothing else.
+
+    A call site that forgets `env=` does not fail; it silently reads and writes
+    ~/.password-store instead. That is data loss for anyone with a store
+    elsewhere, and it steps around the safety.py guard, which only ever saw the
+    path that was configured.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    def test_adding_writes_to_the_configured_store(
+        self, pass_on_path, store, recorded_runs
+    ):
+        backend = self.create(store)
+
+        backend.add_password("email/work", "secret")
+
+        _, kwargs = recorded_runs[-1]
+        assert kwargs["env"]["PASSWORD_STORE_DIR"] == str(store)
+
+    def test_editing_writes_to_the_configured_store(
+        self, pass_on_path, store, recorded_runs
+    ):
+        (store / "email").mkdir()
+        (store / "email" / "work.gpg").write_bytes(b"\x01ciphertext")
+        backend = self.create(store)
+
+        backend.edit_password("email/work", "secret")
+
+        _, kwargs = recorded_runs[-1]
+        assert kwargs["env"]["PASSWORD_STORE_DIR"] == str(store)
+
+    def test_no_call_site_is_left_without_an_environment(
+        self, pass_on_path, store, recorded_runs
+    ):
+        (store / "a.gpg").write_bytes(b"\x01ciphertext")
+        backend = self.create(store)
+
+        backend.add_password("new", "x")
+        backend.edit_password("a", "y")
+        backend.delete_password("a")
+        backend.move_password("a", "b")
+        backend.copy_password("a", "c")
+
+        assert recorded_runs, "nothing ran, so this proves nothing"
+        for cmd, kwargs in recorded_runs:
+            assert kwargs.get("env") is backend._env, f"{cmd} ran without the store"
+
+
+class TestListing:
+    """Listing reads the store layout; it does not parse `pass ls`.
+
+    `pass ls` renders the store as `tree` art. Its output is decorated with box
+    characters, indented with non-breaking spaces, and -- fatally -- expresses
+    nesting as indentation, so `bank/checking` arrives as `checking` with no way
+    back to its folder. The parser that tried also skipped every line
+    containing a horizontal rule, which is every entry line, so this backend
+    listed nothing at all for any store.
+
+    Entry names are filenames. Reading them needs no GPG and no subprocess, so
+    pass is left to do the part that does.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    @pytest.fixture
+    def populated(self, store):
+        (store / "bank").mkdir()
+        (store / "bank" / "checking.gpg").write_bytes(b"\x01ciphertext")
+        (store / "email").mkdir()
+        (store / "email" / "work.gpg").write_bytes(b"\x01ciphertext")
+        (store / "loose.gpg").write_bytes(b"\x01ciphertext")
+        return store
+
+    def test_it_finds_the_entries(self, pass_on_path, populated):
+        names = {e.name for e in self.create(populated).list_passwords()}
+
+        assert names == {"bank/checking", "email/work", "loose"}
+
+    def test_a_nested_entry_keeps_its_folder(self, pass_on_path, populated):
+        names = [e.name for e in self.create(populated).list_passwords()]
+
+        assert "bank/checking" in names
+        assert "checking" not in names
+
+    def test_names_carry_no_tree_decoration(self, pass_on_path, populated):
+        for entry in self.create(populated).list_passwords():
+            assert "\xa0" not in entry.name
+            assert not set(entry.name) & set("├└│─")
+
+    def test_repository_internals_are_skipped(self, pass_on_path, populated):
+        """A .git directory holds .gpg objects of its own."""
+        objects = populated / ".git" / "objects"
+        objects.mkdir(parents=True)
+        (objects / "deadbeef.gpg").write_bytes(b"\x01not an entry")
+
+        names = {e.name for e in self.create(populated).list_passwords()}
+
+        assert names == {"bank/checking", "email/work", "loose"}
+
+    def test_a_prefix_narrows_the_listing(self, pass_on_path, populated):
+        entries = self.create(populated).list_passwords("bank")
+
+        assert [e.name for e in entries] == ["bank/checking"]
+
+    def test_listing_runs_no_subprocess(self, pass_on_path, populated, recorded_runs):
+        """No GPG is involved in reading filenames, so nothing needs to run."""
+        self.create(populated).list_passwords()
+
+        assert recorded_runs == []
+
+
+class TestExistenceComesFromTheStore:
+    """Whether an entry exists is a question about a file, not about pass.
+
+    It used to be answered by matching "is not in the password store" against
+    stderr, which only works once pass has already run, and reports nothing at
+    all when the message changes. The file is right there.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    @pytest.fixture
+    def populated(self, store):
+        (store / "email").mkdir()
+        (store / "email" / "work.gpg").write_bytes(b"\x01ciphertext")
+        return store
+
+    def test_reading_a_missing_entry_is_reported(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        with pytest.raises(FileNotFoundError):
+            self.create(populated).get_password("email/nonexistent")
+
+        assert recorded_runs == [], "pass ran for an entry that is not there"
+
+    def test_adding_over_an_existing_entry_is_refused(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        with pytest.raises(FileExistsError):
+            self.create(populated).add_password("email/work", "secret")
+
+        assert recorded_runs == []
+
+    def test_editing_a_missing_entry_is_reported(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        with pytest.raises(FileNotFoundError):
+            self.create(populated).edit_password("email/nope", "secret")
+
+        assert recorded_runs == []
+
+    def test_deleting_a_missing_entry_is_reported(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        with pytest.raises(FileNotFoundError):
+            self.create(populated).delete_password("email/nope")
+
+        assert recorded_runs == []
+
+    def test_moving_a_missing_entry_is_reported(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        with pytest.raises(FileNotFoundError):
+            self.create(populated).move_password("email/nope", "email/other")
+
+        assert recorded_runs == []
+
+    def test_copying_a_missing_entry_is_reported(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        with pytest.raises(FileNotFoundError):
+            self.create(populated).copy_password("email/nope", "email/other")
+
+        assert recorded_runs == []
+
+
+class TestNamesCannotEscapeTheStore:
+    """An entry name is a path fragment, and pass would follow it out.
+
+    DirectBackend refuses this; this backend handed the name straight to a
+    subprocess, so `../../` reached whatever was above the store.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    @pytest.mark.parametrize(
+        "name", ["../outside", "email/../../outside", "/etc/passwd"]
+    )
+    def test_a_name_leaving_the_store_is_refused(
+        self, pass_on_path, store, recorded_runs, name
+    ):
+        with pytest.raises(BackendError):
+            self.create(store).get_password(name)
+
+        assert recorded_runs == []
+
+
+class TestSearchMatchesNames:
+    """Search must not decrypt.
+
+    `pass grep` decrypts every entry in the store to grep its plaintext, which
+    prompts for the passphrase and prints matching lines. DirectBackend.search
+    already refuses to do that for the stated reason that it defeats the point
+    of the store being encrypted at rest; this backend has to agree.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    @pytest.fixture
+    def populated(self, store):
+        (store / "email").mkdir()
+        (store / "email" / "work.gpg").write_bytes(b"\x01ciphertext")
+        (store / "bank.gpg").write_bytes(b"\x01ciphertext")
+        return store
+
+    def test_it_finds_a_matching_name(self, pass_on_path, populated):
+        found = [e.name for e in self.create(populated).search("work")]
+
+        assert found == ["email/work"]
+
+    def test_it_is_case_insensitive(self, pass_on_path, populated):
+        found = [e.name for e in self.create(populated).search("WORK")]
+
+        assert found == ["email/work"]
+
+    def test_a_miss_returns_nothing(self, pass_on_path, populated):
+        assert self.create(populated).search("nothing-like-this") == []
+
+    def test_it_never_runs_pass_grep(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).search("work")
+
+        assert recorded_runs == []
+
+
+class TestGitIsNotAnEnvironmentSetting:
+    """pass decides to commit by whether the store has a .git, and nothing else.
+
+    PASSWORD_STORE_ENABLE_EXTENSIONS controls extensions, not git, so setting
+    it here never disabled anything. The preference now means "offer to sync
+    this store", which is a GTKPass concern rather than a pass one.
+    """
+
+    def test_the_extensions_knob_is_not_touched(self, pass_on_path, store):
+        backend = PassBackend.create(
+            PassBackendSettings(password_store_dir=store, use_git=False)
+        )
+
+        assert "PASSWORD_STORE_ENABLE_EXTENSIONS" not in backend._env
