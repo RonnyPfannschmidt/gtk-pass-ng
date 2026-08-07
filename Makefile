@@ -125,14 +125,21 @@ flatpak-run:
 # Flathub runs these on submission; they catch permission and metadata problems
 # that would otherwise surface during review. The repo check needs a build, and
 # sees things the manifest check cannot -- missing screenshots, for one.
+#
+# --no-documents-portal for the same reason as flatpak-run above, and it is not
+# optional here either: these run the linter through `flatpak run`, so without
+# it a missing portal mount stops the check with a bwrap error rather than a
+# lint result.
 flatpak-lint:
-	flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest \
+	flatpak run --no-documents-portal \
+		--command=flatpak-builder-lint org.flatpak.Builder manifest \
 		$(FLATPAK_MANIFEST)
 
 flatpak-lint-repo:
 	flatpak-builder --force-clean --user --repo=.flatpak-repo \
 		.flatpak-build $(FLATPAK_MANIFEST)
-	flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo \
+	flatpak run --no-documents-portal \
+		--command=flatpak-builder-lint org.flatpak.Builder repo \
 		.flatpak-repo
 
 clean:

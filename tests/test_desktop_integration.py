@@ -142,3 +142,35 @@ class TestTheFlatpakManifest:
     def test_the_gpg_agent_socket_is_shared(self, manifest):
         """Decryption happens in the host agent; the sandbox never sees a key."""
         assert "--socket=gpg-agent" in manifest
+
+    def test_the_ssh_agent_socket_is_not_requested(self, manifest):
+        """Syncing needs it; opening a password store does not.
+
+        Requested statically it would be held by every user whether or not
+        their store has a remote, and Flathub asks for static permissions to be
+        kept to a minimum. It is granted per user with `flatpak override`, and
+        the application says so when a sync finds it missing.
+        """
+        granted = [
+            line
+            for line in manifest.splitlines()
+            if line.strip().startswith("- --socket=ssh-auth")
+        ]
+        assert granted == [], f"ssh-auth is requested statically: {granted}"
+
+    def test_network_access_is_not_requested(self, manifest):
+        """Same reasoning: only reaching a git remote needs it."""
+        granted = [
+            line
+            for line in manifest.splitlines()
+            if line.strip().startswith("- --share=network")
+        ]
+        assert granted == [], f"network is requested statically: {granted}"
+
+    def test_the_override_command_is_documented(self, manifest):
+        """Whoever reads the manifest should find the way to turn sync on."""
+        assert "flatpak override --user --socket=ssh-auth --share=network" in manifest
+
+    def test_git_is_still_bundled(self, manifest):
+        """Local commits need git regardless of whether a remote exists."""
+        assert "name: git" in manifest

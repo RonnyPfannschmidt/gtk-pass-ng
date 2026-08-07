@@ -43,10 +43,23 @@ finish-args:
   # The Secret Service backend talks to the session keyring.
   - --talk-name=org.freedesktop.secrets
 
-  # pass commits to the store's git repository when there is one, and reaches a
-  # remote over ssh. The key stays in the host's agent, as with GPG.
-  - --socket=ssh-auth
-  - --share=network
+  # Deliberately NOT requested here: --socket=ssh-auth and --share=network.
+  #
+  # Syncing a store with a git remote needs both, but most stores have no
+  # remote, and a password manager holding network access and an agent socket
+  # on the chance that one does is exactly the request a reviewer should
+  # question. So they are opt-in, per user:
+  #
+  #   flatpak override --user --socket=ssh-auth --share=network \
+  #       io.github.RonnyPfannschmidt.GTKPass
+  #
+  # src/gtkpass/sandbox.py reads /.flatpak-info to see whether they have been
+  # granted, and the sync action shows that exact command when they have not.
+  # The bundled git below still commits locally, which needs neither.
+  #
+  # An extension cannot carry these instead: flatpak-metadata(5) gives
+  # [Extension NAME] and [ExtensionOf] no [Context] group, so an extension is
+  # only content mounted into a sandbox whose permissions were already fixed.
 
   # A packaged build is the application actually being used, so it opts in to
   # the guard in src/gtkpass/safety.py. Without this it would refuse its own
@@ -61,7 +74,7 @@ finish-args:
   #     the end of it. pass is bundled below instead, so it runs inside.
   #   --filesystem=~/.ssh:ro
   #     would hand over the private keys along with known_hosts. The agent
-  #     socket above does the authentication without them.
+  #     socket, once the user grants it, authenticates without them.
   #   --filesystem=home, --filesystem=host
   #     a password manager asking for the whole home directory is the thing a
   #     sandbox exists to prevent.
