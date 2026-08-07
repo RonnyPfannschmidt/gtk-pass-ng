@@ -50,6 +50,13 @@ This needs a running agent on the host. Under systemd socket activation there
 normally is one; if not, `gpg` in the sandbox cannot start it and will fail to
 connect.
 
+It also means *how* the host unwraps the key is none of the sandbox's business.
+A smartcard via `scdaemon`, or a TPM-bound key via `tpm2daemon`, works through
+this same grant and needs **no** additional permission — no `--device=`, no
+`/dev/tpmrm0`. Verified in the built sandbox: it has neither `tpm2daemon` nor any
+`/dev/tpm*`, and reaches the agent regardless, because the daemon doing the work
+runs on the host. See [TRUST-MODEL.md](TRUST-MODEL.md).
+
 **The public keyring, for resolving recipients.** The agent does not answer
 "which key is `alice@example.com`?" — `gpg` reads that from `GNUPGHOME`, which
 inside the sandbox points at an inaccessible `~/.gnupg`. Granting the specific
@@ -90,20 +97,72 @@ application that manages keys cannot get away with this;
 [Kleopatra](https://flathub.org/apps/org.kde.kleopatra) takes
 `--filesystem=~/.gnupg:create` plus `--filesystem=xdg-run/gnupg:ro` instead.
 
-## SSH
+## SSH, and why it is not in the manifest
 
-Relevant because the bundled `pass` can drive `git` against a remote, though
-nothing in the interface asks it to yet.
+The sync action pulls and pushes a store that has a git remote. Over ssh that
+needs `--socket=ssh-auth`, which exposes `$SSH_AUTH_SOCK` so an agent on the
+host does the authentication and the private key never enters the sandbox — the
+same shape as the GPG arrangement. It also needs `--share=network`.
 
-`--socket=ssh-auth` exposes `$SSH_AUTH_SOCK`, so an agent on the host does the
-authentication and the private key never enters the sandbox — the same shape as
-the GPG arrangement. `gitg` is the reference here.
+**Neither is requested.** Most stores have no remote, and a password manager
+holding network access and an agent socket on the chance that one does is
+exactly the request that deserves scrutiny. They are opt-in, per user:
 
-Host verification needs `known_hosts`, which means `--filesystem=~/.ssh:ro`. It
-grants the private keys too; there is no narrower option, since `~/.ssh` mixes
-both. Prefer relying on the agent.
+```bash
+flatpak override --user --socket=ssh-auth --share=network io.github.RonnyPfannschmidt.GTKPass
+```
 
-Keys not loaded into an agent cannot be used without that filesystem grant.
+`flatpak override` is the mechanism for this, and its man page says so outright:
+it exists to *"grant a sandboxed application more or less resources than it
+requested"*. Flatseal does the same thing graphically. The bundled `git` still
+commits locally, which needs neither permission.
+
+`src/gtkpass/sandbox.py` checks whether they have been granted, and the sync
+action shows that exact command, copyable, when they have not — raised before
+any git process starts, so nothing blocks on a socket that was never mounted.
+
+### An extension cannot carry the permission instead
+
+Worth writing down because it looks like it should. Checked against
+`flatpak-metadata(5)` and flatpak 1.18.0:
+
+- `[Extension NAME]` accepts only `directory`, `version`/`versions`,
+  `add-ld-path`, `merge-dirs`, `download-if`/`enable-if`, `autodelete`,
+  `no-autodownload` and `subdirectories` — all about *what content mounts
+  where*.
+- `[ExtensionOf]`, on the extension side, accepts only `ref`, `runtime`,
+  `priority` and `tag`.
+- Neither has a `[Context]` group.
+
+An extension is content mounted into a sandbox whose `[Context]` was fixed at
+`flatpak build-finish`; it never widens it. Conditional permissions
+(`--share-if=`, flatpak 1.17 and later) do exist, but cover only `network` and
+`ipc` and condition on system capabilities such as `has-wayland`, not on
+anything the user chose. So there is no packaging trick here, only the override.
+
+### `$SSH_AUTH_SOCK` is not a usable probe
+
+The obvious check is wrong, and wrong in the direction that hangs. Running the
+packaged application with `--nosocket=ssh-auth` leaves `SSH_AUTH_SOCK` set — to
+the host's `/run/user/$UID/gcr/ssh`, leaked through the environment — while
+`/run/flatpak/` contains no `ssh-auth` at all and `ssh-add -l` exits 2. Code
+trusting the variable concludes the agent is reachable and finds out otherwise
+at push time.
+
+`[Context]` in `/.flatpak-info` has neither problem. `flatpak-metadata(5)`
+describes it as the effective configuration, so it already accounts for every
+override, and reading it is a file read rather than a subprocess — which matters
+because it decides whether a button is sensitive.
+
+### `known_hosts`
+
+Host verification needs it, which would mean `--filesystem=~/.ssh:ro`. That
+grants every private key in the same breath, since `~/.ssh` mixes both and there
+is no narrower spelling, so it is refused. `GitStore` runs ssh with
+`StrictHostKeyChecking=accept-new` instead, and a host-key failure is reported
+as itself rather than as a bug.
+
+Keys not loaded into an agent cannot be used at all.
 
 ## Git
 
@@ -121,7 +180,13 @@ preference:
    `--talk-name=org.freedesktop.Flatpak`. Do not. See below.
 
 Either way `--share=network` is required to reach a remote, and ssh remotes
-additionally need the SSH permissions above.
+additionally need the SSH permissions above — neither of which the manifest
+requests, so reaching a remote is something the user opts into.
+
+Local commits need none of that. `DirectBackend` commits every write to a
+git-backed store through the bundled `git`, and `pass` does its own committing,
+so a store stays consistent with its history whether or not sync is ever
+enabled.
 
 ## Bundling pass, rather than borrowing the host's
 
@@ -144,10 +209,11 @@ Both are small. `pass` itself is a bash script, and it uses the `gpg` and `ssh`
 already in the runtime, so nothing crosses the sandbox boundary except through
 the agent sockets.
 
-This is what makes `--socket=ssh-auth` and `--share=network` worth granting:
-`pass git push` reaches a remote over ssh, authenticated by the host's agent,
-with the private key never entering the sandbox. The interface has no sync
-button yet, so nothing triggers that today.
+The sync button in the header bar is what drives this: it pulls and pushes,
+reaching a remote over ssh, authenticated by the host's agent, with the private
+key never entering the sandbox. That is also the only thing that needs
+`--socket=ssh-auth` and `--share=network`, which is why the manifest leaves both
+to a `flatpak override` rather than requesting them for everyone.
 
 ## What is refused, and why
 
@@ -155,7 +221,7 @@ button yet, so nothing triggers that today.
 
 **`--filesystem=~/.ssh:ro`.** It would provide `known_hosts`, but hands over
 every private key in the same grant; `~/.ssh` mixes both and there is no
-narrower spelling. The agent socket authenticates without them.
+narrower spelling. The agent, once granted, authenticates without them.
 
 **`--filesystem=home` or `--filesystem=host`.** A password manager asking for
 the whole home directory is exactly the thing a sandbox is meant to prevent.
@@ -230,6 +296,16 @@ metadata and mounted into the sandbox at a fixed directory — and it is how
 Mesa, VAAPI, GStreamer codecs, the icon themes and the whole
 `org.freedesktop.Sdk.Extension.*` family of toolchains are distributed once and
 used by many applications.
+
+It is worth being clear about what that mechanism would and would not buy,
+because "make it an extension" is the obvious answer to more than one problem
+here and is only the answer to one of them. An extension can ship a payload
+optionally and share it between applications. It **cannot** carry a permission:
+neither `[Extension NAME]` nor `[ExtensionOf]` has a `[Context]` group, so an
+extension is content mounted into a sandbox whose permissions were already
+fixed. Packaging git or ssh as an extension would not have moved
+`--socket=ssh-auth` out of this application's own permission set; see the SSH
+section above for what does.
 
 Nobody publishes one for git or ssh. Flathub carries extensions for `golang`,
 `llvm`, `dotnet`, `node`, `haskell`, `mono`, `mingw-w64` and similar; a search

@@ -54,15 +54,18 @@ The linter rejects the manifest as it stands, and the built repository with it:
   "errors": [
     "finish-args-gnupg-filesystem-access",
     "finish-args-has-socket-gpg-agent",
-    "finish-args-has-socket-ssh-auth",
     "metainfo-missing-screenshots",
     "appstream-screenshots-not-mirrored-in-ostree"
   ]
 }
 ```
 
-The last two are the missing screenshots, covered below. The first three are
+The last two are the missing screenshots, covered below. The first two are
 permissions.
+
+`finish-args-has-socket-ssh-auth` used to be on that list and is not any more:
+the manifest no longer requests `--socket=ssh-auth` or `--share=network`. See
+the section after next.
 
 These are not mistakes to fix — they are the permissions that make a password
 manager work, and Flathub requires each to be justified individually. Errors
@@ -80,7 +83,7 @@ The format is per app id:
 }
 ```
 
-**Two of the three have direct precedent.**
+**Both have direct precedent.**
 [Identities](https://flathub.org/apps/one.k8ie.Identities), the other GNOME
 password-store client, holds exactly these, granted with:
 
@@ -93,25 +96,33 @@ password-store client, holds exactly these, granted with:
 Both apply to GTKPass word for word, and our grants are the narrower ones:
 three read-only files rather than `~/.gnupg` wholesale.
 
-**The third is the awkward one.** `--socket=ssh-auth` exists so the bundled
-`pass` can drive `git` against a remote. `gitg` holds this exception, but as
-*"Predates the linter rule"* — grandfathered, not argued. GTKPass has no
-argument to make today: **nothing in the interface performs a sync**, so a
-reviewer asking "what uses this?" has no good answer.
+## The third permission, and how it was resolved
 
-The honest options:
+`--socket=ssh-auth` was the awkward one. It existed so the bundled `pass` could
+drive `git` against a remote, and `gitg` holds the same exception only as
+*"Predates the linter rule"* — grandfathered, not argued. GTKPass had no
+argument to make at all, because nothing in the interface performed a sync.
 
-1. **Drop `--socket=ssh-auth` and `--share=network` before submitting**, and
-   add them back with the feature that needs them. Fewest questions, and no
-   permission is granted ahead of a use. The bundled git still commits locally,
-   which is the part that matters for correctness.
-2. **Keep them and justify them** as supporting `pass git push` for stores that
-   are git repositories. Truthful, but it asks a reviewer to approve network
-   and agent access for a code path the user cannot currently reach.
+There is now a sync action, so the argument exists. It is still not the one
+being made. **The manifest requests neither `--socket=ssh-auth` nor
+`--share=network`**, and users who want sync grant them themselves:
 
-Option 1 is the better submission. Static permissions are required to be *"kept
-to an absolute minimum"*, and a password manager asking for network access it
-does not yet use is exactly the request that deserves scrutiny.
+```bash
+flatpak override --user --socket=ssh-auth --share=network io.github.RonnyPfannschmidt.GTKPass
+```
+
+Static permissions are required to be *"kept to an absolute minimum"*, and most
+password stores have no git remote at all. Granting every user network access
+and an agent socket for a feature a minority use is the wrong default, and the
+override costs those users one command — which the application shows them,
+copyable, the first time a sync finds the permission missing.
+
+A Flatpak extension cannot carry the permission instead; that was checked rather
+than assumed, and the reasoning is in
+[FLATPAK.md](FLATPAK.md#an-extension-cannot-carry-the-permission-instead).
+
+So the submission needs two exceptions rather than three, and both are the ones
+Identities already holds word for word.
 
 ## What GTKPass already satisfies
 
@@ -149,7 +160,8 @@ does not yet use is exactly the request that deserves scrutiny.
 - **`secretstorage`**, if the Secret Service backend is meant to work in the
   packaged build. It needs `cryptography`, a Rust build requiring an SDK
   extension.
-- **A decision on `--socket=ssh-auth`**, per the section above.
+`--socket=ssh-auth` is no longer on this list: it is not requested, so there is
+nothing left to decide.
 
 ## Afterwards
 

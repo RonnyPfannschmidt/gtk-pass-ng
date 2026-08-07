@@ -177,10 +177,35 @@ An earlier design described OTP, QR code, Git and keyring *services*, and
 prescribed the dependencies to build them — `keyring`, `GitPython`, `pyotp`,
 `qrcode`, `pillow`, `opencv`. None were ever written and none are planned.
 
-Git integration is not implemented either. The write methods take a `commit`
-flag, but no backend acts on it: `pass_cli` gets commits because `pass(1)`
-makes them itself, and `direct` ignores the flag and writes the file. The
-parameter is a placeholder in the interface, not a feature.
+Git is handled by `backends/git_store.py`, a plain `GitStore` object owned by a
+backend instance rather than a mixin on `PasswordBackend`. It is the only thing
+in the tree that runs `git`, and it never encrypts or decrypts: by the time it
+sees a store, the store holds `.gpg` ciphertext and its inputs are file paths
+and a commit message. That is what lets its failure-mode tests run with no GPG
+key, no `pass` and no backend at all.
+
+The `commit` flag is now acted on, and the two filesystem backends differ in a
+way worth stating. `DirectBackend` writes `.gpg` files itself and so commits
+them itself; it constructs its `GitStore` with `commit_on_write=True` and
+honours `commit=False`. `PassBackend` constructs one with
+`commit_on_write=False` and never calls `commit()`, because `pass insert`, `rm`,
+`mv` and `cp` each commit internally whenever the store is a repository — a
+second commit would be an empty one after every write. `PassBackend` cannot
+honour `commit=False` either: `pass` decides, and there is no environment
+variable for it.
+
+`sync_capability()` and `sync()` are non-abstract on the contract. A backend
+with no filesystem store — the keyring, the demo data — inherits a default that
+says so, rather than every implementation writing a stub. The capability is
+probed once when a backend is created, because the window reads it on the UI
+thread to decide whether the sync button is sensitive.
+
+`src/gtkpass/sandbox.py` sits beside `safety.py` and answers what the Flatpak
+sandbox permits, by parsing `[Context]` out of `/.flatpak-info`. Sync needs
+permissions the manifest deliberately does not request, so this is what lets the
+application tell the user which `flatpak override` to run instead of failing at
+push time. It does **not** consult `$SSH_AUTH_SOCK`, which survives into a
+sandbox that was denied the socket and therefore lies.
 
 There is no CI. `make check` and `make test` are run locally, and the
 pre-commit hook installed by `make hooks` runs the former on the way in.

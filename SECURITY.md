@@ -54,7 +54,13 @@ backends store entries as GPG-encrypted files in the passwordstore layout, so
 the keys, the cipher and the recipients are GnuPG's business and yours. The
 Direct backend resolves recipients from the nearest `.gpg-id` walking up from
 the entry, which is what `pass` does, so a subtree delegated to another set of
-recipients stays delegated.
+recipients stays delegated. Every recipient listed there is encrypted to, which
+is what makes a per-machine key model possible; what that buys, what TPM binding
+does and does not protect against, and how to retire a machine without leaving
+its key able to read the store are in
+[docs/TRUST-MODEL.md](docs/TRUST-MODEL.md). GTKPass cannot change a store's
+recipient set, so enrolling or retiring a key is still `pass init` in a
+terminal.
 
 The Secret Service backend stores nothing itself: it hands entries to the
 session keyring over D-Bus.
