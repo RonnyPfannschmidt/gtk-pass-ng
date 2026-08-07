@@ -1,0 +1,48 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Shown when syncing needs a sandbox permission the user has not granted.
+//
+// The manifest deliberately does not request --socket=ssh-auth or
+// --share=network: a password manager should not hold network access and an
+// agent socket on the chance that someone's store has a remote. So the first
+// sync on a fresh install lands here, and the remedy is a command to run.
+//
+// A toast is the wrong widget for that -- it truncates, it times out, and it
+// cannot be copied. Adw.AlertDialog is final, so this is a builder object
+// rather than a template, as in not_implemented.blp.
+Adw.AlertDialog sync_blocked_dialog {
+  heading: _("Syncing Needs Permission");
+  body: _("GTKPass is not allowed to reach your SSH agent or the network. It asks for neither by default, because syncing is the only thing that needs them.\n\nGrant them by running:");
+
+  extra-child: Box {
+    orientation: vertical;
+    spacing: 12;
+
+    // Selectable, because the point of showing it is that it gets run.
+    Label override_command_label {
+      selectable: true;
+      wrap: true;
+      wrap-mode: word_char;
+      xalign: 0;
+
+      styles ["monospace", "card"]
+    }
+
+    Label {
+      label: _("Then restart GTKPass. Flatseal can grant the same permissions if you prefer a graphical tool.");
+      wrap: true;
+      xalign: 0;
+
+      styles ["dim-label", "caption"]
+    }
+  };
+
+  responses [
+    close: _("Close"),
+    copy: _("Copy Command") suggested,
+  ]
+
+  default-response: "copy";
+  close-response: "close";
+}

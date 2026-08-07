@@ -21,11 +21,15 @@ from gtkpass.backends import (
     BackendError,
     BackendMetadata,
     BackendSettings,
+    GitError,
     GPGError,
     PasswordBackend,
     PasswordEntry,
     PasswordMetadata,
+    SyncCapability,
+    SyncResult,
 )
+from gtkpass.backends.git_store import GitStore
 from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 logger = logging.getLogger(__name__)
@@ -58,6 +62,16 @@ class DirectBackend(PasswordBackend):
     def __init__(self, password_store_dir: Path, gpg):
         self.password_store_dir = password_store_dir
         self.gpg = gpg
+        # Probed once, here, rather than per call: it runs three git commands,
+        # and sync_capability() is read on the UI thread to decide whether the
+        # sync button is sensitive.
+        #
+        # commit_on_write is True because this backend writes .gpg files
+        # itself and commits nothing otherwise. pass does its own committing,
+        # so the Pass backend passes False.
+        self._git, self._sync_capability = GitStore.probe(
+            password_store_dir, commit_on_write=True
+        )
         logger.info("Direct backend initialised with store: %s", password_store_dir)
 
     @classmethod
@@ -195,19 +209,24 @@ class DirectBackend(PasswordBackend):
         if path.exists():
             raise FileExistsError(f"'{name}' already exists")
         self._encrypt_to_file(path, content)
+        self._record(commit, [path], f"Add password for {name} using gtkpass.")
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         path = self._path_for(name)
         if not path.is_file():
             raise FileNotFoundError(f"No password named '{name}'")
         self._encrypt_to_file(path, content)
+        self._record(commit, [path], f"Edit password for {name} using gtkpass.")
 
     def delete_password(self, name: str, commit: bool = True) -> None:
         path = self._path_for(name)
         if not path.is_file():
             raise FileNotFoundError(f"No password named '{name}'")
         path.unlink()
+        # Prune first, so the emptied directories are gone before the removal
+        # is staged rather than turning up as a change in the next commit.
         self._prune_empty_parents(path.parent)
+        self._record(commit, [path], f"Remove {name} from store.")
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         source = self._path_for(old_name)
@@ -218,6 +237,7 @@ class DirectBackend(PasswordBackend):
             raise FileExistsError(f"'{new_name}' already exists")
         self._reencrypt_or_rename(source, destination)
         self._prune_empty_parents(source.parent)
+        self._record(commit, [source, destination], f"Rename {old_name} to {new_name}.")
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         source_path = self._path_for(source)
@@ -227,6 +247,32 @@ class DirectBackend(PasswordBackend):
         if dest_path.exists():
             raise FileExistsError(f"'{dest}' already exists")
         self._reencrypt_or_rename(source_path, dest_path, keep_source=True)
+        self._record(commit, [dest_path], f"Copy {source} to {dest}.")
+
+    # -- git -----------------------------------------------------------------
+
+    def _record(self, commit: bool, paths: list[Path], message: str) -> None:
+        """Commit a write, when the store is a repository and the caller wants it.
+
+        A failed commit is raised rather than logged, and the message says the
+        write itself landed. Swallowing it would leave the store quietly out of
+        step with its own history, which surfaces much later as a push that
+        cannot fast-forward and no explanation for it.
+        """
+        if not commit or self._git is None:
+            return
+        try:
+            self._git.commit(paths, message)
+        except GitError as error:
+            raise GitError(f"The entry was saved, but {error}") from error
+
+    def sync_capability(self) -> SyncCapability:
+        return self._sync_capability
+
+    def sync(self) -> SyncResult:
+        if self._git is None or not self._sync_capability.supported:
+            raise BackendError(self._sync_capability.detail)
+        return self._git.sync()
 
     def _reencrypt_or_rename(
         self, source: Path, destination: Path, keep_source: bool = False

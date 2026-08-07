@@ -62,3 +62,78 @@ def schema_dir() -> Path:
     if COMPILED_SCHEMA_DIR is None:
         pytest.skip("glib-compile-schemas not available")
     return COMPILED_SCHEMA_DIR
+
+
+# -- git stores ------------------------------------------------------------
+#
+# Sync is exercised against a bare repository on disk rather than a network
+# remote, which makes push, rebase, conflict and non-fast-forward all reachable
+# in a unit test with nothing listening on a socket.
+#
+# scripts/make-dev-store.sh is deliberately not reused here. It generates a GPG
+# key, which takes seconds and needs gpg installed; none of the git behaviour
+# does, and keeping it that way is why GitStore is a separate object rather than
+# something living inside the backends.
+
+
+def git(*args: str, cwd: Path) -> str:
+    """Run git for test setup, failing loudly."""
+    result = subprocess.run(
+        ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        pytest.fail(f"git {' '.join(args)} failed:\n{result.stderr}")
+    return result.stdout.strip()
+
+
+def init_repo(path: Path) -> Path:
+    """A store-shaped git repository with one commit.
+
+    commit.gpgsign is forced off. A developer whose global config signs commits
+    would otherwise have every test here block on a pinentry prompt, which under
+    pytest looks like a hang rather than a failure.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    git("init", "-b", "main", cwd=path)
+    git("config", "user.email", "test@example.invalid", cwd=path)
+    git("config", "user.name", "GTKPass Tests", cwd=path)
+    git("config", "commit.gpgsign", "false", cwd=path)
+    # The safety guard opens a store carrying this marker without an opt-in.
+    (path / ".gtkpass-scratch-store").touch()
+    (path / ".gpg-id").write_text("test@example.invalid\n")
+    git("add", "-A", cwd=path)
+    git("commit", "-m", "Initial", cwd=path)
+    return path
+
+
+@pytest.fixture
+def store_repo(tmp_path: Path) -> Path:
+    """A git-backed store with no remote."""
+    return init_repo(tmp_path / "store")
+
+
+@pytest.fixture
+def bare_remote(tmp_path: Path, store_repo: Path) -> Path:
+    """A bare repository on disk, wired up as `origin`."""
+    remote = tmp_path / "remote.git"
+    remote.mkdir()
+    git("init", "--bare", "-b", "main", cwd=remote)
+    git("remote", "add", "origin", str(remote), cwd=store_repo)
+    git("push", "-u", "origin", "main", cwd=store_repo)
+    return remote
+
+
+@pytest.fixture
+def other_clone(tmp_path: Path, bare_remote: Path) -> Path:
+    """A second checkout, for making the remote move ahead."""
+    clone = tmp_path / "elsewhere"
+    subprocess.run(
+        ["git", "clone", str(bare_remote), str(clone)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    git("config", "user.email", "other@example.invalid", cwd=clone)
+    git("config", "user.name", "Somebody Else", cwd=clone)
+    git("config", "commit.gpgsign", "false", cwd=clone)
+    return clone

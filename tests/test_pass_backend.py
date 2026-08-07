@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from gtkpass.backends import BackendError
+from gtkpass.backends import BackendError, SyncUnavailable
 from gtkpass.backends.pass_cli import PassBackend, PassBackendSettings
 
 
@@ -378,3 +378,81 @@ class TestGitIsNotAnEnvironmentSetting:
         )
 
         assert "PASSWORD_STORE_ENABLE_EXTENSIONS" not in backend._env
+
+
+@pytest.mark.requires_git
+@pytest.mark.requires_pass
+@pytest.mark.requires_gpg
+class TestPassCommitsForItself:
+    """pass commits on every write, so GTKPass must not commit again.
+
+    A second commit per write would double the store's history and produce an
+    empty commit each time, since pass has already staged and committed
+    everything by the time control returns.
+    """
+
+    @pytest.fixture
+    def git_store(self, tmp_path):
+        from conftest import git, init_repo
+
+        if shutil.which("pass") is None or shutil.which("gpg") is None:
+            pytest.skip("pass and gpg are both needed")
+
+        root = init_repo(tmp_path / "store")
+        git("add", "-A", cwd=root)
+        return root
+
+    def test_the_backend_adds_no_commit_of_its_own(self, git_store):
+        """The GitStore is built not to commit; this proves the wiring."""
+        backend = PassBackend.create(PassBackendSettings(password_store_dir=git_store))
+
+        assert backend._git is not None
+        assert backend._git.commit_on_write is False
+
+    def test_a_commit_from_the_backend_is_a_no_op(self, git_store):
+        from conftest import git
+
+        backend = PassBackend.create(PassBackendSettings(password_store_dir=git_store))
+        assert backend._git is not None
+        before = git("rev-list", "--count", "HEAD", cwd=git_store)
+        (git_store / "email.gpg").write_bytes(b"\x01ciphertext")
+
+        backend._git.commit([git_store / "email.gpg"], "Should not happen.")
+
+        assert git("rev-list", "--count", "HEAD", cwd=git_store) == before
+
+
+@pytest.mark.requires_git
+class TestSyncIsOfferedForAGitBackedStore:
+    @pytest.fixture
+    def git_store(self, tmp_path):
+        from conftest import git, init_repo
+
+        root = init_repo(tmp_path / "store")
+        remote = tmp_path / "remote.git"
+        remote.mkdir()
+        git("init", "--bare", "-b", "main", cwd=remote)
+        git("remote", "add", "origin", str(remote), cwd=root)
+        git("push", "-u", "origin", "main", cwd=root)
+        return root
+
+    def test_it_is_offered(self, pass_on_path, git_store):
+        backend = PassBackend.create(PassBackendSettings(password_store_dir=git_store))
+
+        assert backend.sync_capability().supported
+
+    def test_turning_git_off_withdraws_the_offer(self, pass_on_path, git_store):
+        """The `use-git` preference used to set an unrelated pass variable."""
+        backend = PassBackend.create(
+            PassBackendSettings(password_store_dir=git_store, use_git=False)
+        )
+
+        capability = backend.sync_capability()
+
+        assert not capability.supported
+        assert capability.reason is SyncUnavailable.NOT_OFFERED
+
+    def test_a_store_without_a_remote_is_not_offered(self, pass_on_path, store):
+        backend = PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+        assert not backend.sync_capability().supported

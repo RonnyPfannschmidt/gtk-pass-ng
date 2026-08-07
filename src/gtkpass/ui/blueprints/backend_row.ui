@@ -48,8 +48,8 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     </child>
     <child>
       <object class="AdwSwitchRow" id="pass_git_row">
-        <property name="title" translatable="yes">Enable Git</property>
-        <property name="subtitle" translatable="yes">Use git for version control of the store</property>
+        <property name="title" translatable="yes">Offer to Sync</property>
+        <property name="subtitle" translatable="yes">Pull and push this store when it has a git remote</property>
         <property name="visible">false</property>
         <signal name="notify::active" handler="_on_settings_changed"/>
       </object>

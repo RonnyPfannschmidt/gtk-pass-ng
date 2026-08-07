@@ -34,6 +34,35 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                 <property name="menu-model">primary_menu</property>
               </object>
             </child>
+            <child type="end">
+              <object class="GtkButton" id="sync_button">
+                <property name="tooltip-text" translatable="yes">Sync with Remote</property>
+                <property name="action-name">win.sync</property>
+                <property name="child">
+                  <object class="GtkStack" id="sync_stack">
+                    <property name="transition-type">1</property>
+                    <child>
+                      <object class="GtkStackPage">
+                        <property name="name">idle</property>
+                        <property name="child">
+                          <object class="GtkImage">
+                            <property name="icon-name">emblem-synchronizing-symbolic</property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkStackPage">
+                        <property name="name">busy</property>
+                        <property name="child">
+                          <object class="AdwSpinner"></object>
+                        </property>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
           </object>
         </child>
         <property name="content">
@@ -109,6 +138,12 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     </child>
   </template>
   <menu id="primary_menu">
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Sync with Remote</attribute>
+        <attribute name="action">win.sync</attribute>
+      </item>
+    </section>
     <section>
       <item>
         <attribute name="label" translatable="yes">Preferences</attribute>

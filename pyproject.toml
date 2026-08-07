@@ -116,4 +116,5 @@ markers = [
     "slow: Slow running tests",
     "requires_gpg: Needs a working gpg binary",
     "requires_pass: Needs the pass CLI",
+    "requires_git: Needs a git binary",
 ]

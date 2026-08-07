@@ -366,3 +366,204 @@ class TestEditing:
 
         shown, expected = run_in_application(select_twice)
         assert shown == expected
+
+
+class TestSyncing:
+    """The sync action, from the button through to a toast.
+
+    The backend is stubbed with a Future held open by the test, the way the
+    stale-decrypt test above does, so nothing here touches a network or a real
+    repository.
+    """
+
+    def window_with_sync(self, app, capability, sync=None):
+        """A window whose demo backend claims the given sync capability."""
+        from gtkpass.window import GTKPassWindow
+
+        window = GTKPassWindow(application=app)
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        assert backend is not None
+        backend.sync_capability = lambda: capability  # type: ignore[method-assign]
+        if sync is not None:
+            backend.sync = sync  # type: ignore[method-assign]
+        window._refresh_sync_action()
+        return window
+
+    def test_it_is_not_offered_without_a_syncable_backend(
+        self, demo_backend_configured
+    ):
+        from gtkpass.backends import SyncCapability, SyncUnavailable
+
+        def check(app):
+            window = self.window_with_sync(
+                app,
+                SyncCapability.unsupported(
+                    SyncUnavailable.NO_REMOTE, "No remote is configured."
+                ),
+            )
+            return (
+                window.lookup_action("sync").get_enabled(),
+                window.sync_button.get_tooltip_text(),
+            )
+
+        enabled, tooltip = run_in_application(check)
+
+        assert not enabled
+        assert tooltip == "No remote is configured."
+
+    def test_it_is_offered_when_a_store_has_a_remote(self, demo_backend_configured):
+        from gtkpass.backends import SyncCapability, SyncUnavailable
+
+        def check(app):
+            window = self.window_with_sync(
+                app,
+                SyncCapability(
+                    supported=True,
+                    reason=SyncUnavailable.READY,
+                    detail="Sync with origin/main",
+                    remote="origin",
+                    branch="main",
+                ),
+            )
+            return (
+                window.lookup_action("sync").get_enabled(),
+                window.sync_button.get_tooltip_text(),
+            )
+
+        enabled, tooltip = run_in_application(check)
+
+        assert enabled
+        assert tooltip == "Sync with origin/main"
+
+    def ready(self):
+        from gtkpass.backends import SyncCapability, SyncUnavailable
+
+        return SyncCapability(
+            supported=True,
+            reason=SyncUnavailable.READY,
+            detail="Sync with origin/main",
+            remote="origin",
+            branch="main",
+        )
+
+    def test_a_successful_sync_is_confirmed(self, demo_backend_configured):
+        from gtkpass.backends import SyncResult
+
+        def check(app):
+            window = self.window_with_sync(
+                app, self.ready(), sync=lambda: SyncResult(pulled=2, pushed=1)
+            )
+            toasts: list[str] = []
+            window._toast = toasts.append  # type: ignore[method-assign,assignment]
+
+            window.lookup_action("sync").activate(None)
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return toasts
+
+        toasts = run_in_application(check)
+
+        assert toasts, "the sync reported nothing"
+        assert "2 in, 1 out" in toasts[0]
+
+    def test_a_sync_that_moved_nothing_says_so(self, demo_backend_configured):
+        from gtkpass.backends import SyncResult
+
+        def check(app):
+            window = self.window_with_sync(
+                app, self.ready(), sync=lambda: SyncResult(pulled=0, pushed=0)
+            )
+            toasts: list[str] = []
+            window._toast = toasts.append  # type: ignore[method-assign,assignment]
+
+            window.lookup_action("sync").activate(None)
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return toasts
+
+        toasts = run_in_application(check)
+
+        assert toasts and "up to date" in toasts[0]
+
+    def test_a_failure_is_reported_and_not_swallowed(self, demo_backend_configured):
+        from gtkpass.backends import GitError
+
+        def failing():
+            raise GitError("git push failed: Permission denied (publickey)")
+
+        def check(app):
+            window = self.window_with_sync(app, self.ready(), sync=failing)
+            toasts: list[str] = []
+            window._toast = toasts.append  # type: ignore[method-assign,assignment]
+
+            window.lookup_action("sync").activate(None)
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return toasts
+
+        toasts = run_in_application(check)
+
+        assert toasts, "a failed sync said nothing at all"
+        assert "Permission denied" in toasts[0]
+
+    def test_the_button_shows_progress_while_it_runs(self, demo_backend_configured):
+        from concurrent.futures import Future
+
+        def check(app):
+            window = self.window_with_sync(app, self.ready())
+            held: list[Future] = []
+
+            def capture(_backend_id):
+                held.append(Future())
+                return held[-1]
+
+            window.backend_manager.sync_async = capture  # type: ignore[assignment]
+            window.lookup_action("sync").activate(None)
+
+            busy = window.sync_stack.get_visible_child_name()
+            enabled_while_busy = window.lookup_action("sync").get_enabled()
+            return busy, enabled_while_busy
+
+        busy, enabled_while_busy = run_in_application(check)
+
+        assert busy == "busy"
+        assert not enabled_while_busy, "a second sync could be started mid-sync"
+
+    def test_the_button_goes_back_to_idle_afterwards(self, demo_backend_configured):
+        from gtkpass.backends import SyncResult
+
+        def check(app):
+            window = self.window_with_sync(
+                app, self.ready(), sync=lambda: SyncResult(pulled=0, pushed=0)
+            )
+            window.lookup_action("sync").activate(None)
+            pump_until(
+                lambda: window.sync_stack.get_visible_child_name() == "idle",
+                timeout_seconds=5.0,
+            )
+            return window.sync_stack.get_visible_child_name()
+
+        assert run_in_application(check) == "idle"
+
+    def test_a_missing_permission_offers_the_override_command(
+        self, demo_backend_configured
+    ):
+        """The whole point of not requesting ssh-auth up front."""
+        from gtkpass.backends import SyncNotPermitted
+
+        command = "flatpak override --user --socket=ssh-auth --share=network app.id"
+
+        def blocked():
+            raise SyncNotPermitted("Not permitted", command)
+
+        def check(app):
+            window = self.window_with_sync(app, self.ready(), sync=blocked)
+            shown: list[str] = []
+            window._show_sync_blocked = lambda error: shown.append(  # type: ignore[method-assign]
+                error.override_command
+            )
+
+            window.lookup_action("sync").activate(None)
+            pump_until(lambda: bool(shown), timeout_seconds=5.0)
+            return shown
+
+        shown = run_in_application(check)
+
+        assert shown == [command]

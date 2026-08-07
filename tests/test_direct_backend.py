@@ -237,3 +237,110 @@ class TestRecipientResolution:
 
         with pytest.raises(BackendError, match="gpg-id"):
             backend.add_password("entry", "a\n")
+
+
+@pytest.mark.requires_git
+class TestCommittingToAGitStore:
+    """The `commit` flag was accepted and dropped by every backend.
+
+    DirectBackend writes .gpg files straight to disk, so unless it commits them
+    itself a git-backed store drifts out of step with its own history -- which
+    is what produces an unexplained non-fast-forward at the next push.
+    """
+
+    @pytest.fixture
+    def git_store(self, tmp_path, gpg_home):
+        from conftest import git, init_repo
+
+        root = init_repo(tmp_path / "store")
+        (root / ".gpg-id").write_text(f"{KEY_ID}\n")
+        git("add", "-A", cwd=root)
+        git("commit", "-m", "Set the recipient", cwd=root)
+        return root
+
+    @pytest.fixture
+    def backend(self, git_store, gpg_home):
+        return DirectBackend.create(
+            DirectBackendSettings(password_store_dir=git_store, gpg_home=gpg_home)
+        )
+
+    def revisions(self, store):
+        from conftest import git
+
+        return int(git("rev-list", "--count", "HEAD", cwd=store))
+
+    def test_a_new_entry_is_committed(self, backend, git_store):
+        from conftest import git
+
+        before = self.revisions(git_store)
+
+        backend.add_password("email/work", "hunter2\n")
+
+        assert self.revisions(git_store) == before + 1
+        assert git("status", "--porcelain", cwd=git_store) == ""
+
+    def test_the_commit_message_names_the_entry(self, backend, git_store):
+        from conftest import git
+
+        backend.add_password("email/work", "hunter2\n")
+
+        assert "email/work" in git("log", "-1", "--pretty=%s", cwd=git_store)
+
+    def test_the_commit_message_does_not_carry_the_password(self, backend, git_store):
+        from conftest import git
+
+        backend.add_password("email/work", "hunter2\n")
+
+        assert "hunter2" not in git("log", "-1", "--pretty=%B", cwd=git_store)
+
+    def test_an_edit_is_committed(self, backend, git_store):
+        backend.add_password("email/work", "hunter2\n")
+        before = self.revisions(git_store)
+
+        backend.edit_password("email/work", "hunter3\n")
+
+        assert self.revisions(git_store) == before + 1
+
+    def test_a_deletion_is_committed_as_a_removal(self, backend, git_store):
+        from conftest import git
+
+        backend.add_password("email/work", "hunter2\n")
+
+        backend.delete_password("email/work")
+
+        assert git("status", "--porcelain", cwd=git_store) == ""
+        assert "email/work.gpg" not in git("ls-files", cwd=git_store)
+
+    def test_not_committing_can_be_asked_for(self, backend, git_store):
+        from conftest import git
+
+        before = self.revisions(git_store)
+
+        backend.add_password("email/work", "hunter2\n", commit=False)
+
+        assert self.revisions(git_store) == before
+        # -uall: without it an untracked directory collapses to "?? email/".
+        assert "email/work.gpg" in git("status", "--porcelain", "-uall", cwd=git_store)
+
+    def test_the_entry_is_still_written_when_not_committing(self, backend, git_store):
+        backend.add_password("email/work", "hunter2\n", commit=False)
+
+        assert backend.get_password("email/work").password == "hunter2"
+
+
+@pytest.mark.requires_git
+class TestAStoreWithoutGitStillWorks:
+    """git is optional: plenty of stores are a plain directory."""
+
+    def test_writing_to_a_plain_directory_is_unaffected(self, backend):
+        backend.add_password("email/work", "hunter2\n")
+
+        assert backend.get_password("email/work").password == "hunter2"
+
+    def test_it_reports_that_it_cannot_sync(self, backend):
+        from gtkpass.backends import SyncUnavailable
+
+        capability = backend.sync_capability()
+
+        assert not capability.supported
+        assert capability.reason is SyncUnavailable.NOT_A_REPO

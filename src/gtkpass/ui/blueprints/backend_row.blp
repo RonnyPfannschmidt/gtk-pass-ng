@@ -39,8 +39,8 @@ template $BackendSettingsRow : Adw.ExpanderRow {
   }
 
   Adw.SwitchRow pass_git_row {
-    title: _("Enable Git");
-    subtitle: _("Use git for version control of the store");
+    title: _("Offer to Sync");
+    subtitle: _("Pull and push this store when it has a git remote");
     visible: false;
     notify::active => $_on_settings_changed();
   }

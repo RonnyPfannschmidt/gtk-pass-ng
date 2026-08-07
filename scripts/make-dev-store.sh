@@ -7,6 +7,7 @@ set -euo pipefail
 
 STORE="${1:-.dev/store}"
 GNUPG="${2:-.dev/gnupg}"
+REMOTE="${3:-.dev/remote.git}"
 KEY="gtkpass-dev@example.invalid"
 
 mkdir -p "$STORE" "$GNUPG"
@@ -80,5 +81,27 @@ ENTRY
 add "no-metadata" <<'ENTRY'
 just-a-password
 ENTRY
+
+# A git repository with a bare remote beside it, so the sync button can be
+# driven by hand with nothing listening on a network. The remote is a directory
+# on disk; pushing to it needs no ssh, no agent and no sandbox permission,
+# which makes it the one arrangement that works identically in a checkout and
+# inside the Flatpak.
+if command -v git >/dev/null 2>&1 && [ ! -d "$STORE/.git" ]; then
+    echo "Making the store a git repository with a local remote..."
+    git -C "$STORE" init -q -b main
+    git -C "$STORE" config user.email "$KEY"
+    git -C "$STORE" config user.name "GTKPass Development"
+    # A developer signing commits globally would otherwise get a pinentry
+    # prompt on every write the application makes.
+    git -C "$STORE" config commit.gpgsign false
+    git -C "$STORE" add -A
+    git -C "$STORE" commit -q -m "Development store"
+
+    mkdir -p "$REMOTE"
+    git -C "$REMOTE" init -q --bare -b main
+    git -C "$STORE" remote add origin "$(cd "$REMOTE" && pwd)"
+    git -C "$STORE" push -q -u origin main
+fi
 
 echo "Development store ready: $STORE ($(find "$STORE" -name '*.gpg' | wc -l) entries)"

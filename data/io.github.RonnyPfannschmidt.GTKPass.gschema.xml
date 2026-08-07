@@ -122,9 +122,13 @@
 
     <key name="use-git" type="b">
       <default>true</default>
-      <summary>Enable git integration</summary>
+      <summary>Offer to sync this store with its git remote</summary>
       <description>
-        Use git for version control of password store.
+        Whether GTKPass offers to pull and push this store. It has no effect on
+        whether pass itself commits: pass decides that by whether the store is
+        a git repository, and there is no setting for it. This key used to set
+        PASSWORD_STORE_ENABLE_EXTENSIONS, which controls pass extensions rather
+        than git, so it never did anything at all.
       </description>
     </key>
   </schema>

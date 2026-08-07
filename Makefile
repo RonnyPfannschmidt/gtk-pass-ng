@@ -87,9 +87,12 @@ run:
 # Use this instead of the real one; see src/gtkpass/safety.py.
 DEV_STORE := .dev/store
 DEV_GNUPGHOME := .dev/gnupg
+# A bare repository on disk, so the sync button is exercisable without a
+# network, an ssh agent or the sandbox permissions sync would otherwise need.
+DEV_REMOTE := .dev/remote.git
 
 devstore:
-	./scripts/make-dev-store.sh $(DEV_STORE) $(DEV_GNUPGHOME)
+	./scripts/make-dev-store.sh $(DEV_STORE) $(DEV_GNUPGHOME) $(DEV_REMOTE)
 
 # The 0 matters. This launches through run_app.sh, which opts in to the real
 # store by default; without turning it back off the development run would have

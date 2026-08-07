@@ -29,6 +29,35 @@ template $GTKPassWindow : Adw.ApplicationWindow {
         icon-name: "open-menu-symbolic";
         menu-model: primary_menu;
       }
+
+      // Insensitive until a backend reports a store it can sync; the action
+      // owns that. Packed after the menu so the menu stays outermost.
+      [end]
+      Button sync_button {
+        tooltip-text: _("Sync with Remote");
+        action-name: "win.sync";
+
+        // A stack rather than swapping the child in Python: nothing here may
+        // construct a widget, and a spinner has to replace the icon in place
+        // so the header bar does not shift while a sync runs.
+        child: Stack sync_stack {
+          transition-type: crossfade;
+
+          StackPage {
+            name: "idle";
+
+            child: Image {
+              icon-name: "emblem-synchronizing-symbolic";
+            };
+          }
+
+          StackPage {
+            name: "busy";
+
+            child: Adw.Spinner {};
+          }
+        };
+      }
     }
 
     // Wraps the split view so toasts appear over the whole window, which is
@@ -92,6 +121,12 @@ template $GTKPassWindow : Adw.ApplicationWindow {
 }
 
 menu primary_menu {
+  section {
+    item {
+      label: _("Sync with Remote");
+      action: "win.sync";
+    }
+  }
   section {
     item {
       label: _("Preferences");

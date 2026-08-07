@@ -14,9 +14,11 @@ import textwrap
 import pytest
 
 from gtkpass.backends import (
+    BackendError,
     BackendMetadata,
     PasswordBackend,
     PasswordMetadata,
+    SyncUnavailable,
 )
 
 ENTRY_POINT_GROUP = "gtkpass.backends"
@@ -29,6 +31,11 @@ ENTRY_POINT_NAMES = [ep.name for ep in ENTRY_POINTS]
 #: Methods a concrete backend has to provide, with the signature the caller
 #: is entitled to rely on.
 ABSTRACT_METHODS = sorted(PasswordBackend.__abstractmethods__)
+
+#: Methods the ABC supplies a working default for, so they are absent from
+#: __abstractmethods__ and the signature check above would never see them.
+#: A backend may override these; if it does, it has to keep the signature.
+OPTIONAL_METHODS = ["sync", "sync_capability"]
 
 
 #: ``is_available()`` runs on the UI thread during window construction, so a
@@ -119,6 +126,67 @@ class TestBackendClass:
         expected = inspect.signature(getattr(PasswordBackend, method_name))
         actual = inspect.signature(getattr(cls, method_name))
         assert list(actual.parameters) == list(expected.parameters)
+
+    @pytest.mark.parametrize("method_name", OPTIONAL_METHODS)
+    def test_optional_signature_matches_the_interface(self, name, method_name):
+        """Sync is not abstract, so ABSTRACT_METHODS does not cover it.
+
+        A backend that overrides it with a different signature would still
+        import cleanly and fail only when the button is pressed.
+        """
+        cls = load(name)
+        expected = inspect.signature(getattr(PasswordBackend, method_name))
+        actual = inspect.signature(getattr(cls, method_name))
+        assert list(actual.parameters) == list(expected.parameters)
+
+
+@pytest.mark.parametrize("name", ENTRY_POINT_NAMES)
+class TestSyncCapabilityIsAnswerable:
+    """Every backend answers whether it can sync, without doing any work.
+
+    ``sync_capability()`` gates the sensitivity of a header-bar button, so it is
+    read on the UI thread. A backend that shells out to git here would put a
+    subprocess in the way of the window drawing.
+    """
+
+    def test_the_class_offers_the_capability_query(self, name):
+        assert callable(load(name).sync_capability)
+
+    def test_a_backend_with_no_store_inherits_the_refusal(self, name):
+        """Only the two filesystem backends have anything to sync.
+
+        Overriding it elsewhere would mean a backend claiming it can sync
+        something that is not on disk, which nothing here can do.
+        """
+        cls = load(name)
+        overrides = "sync_capability" in vars(cls)
+
+        assert overrides == (name in {"direct", "pass"}), (
+            f"{name} unexpectedly {'overrides' if overrides else 'inherits'} "
+            "the sync capability probe"
+        )
+
+
+class TestTheInheritedDefaultRefuses:
+    """Checked against a real instance, not a stand-in.
+
+    The demo backend is always available and has no filesystem store, which is
+    exactly the case the default exists for.
+    """
+
+    def test_it_reports_that_there_is_nothing_to_sync(self):
+        backend = load("demo").create()
+
+        capability = backend.sync_capability()
+
+        assert not capability.supported
+        assert capability.reason is SyncUnavailable.NO_STORE
+
+    def test_asking_it_to_sync_is_refused(self):
+        backend = load("demo").create()
+
+        with pytest.raises(BackendError):
+            backend.sync()
 
 
 class TestDemoBackendBehaviour:

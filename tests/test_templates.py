@@ -87,3 +87,32 @@ class TestMainWindow:
 
         assert outcome, "the application never activated"
         assert outcome["unresolved"] == []
+
+
+class TestSyncButtonStack:
+    """The sync button swaps icon for spinner by page name.
+
+    Renaming a page makes set_visible_child_name a silent no-op, so the button
+    would simply never show that a sync was running.
+    """
+
+    @pytest.mark.parametrize("page_name", ["idle", "busy"])
+    def test_stack_page_exists(self, page_name):
+        from gtkpass.window import GTKPassWindow
+
+        outcome = {}
+
+        def on_activate(app):
+            window = GTKPassWindow(application=app)
+            outcome["child"] = window.sync_stack.get_child_by_name(page_name)
+            window.close()
+            app.quit()
+
+        app = Adw.Application(application_id="io.github.RonnyPfannschmidt.GTKPass.Test")
+        app.connect("activate", on_activate)
+        app.run([])
+
+        assert outcome.get("child") is not None, (
+            f"window.blp has no Stack page named {page_name!r}; "
+            f"set_visible_child_name({page_name!r}) is a silent no-op"
+        )

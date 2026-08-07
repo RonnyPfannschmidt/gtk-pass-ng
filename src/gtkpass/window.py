@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from gtkpass._gi import Adw, Gio, Gtk
-from gtkpass.backends import BackendError
+from gtkpass.backends import BackendError, SyncNotPermitted, SyncUnavailable
 from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
 from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 from gtkpass.backends.manager import BackendManager
@@ -57,6 +57,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
     toast_overlay = Gtk.Template.Child()
     content_stack = Gtk.Template.Child()
     password_detail = Gtk.Template.Child()
+    sync_button = Gtk.Template.Child()
+    sync_stack = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -75,12 +77,16 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # (backend id, name) of the entry on display, or None.
         self._shown: tuple[str, str] | None = None
         self._clipboard = ClipboardCopier(self)
+        # Backends whose stores have a remote, refreshed whenever they load.
+        self._syncable_backends: list[str] = []
+        self._pending_syncs: list[str] = []
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
 
         self._setup_actions()
         self._load_backends()
+        self._refresh_sync_action()
         self._setup_password_list()
 
     def _setup_actions(self):
@@ -96,6 +102,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         edit_action.connect("activate", self._on_edit_password)
         edit_action.set_enabled(False)
         self.add_action(edit_action)
+
+        # Nothing is syncable until the backends have loaded and reported what
+        # their stores are, so this starts closed and _refresh_sync_action
+        # opens it.
+        sync_action = Gio.SimpleAction.new("sync", None)
+        sync_action.connect("activate", self._on_sync)
+        sync_action.set_enabled(False)
+        self.add_action(sync_action)
 
     def _load_backends(self):
         """Load backend instances from GSettings."""
@@ -116,16 +130,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
                     settings = self._load_backend_settings(backend_id, backend_type)
                     if settings:
                         backend = self._create_backend(backend_type, settings)
-                        if backend:
-                            self.backend_manager.add_backend(backend_id, backend)
-                            logger.info(f"Successfully loaded backend: {backend_id}")
-                        else:
-                            logger.warning(
-                                f"Backend not available: {backend_id} ({backend_type})"
-                            )
-                            self.failed_backends.append(
-                                (backend_id, backend_type, "Backend not available")
-                            )
+                        self.backend_manager.add_backend(backend_id, backend)
+                        logger.info(f"Successfully loaded backend: {backend_id}")
                     else:
                         logger.error(
                             f"Failed to load settings for backend: {backend_id}"
@@ -177,6 +183,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         # Reload backends
         self._load_backends()
+        self._refresh_sync_action()
 
         # Refresh the password list
         self._load_passwords()
@@ -215,21 +222,22 @@ class GTKPassWindow(Adw.ApplicationWindow):
         return None
 
     def _create_backend(self, backend_type: str, settings):
-        """Create a backend instance from settings."""
-        try:
-            if backend_type == "demo":
-                return DemoBackend.create(settings)
-            elif backend_type == "secretservice":
-                return SecretServiceBackend.create(settings)
-            elif backend_type == "pass":
-                return PassBackend.create(settings)
-            elif backend_type == "direct":
-                return DirectBackend.create(settings)
-        except BackendError as e:
-            logger.warning(f"Backend not available: {backend_type} - {e}")
-        except Exception as e:
-            logger.exception(f"Error creating {backend_type} backend: {e}")
-        return None
+        """Create a backend instance from settings.
+
+        Raises rather than returning None on a BackendError. The message is the
+        only thing that tells a blocked store apart from a missing .gpg-id or a
+        GPG that would not start, and swallowing it here is why every one of
+        them reached the sidebar as the same "Backend not available".
+        """
+        if backend_type == "demo":
+            return DemoBackend.create(settings)
+        elif backend_type == "secretservice":
+            return SecretServiceBackend.create(settings)
+        elif backend_type == "pass":
+            return PassBackend.create(settings)
+        elif backend_type == "direct":
+            return DirectBackend.create(settings)
+        raise BackendError(f"Unknown backend type '{backend_type}'")
 
     def _setup_password_list(self):
         """Set up the password list."""
@@ -351,14 +359,126 @@ class GTKPassWindow(Adw.ApplicationWindow):
         else:
             message = f"{len(self.failed_backends)} backend(s) failed to load"
 
-        # Show toast
         toast = Adw.Toast.new(message)
-        toast.set_timeout(5)  # Show for 5 seconds
+        toast.set_timeout(5)
+        # This add_toast was missing, so a backend that failed to load said so
+        # only in the log. The sidebar row was the sole indication, and it did
+        # not carry the reason.
+        self.toast_overlay.add_toast(toast)
 
-        # Log the errors
         logger.warning(f"Failed backends: {message}")
         for backend_id, backend_type, error in self.failed_backends:
             logger.warning(f"  - {backend_id} ({backend_type}): {error}")
+
+    # -- syncing -------------------------------------------------------------
+
+    def _refresh_sync_action(self) -> None:
+        """Offer sync only where a backend has a store with a remote.
+
+        The tooltip carries the reason when it is refused, because "the button
+        is grey" is not an answer to "why can I not sync?".
+        """
+        capabilities = self.backend_manager.sync_capabilities()
+        syncable = [
+            backend_id
+            for backend_id, capability in capabilities.items()
+            if capability.supported
+        ]
+        self._syncable_backends = syncable
+
+        action = self.lookup_action("sync")
+        if action is not None:
+            action.set_enabled(bool(syncable))
+
+        if syncable:
+            details = ", ".join(
+                capabilities[backend_id].detail for backend_id in syncable
+            )
+            self.sync_button.set_tooltip_text(details)
+        elif capabilities:
+            # Whichever reason is most actionable: a store that is a repository
+            # without a remote is closer to working than one that is not a
+            # repository at all.
+            reasons = [
+                capability.detail
+                for capability in capabilities.values()
+                if capability.reason is not SyncUnavailable.NO_STORE
+            ]
+            self.sync_button.set_tooltip_text(
+                reasons[0] if reasons else "No store here can be synced."
+            )
+        else:
+            self.sync_button.set_tooltip_text("No backends are configured.")
+
+    def _on_sync(self, action, param):
+        """Pull and push the syncable backends, off the UI thread."""
+        if not self._syncable_backends:
+            return
+
+        action.set_enabled(False)
+        self.sync_stack.set_visible_child_name("busy")
+
+        # One at a time: they queue on the same four-worker pool anyway, and a
+        # single report reads better than one toast per backend.
+        self._pending_syncs = list(self._syncable_backends)
+        self._sync_next()
+
+    def _sync_next(self) -> None:
+        if not self._pending_syncs:
+            self._sync_finished()
+            return
+
+        backend_id = self._pending_syncs.pop(0)
+
+        def done(result):
+            if result.pulled or result.pushed:
+                self._toast(
+                    f"Synced {self._get_backend_display_name(backend_id)}: "
+                    f"{result.pulled} in, {result.pushed} out"
+                )
+            else:
+                self._toast(
+                    f"{self._get_backend_display_name(backend_id)} is up to date"
+                )
+            self._sync_next()
+
+        def report(error):
+            logger.error("Sync failed for %s: %s", backend_id, error)
+            if isinstance(error, SyncNotPermitted):
+                self._show_sync_blocked(error)
+            else:
+                self._toast(f"Could not sync: {error}")
+            self._sync_next()
+
+        try:
+            future = self.backend_manager.sync_async(backend_id)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, done, report)
+
+    def _sync_finished(self) -> None:
+        self.sync_stack.set_visible_child_name("idle")
+        self._refresh_sync_action()
+        # A pull can have brought entries in, so the tree is out of date.
+        self._load_passwords()
+
+    def _show_sync_blocked(self, error: "SyncNotPermitted") -> None:
+        """Explain the missing sandbox permission and how to grant it."""
+        builder = Gtk.Builder.new_from_file(
+            str(importlib.resources.files("gtkpass.ui.blueprints") / "sync_blocked.ui")
+        )
+        dialog = builder.get_object("sync_blocked_dialog")
+        builder.get_object("override_command_label").set_label(error.override_command)
+
+        def responded(_dialog, response):
+            if response == "copy":
+                # No timeout: this is a shell command, not a secret.
+                self._clipboard.copy(error.override_command, 0)
+                self._toast("Command copied")
+
+        dialog.connect("response", responded)
+        dialog.present(self)
 
     def _on_add_password(self, action, param):
         """Handle add password button click."""

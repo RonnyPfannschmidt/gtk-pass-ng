@@ -21,7 +21,11 @@ from . import (
     PasswordBackend,
     PasswordEntry,
     PasswordMetadata,
+    SyncCapability,
+    SyncResult,
+    SyncUnavailable,
 )
+from .git_store import GitStore
 
 
 @dataclass
@@ -63,6 +67,7 @@ class PassBackend(PasswordBackend):
         pass_cmd: list[str],
         env: dict,
         password_store_dir: Path,
+        use_git: bool = True,
     ):
         """Initialize Pass backend.
 
@@ -70,10 +75,24 @@ class PassBackend(PasswordBackend):
             pass_cmd: Command to invoke pass
             env: Environment variables for pass command
             password_store_dir: The store this instance was configured with
+            use_git: Whether to offer syncing this store with its remote
         """
         self._pass_cmd = pass_cmd
         self._env = env
         self.password_store_dir = password_store_dir
+        # commit_on_write=False, and this is the whole difference from
+        # DirectBackend: pass commits by itself on every insert, rm, mv and cp
+        # whenever the store is a repository, so a commit from here would add a
+        # second, empty one after each write. The GitStore exists for sync()
+        # and for answering whether sync is possible.
+        self._git, self._sync_capability = GitStore.probe(
+            password_store_dir, commit_on_write=False
+        )
+        if self._sync_capability.supported and not use_git:
+            self._sync_capability = SyncCapability.unsupported(
+                SyncUnavailable.NOT_OFFERED,
+                "Syncing is turned off for this store in its settings.",
+            )
 
     @classmethod
     def is_available(cls) -> bool:
@@ -131,7 +150,18 @@ class PassBackend(PasswordBackend):
             pass_cmd=pass_cmd,
             env=env,
             password_store_dir=store_dir,
+            use_git=settings.use_git,
         )
+
+    # -- syncing -------------------------------------------------------------
+
+    def sync_capability(self) -> SyncCapability:
+        return self._sync_capability
+
+    def sync(self) -> SyncResult:
+        if self._git is None or not self._sync_capability.supported:
+            raise BackendError(self._sync_capability.detail)
+        return self._git.sync()
 
     # -- paths ---------------------------------------------------------------
 

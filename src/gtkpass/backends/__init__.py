@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 
@@ -105,6 +106,50 @@ class PasswordMetadata:
     name: str
     path: Path
     modified: float
+
+
+class SyncUnavailable(Enum):
+    """Why a store cannot sync.
+
+    Each value has a different remedy -- install git, run `git init`, add a
+    remote, move the store out of the repository it is nested in -- so they are
+    not collapsed into a single boolean.
+    """
+
+    READY = "ready"
+    NO_GIT = "no-git"
+    NOT_A_REPO = "not-a-repo"
+    NESTED_IN_ANOTHER_REPO = "nested-in-another-repo"
+    NO_REMOTE = "no-remote"
+    NOT_OFFERED = "not-offered"
+    NO_STORE = "no-store"
+
+
+@dataclass(frozen=True)
+class SyncCapability:
+    """Whether a backend instance can sync, and what to say when it cannot.
+
+    ``detail`` is shown to the user as the sync button's tooltip, so it reads as
+    a sentence rather than as a reason code.
+    """
+
+    supported: bool
+    reason: SyncUnavailable
+    detail: str
+    remote: str | None = None
+    branch: str | None = None
+
+    @classmethod
+    def unsupported(cls, reason: SyncUnavailable, detail: str) -> "SyncCapability":
+        return cls(supported=False, reason=reason, detail=detail)
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """What a sync moved, for the confirmation message."""
+
+    pulled: int
+    pushed: int
 
 
 class PasswordBackend(ABC):
@@ -280,6 +325,35 @@ class PasswordBackend(ABC):
         """
         pass
 
+    # -- syncing -------------------------------------------------------------
+    #
+    # Deliberately not abstract. A backend with no filesystem store -- the
+    # keyring, the demo data -- can never sync, and making these abstract would
+    # force every one of them, and every third-party backend, to write a stub
+    # that says so. The default already says so.
+
+    def sync_capability(self) -> SyncCapability:
+        """Whether this instance can sync with a remote, and why not if it cannot.
+
+        Must not block: this is consulted to decide whether the sync button is
+        sensitive. Implementations probe once when they are created rather than
+        shelling out here.
+        """
+        return SyncCapability.unsupported(
+            SyncUnavailable.NO_STORE,
+            f"{self.metadata.name} has no password store to sync.",
+        )
+
+    def sync(self) -> SyncResult:
+        """Pull from the remote, then push.
+
+        Raises:
+            GitError: If the sync fails, including SyncNotPermitted when the
+                sandbox was not granted the permissions it needs.
+            BackendError: If this backend cannot sync at all.
+        """
+        raise BackendError(f"{self.metadata.name} cannot sync.")
+
 
 class BackendError(Exception):
     """Base exception for backend errors."""
@@ -297,3 +371,16 @@ class GitError(BackendError):
     """Exception for git-related errors."""
 
     pass
+
+
+class SyncNotPermitted(GitError):
+    """Sync needs a sandbox permission the user has not granted.
+
+    A GitError so that ``except GitError`` around a sync still catches it, but
+    distinct because the remedy is a command to run rather than anything about
+    the store. Raised before any git process starts.
+    """
+
+    def __init__(self, message: str, override_command: str) -> None:
+        super().__init__(message)
+        self.override_command = override_command

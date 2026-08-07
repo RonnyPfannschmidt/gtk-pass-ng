@@ -4,10 +4,13 @@ Discovers and manages multiple password storage backends using entry points.
 """
 
 import concurrent.futures
+import logging
 from collections.abc import Callable
 from importlib.metadata import entry_points
 
-from . import PasswordBackend, PasswordEntry, PasswordMetadata
+from . import PasswordBackend, PasswordEntry, PasswordMetadata, SyncCapability
+
+logger = logging.getLogger(__name__)
 
 
 class BackendManager:
@@ -48,7 +51,7 @@ class BackendManager:
                 self._backend_classes[backend_id] = backend_class
 
             except Exception as e:
-                print(f"Warning: Failed to load backend {ep.name}: {e}")
+                logger.warning("Failed to load backend %s: %s", ep.name, e)
 
         return discovered
 
@@ -210,6 +213,45 @@ class BackendManager:
 
         return self._executor.submit(backend.edit_password, name, content)
 
+    # -- syncing -------------------------------------------------------------
+
+    def sync_capabilities(self) -> dict[str, SyncCapability]:
+        """What each initialized backend can sync, if anything.
+
+        Reads what the backends probed when they were created, so this is a
+        dictionary lookup and safe to call from the UI thread.
+        """
+        return {
+            backend_id: backend.sync_capability()
+            for backend_id, backend in self._backends.items()
+        }
+
+    def syncable_backends(self) -> list[str]:
+        """Backends that could sync right now."""
+        return [
+            backend_id
+            for backend_id, capability in self.sync_capabilities().items()
+            if capability.supported
+        ]
+
+    def sync_async(self, backend_id: str) -> concurrent.futures.Future:
+        """Sync one backend with its remote, off the UI thread.
+
+        Args:
+            backend_id: Backend identifier
+
+        Returns:
+            Future carrying a SyncResult, or the GitError that stopped it
+
+        Raises:
+            ValueError: If backend not initialized
+        """
+        backend = self._backends.get(backend_id)
+        if not backend:
+            raise ValueError(f"Backend '{backend_id}' not initialized")
+
+        return self._executor.submit(backend.sync)
+
     def search_all_backends(self, query: str) -> dict[str, list[PasswordMetadata]]:
         """Search across all active backends.
 
@@ -227,7 +269,7 @@ class BackendManager:
                 if matches:
                     results[backend_id] = matches
             except Exception as e:
-                print(f"Warning: Search failed in backend '{backend_id}': {e}")
+                logger.warning("Search failed in backend %r: %s", backend_id, e)
 
         return results
 
