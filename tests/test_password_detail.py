@@ -1,14 +1,47 @@
 """The detail pane: how a decrypted entry is mapped onto rows."""
 
+import time
 from pathlib import Path
 
 import pytest
 
-from gtkpass._gi import Adw
+from gtkpass._gi import Adw, GLib, Gtk
 from gtkpass.backends import PasswordEntry
 from gtkpass.ui.password_detail import PLACEHOLDER, PasswordDetailView
 
 pytestmark = pytest.mark.gui
+
+
+def labels_of(widget):
+    """Text of every Label below ``widget``."""
+
+    def walk(parent):
+        child = parent.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Label):
+                yield child.get_text()
+            yield from walk(child)
+            child = child.get_next_sibling()
+
+    return set(walk(widget))
+
+
+def present_until(view, ready):
+    """Show the pane until ``ready(view)`` holds, and report what it rendered.
+
+    Rows are built during a layout pass, so nothing is on screen until the loop
+    turns. Waiting on the condition rather than a fixed delay is what keeps
+    this from failing on a loaded machine.
+    """
+    window = Gtk.Window(child=view, default_width=400, default_height=400)
+    window.present()
+
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline and not ready(view):
+        context.iteration(may_block=False)
+        time.sleep(0.005)
+    return labels_of(view.extras_view)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -25,16 +58,51 @@ def view():
     return PasswordDetailView()
 
 
+class TestHeading:
+    """The entry names the pane; it is not one of the pane's fields.
+
+    A row labelled "Name" whose value was the entry itself said nothing the
+    heading does not, and pushed the fields that matter further down.
+    """
+
+    def test_the_entry_is_the_title(self, view):
+        view.show_entry(entry("s3cret", name="email/work"))
+
+        assert view.title_label.get_text() == "work"
+
+    def test_the_folder_leads_into_it(self, view):
+        """The two labels sit on one line, so they read as one path."""
+        view.show_entry(entry("s3cret", name="email/work"))
+
+        assert view.path_label.get_text() == "email/"
+        assert view.path_label.get_visible()
+
+    def test_a_nested_folder_keeps_its_whole_path(self, view):
+        view.show_entry(entry("s3cret", name="web/news/hn"))
+
+        assert view.title_label.get_text() == "hn"
+        assert view.path_label.get_text() == "web/news/"
+
+    def test_a_top_level_entry_has_no_folder_line(self, view):
+        view.show_entry(entry("s3cret", name="wifi"))
+
+        assert view.title_label.get_text() == "wifi"
+        assert not view.path_label.get_visible()
+
+    def test_clear_blanks_the_heading(self, view):
+        view.show_entry(entry("s3cret", name="email/work"))
+
+        view.clear()
+
+        assert view.title_label.get_text() == ""
+        assert not view.path_label.get_visible()
+
+
 class TestFieldMapping:
     def test_password_is_the_first_line(self, view):
         view.show_entry(entry("s3cret\nusername: alice"))
 
         assert view.password_row.get_text() == "s3cret"
-
-    def test_name_is_shown(self, view):
-        view.show_entry(entry("s3cret", name="email/work"))
-
-        assert view.name_row.get_subtitle() == "email/work"
 
     @pytest.mark.parametrize("key", ["username", "user", "login"])
     def test_username_accepts_the_usual_spellings(self, view, key):
@@ -54,6 +122,75 @@ class TestFieldMapping:
 
         assert view.username_row.get_subtitle() == PLACEHOLDER
         assert view.url_row.get_subtitle() == PLACEHOLDER
+
+
+class TestOtherFields:
+    """Anything the pane has no dedicated row for still has to be shown.
+
+    Stores carry whatever their owner put there -- ``host``, ``port``,
+    ``account``, ``server`` -- and every one of those used to be dropped on the
+    floor: not a row, and not part of the notes either, because a line with a
+    colon in it is read as metadata rather than as prose.
+    """
+
+    def fields(self, view):
+        model = view.extra_fields
+        return [
+            (model.get_item(index).key, model.get_item(index).value)
+            for index in range(model.get_n_items())
+        ]
+
+    def test_an_unknown_field_is_shown(self, view):
+        view.show_entry(entry("s3cret\nhost: db.example.com\nport: 5432"))
+
+        assert self.fields(view) == [("host", "db.example.com"), ("port", "5432")]
+
+    def test_fields_with_rows_of_their_own_are_not_repeated(self, view):
+        view.show_entry(
+            entry("s3cret\nusername: alice\nurl: https://example.com\nnotes: hello")
+        )
+
+        assert self.fields(view) == []
+
+    def test_the_group_is_hidden_when_there_are_none(self, view):
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert not view.extras_group.get_visible()
+
+    def test_the_group_appears_when_there_are_some(self, view):
+        view.show_entry(entry("s3cret\naccount: 1234567890"))
+
+        assert view.extras_group.get_visible()
+
+    def test_moving_to_another_entry_drops_the_previous_fields(self, view):
+        view.show_entry(entry("s3cret\nhost: db.example.com"))
+
+        view.show_entry(entry("other\nport: 5432", name="second"))
+
+        assert self.fields(view) == [("port", "5432")]
+
+    def test_clear_empties_them(self, view):
+        view.show_entry(entry("s3cret\nhost: db.example.com"))
+
+        view.clear()
+
+        assert self.fields(view) == []
+        assert not view.extras_group.get_visible()
+
+    def test_the_rows_reach_the_display(self, view):
+        """The model being right proves nothing about the row template.
+
+        These rows come from a BuilderListItemFactory, whose bindings only run
+        when a row is built, so a broken one leaves every assertion above
+        passing and the group on screen empty.
+        """
+        view.show_entry(entry("s3cret\nhost: db.example.com"))
+
+        rendered = present_until(
+            view, lambda v: {"host", "db.example.com"} <= labels_of(v.extras_view)
+        )
+
+        assert {"host", "db.example.com"} <= rendered
 
 
 class TestNotes:
