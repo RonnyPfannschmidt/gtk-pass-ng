@@ -14,6 +14,11 @@ from collections.abc import Callable
 
 from gtkpass._gi import Gio, GObject, Gtk
 
+#: A leaf carries the same icon the application uses for itself, so an entry is
+#: recognisable as one without counting indentation levels.
+ENTRY_ICON = "dialog-password-symbolic"
+FOLDER_ICON = "folder-symbolic"
+
 
 class PasswordNode(GObject.Object):
     """One row in the sidebar: a backend, a folder, or an entry.
@@ -90,9 +95,23 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             model=self.tree_model, autoselect=False, can_unselect=True
         )
         self.column_view.set_model(self.selection)
+        self._hide_column_header()
 
         self._on_password_selected: Callable[[str, str], None] | None = None
         self.selection.connect("notify::selected-item", self._selection_changed)
+
+    def _hide_column_header(self) -> None:
+        """Drop the header row of the one column the sidebar has.
+
+        A single column with nothing to sort by has no title worth 30 pixels of
+        a 250 pixel sidebar. ColumnView exposes no property for this, so the
+        header row -- its first child -- is hidden directly; a test presents the
+        widget and checks it stayed hidden, which is what would catch GTK
+        rearranging its children under us.
+        """
+        header = self.column_view.get_first_child()
+        if header is not None:
+            header.set_visible(False)
 
     def _selection_changed(self, *_args) -> None:
         selected = self.get_selected_password()
@@ -140,7 +159,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             is_leaf = depth == len(parts) - 1
             node = PasswordNode(
                 name=part,
-                icon_name="" if is_leaf else "folder-symbolic",
+                icon_name=ENTRY_ICON if is_leaf else FOLDER_ICON,
                 backend_id=backend.backend_id,
                 password_name="/".join(parts[: depth + 1]) if is_leaf else "",
             )

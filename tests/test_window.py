@@ -64,6 +64,19 @@ def sidebar_names(window):
     return list(walk(window.password_list.root))
 
 
+def displayed_name(window):
+    """The entry the detail pane is showing, read back off its heading.
+
+    The pane splits a path across two labels, so put it back together rather
+    than asking the view which entry it holds: what these tests are after is
+    that the right one reached the display. The folder label carries the
+    separator, so the two concatenate as they read.
+    """
+    detail = window.password_detail
+    folder = detail.path_label.get_text() if detail.path_label.get_visible() else ""
+    return folder + detail.title_label.get_text()
+
+
 #: Matches the ``<type>_<timestamp>`` form the settings UI generates, so the
 #: display-name derivation is exercised the way it runs in production.
 DEMO_BACKEND_ID = "demo_1766234611"
@@ -178,7 +191,7 @@ class TestShowingDetails:
     def test_the_entry_is_decrypted_and_displayed(self, demo_backend_configured):
         window, name = run_in_application(self.open_first_password)
 
-        assert window.password_detail.name_row.get_subtitle() == name
+        assert displayed_name(window) == name
         assert window.password_detail.password_row.get_text()
 
     def test_a_missing_entry_reports_instead_of_crashing(self, demo_backend_configured):
@@ -362,7 +375,7 @@ class TestEditing:
                 future.set_result(backend.get_password(name))
 
             pump_until(lambda: False, timeout_seconds=0.5)
-            return window.password_detail.name_row.get_subtitle(), second
+            return displayed_name(window), second
 
         shown, expected = run_in_application(select_twice)
         assert shown == expected

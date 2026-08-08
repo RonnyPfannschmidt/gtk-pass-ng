@@ -3,7 +3,7 @@
 import importlib.resources
 from typing import ClassVar
 
-from gtkpass._gi import Adw, GObject, Gtk
+from gtkpass._gi import Adw, Gio, GObject, Gtk
 from gtkpass.backends import PasswordEntry
 
 #: Metadata keys that mean "the account name", in order of preference. Stores
@@ -13,7 +13,25 @@ USERNAME_KEYS = ("username", "user", "login")
 #: Likewise for the site a password belongs to.
 URL_KEYS = ("url", "website", "uri")
 
+#: Keys the pane has a row of its own for. Everything else is shown as it was
+#: written rather than dropped: a store carries whatever its owner put there.
+KNOWN_KEYS = frozenset(USERNAME_KEYS + URL_KEYS + ("notes",))
+
 PLACEHOLDER = "—"
+
+
+class MetadataField(GObject.Object):
+    """One key and value the pane has no dedicated row for.
+
+    The row template in ``password_detail.blp`` binds to these properties by
+    name, so the GType name here has to stay in step with the
+    ``$GTKPassMetadataField`` casts over there.
+    """
+
+    __gtype_name__ = "GTKPassMetadataField"
+
+    key = GObject.Property(type=str, default="")
+    value = GObject.Property(type=str, default="")
 
 
 @Gtk.Template(
@@ -38,10 +56,13 @@ class PasswordDetailView(Gtk.Box):
     stack: Gtk.Stack = Gtk.Template.Child()
     spinner: Gtk.Spinner = Gtk.Template.Child()
     spinner_label: Gtk.Label = Gtk.Template.Child()
-    name_row: Adw.ActionRow = Gtk.Template.Child()
+    title_label: Gtk.Label = Gtk.Template.Child()
+    path_label: Gtk.Label = Gtk.Template.Child()
     username_row: Adw.ActionRow = Gtk.Template.Child()
     password_row: Adw.PasswordEntryRow = Gtk.Template.Child()
     url_row: Adw.ActionRow = Gtk.Template.Child()
+    extras_group: Adw.PreferencesGroup = Gtk.Template.Child()
+    extras_view: Gtk.ListView = Gtk.Template.Child()
     notes_group: Adw.PreferencesGroup = Gtk.Template.Child()
     notes_label: Gtk.Label = Gtk.Template.Child()
     copy_username_btn: Gtk.Button = Gtk.Template.Child()
@@ -54,6 +75,9 @@ class PasswordDetailView(Gtk.Box):
         #: Whether passwords are shown rather than dotted out. Kept so that
         #: moving to another entry does not silently re-hide one.
         self._reveal_password = False
+        #: Fields with no row of their own, in the order the store wrote them.
+        self.extra_fields: Gio.ListStore = Gio.ListStore(item_type=MetadataField)
+        self.extras_view.set_model(Gtk.NoSelection(model=self.extra_fields))
         self.stack.set_visible_child_name("content")
 
     # -- state ---------------------------------------------------------------
@@ -74,12 +98,13 @@ class PasswordDetailView(Gtk.Box):
         self._replace_entry(entry)
 
         metadata = entry.metadata
-        self.name_row.set_subtitle(entry.name)
+        self._show_heading(entry.name)
         self.username_row.set_subtitle(_first(metadata, USERNAME_KEYS) or PLACEHOLDER)
         self.password_row.set_text(entry.password or "")
         # Re-applied per entry: setting the text can reset the delegate.
         self.set_reveal_password(self._reveal_password)
         self.url_row.set_subtitle(_first(metadata, URL_KEYS) or PLACEHOLDER)
+        self._show_extra_fields(metadata)
 
         notes = _notes(entry)
         self.notes_label.set_text(notes)
@@ -88,13 +113,40 @@ class PasswordDetailView(Gtk.Box):
         self.spinner.set_spinning(False)
         self.stack.set_visible_child_name("content")
 
+    def _show_heading(self, name: str) -> None:
+        """Split ``work/mail`` into the folder that leads to it and the entry.
+
+        The two labels share a line, so the folder keeps the separator and the
+        heading reads as the path it is. A top-level entry hides the folder
+        label rather than showing an empty one, which would otherwise indent
+        the entry by a stray space.
+        """
+        folder, separator, leaf = name.rpartition("/")
+        self.title_label.set_text(leaf)
+        self.path_label.set_text(folder + separator)
+        self.path_label.set_visible(bool(folder))
+
+    def _show_extra_fields(self, metadata: dict[str, str]) -> None:
+        """List every field that has no row of its own, as the store wrote it.
+
+        Dropping them was silent: a line like ``host: db.example.com`` is read
+        as metadata, so it never reached the notes either, and an entry could
+        lose half of what it carried without saying so.
+        """
+        self.extra_fields.remove_all()
+        for key, value in metadata.items():
+            if key not in KNOWN_KEYS and value:
+                self.extra_fields.append(MetadataField(key=key, value=value))
+        self.extras_group.set_visible(bool(self.extra_fields.get_n_items()))
+
     def clear(self) -> None:
         """Forget the entry and blank the rows."""
         self._replace_entry(None)
-        self.name_row.set_subtitle("")
+        self._show_heading("")
         self.username_row.set_subtitle(PLACEHOLDER)
         self.password_row.set_text("")
         self.url_row.set_subtitle(PLACEHOLDER)
+        self._show_extra_fields({})
         self.notes_label.set_text("")
         self.notes_group.set_visible(False)
         self.spinner.set_spinning(False)

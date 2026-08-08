@@ -103,6 +103,70 @@ class TestExpansion:
         assert visible_rows(view) == ["Demo", "work"]
 
 
+class TestIcons:
+    """What a row is has to be readable at a glance, not inferred from depth."""
+
+    def icon_of(self, view, name):
+        for index in range(view.tree_model.get_n_items()):
+            node = view.tree_model.get_row(index).get_item()
+            if node.name == name:
+                return node.icon_name
+        raise AssertionError(f"no row named {name}")
+
+    def test_an_entry_gets_the_password_icon(self, view, backend):
+        view.add_password(backend, "email")
+        view.expand_all()
+
+        assert self.icon_of(view, "email") == "dialog-password-symbolic"
+
+    def test_a_folder_gets_the_folder_icon(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_all()
+
+        assert self.icon_of(view, "work") == "folder-symbolic"
+
+    def test_a_backend_keeps_the_icon_it_was_given(self, view, backend):
+        assert self.icon_of(view, "Demo") == "emblem-default-symbolic"
+
+
+def present(view, ready):
+    """Present the view until ``ready(view)`` holds, or the deadline passes.
+
+    Bounded by wall clock and not by iteration count: rows are built during a
+    layout pass, and a non-blocking iteration returns immediately when nothing
+    is pending, so a plain loop spins through before the view has drawn.
+    Waiting on the condition rather than on a fixed delay is also what keeps
+    this from failing on a loaded machine.
+    """
+    window = Gtk.Window(child=view, default_width=300, default_height=400)
+    window.present()
+
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline and not ready(view):
+        context.iteration(may_block=False)
+        time.sleep(0.005)
+    return window
+
+
+def rendered_rows(view):
+    """The row widgets the view has built, if any."""
+    return [
+        child
+        for child in descendants(view.column_view)
+        if child.__gtype__.name == "GtkColumnViewRowWidget" and child.get_height()
+    ]
+
+
+def descendants(widget):
+    """Every widget below ``widget``, depth first."""
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from descendants(child)
+        child = child.get_next_sibling()
+
+
 class TestRendering:
     """The row template is only exercised once rows are actually built.
 
@@ -111,35 +175,61 @@ class TestRendering:
     sidebar empty.
     """
 
-    def labels(self, widget):
-        """Text of every Label below ``widget``."""
-        child = widget.get_first_child()
-        while child is not None:
-            if isinstance(child, Gtk.Label):
-                yield child.get_text()
-            yield from self.labels(child)
-            child = child.get_next_sibling()
+    def labels(self, view):
+        return {
+            child.get_text()
+            for child in descendants(view.column_view)
+            if isinstance(child, Gtk.Label)
+        }
 
-    def rendered(self, view):
-        """Present the view long enough for it to build its rows."""
-        window = Gtk.Window(child=view)
-        window.present()
-
-        context = GLib.MainContext.default()
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            context.iteration(may_block=False)
-            texts = set(self.labels(view.column_view))
-            if len(texts) > 1:  # more than the column header
-                return texts
-            time.sleep(0.005)
-        return set(self.labels(view.column_view))
+    def icons(self, view):
+        return {
+            child.get_icon_name()
+            for child in descendants(view.column_view)
+            if isinstance(child, Gtk.Image)
+        }
 
     def test_a_row_shows_its_name(self, view, backend):
         view.add_password(backend, "email")
         view.expand_first_level()
 
-        assert {"Demo", "email"} <= self.rendered(view)
+        present(view, lambda v: {"Demo", "email"} <= self.labels(v))
+
+        assert {"Demo", "email"} <= self.labels(view)
+
+    def test_a_row_shows_its_icon(self, view, backend):
+        view.add_password(backend, "email")
+        view.expand_first_level()
+
+        present(view, lambda v: "dialog-password-symbolic" in self.icons(v))
+
+        assert "dialog-password-symbolic" in self.icons(view)
+
+
+class TestCompactness:
+    """A sidebar of one column has no room to spend on chrome.
+
+    Both of these are about pixels the tree gives back: the header of a column
+    that needs no title, and the padding a full-size list row carries.
+    """
+
+    def test_no_column_header_is_shown(self, view, backend):
+        view.add_password(backend, "email")
+        view.expand_first_level()
+        present(view, rendered_rows)
+
+        assert not view.column_view.get_first_child().get_visible()
+
+    def test_rows_are_tighter_than_a_default_list_row(self, view, backend):
+        view.add_password(backend, "email")
+        view.expand_first_level()
+        present(view, rendered_rows)
+
+        # A stock ColumnView row is 34px tall for this content; the compact
+        # style class takes it to 22. The padding sits on the row, not on the
+        # cell inside it, which stays 18px either way.
+        heights = [row.get_height() for row in rendered_rows(view)]
+        assert heights and max(heights) < 30
 
 
 class TestSelection:
