@@ -45,45 +45,45 @@ rm -rf dist/rpm
 mkdir -p dist/rpm
 # Without this setuptools-scm derives a version from git describe, which with no
 # tags in the repository is a dev version no RPM Release could sort against.
-SETUPTOOLS_SCM_PRETEND_VERSION="${VERSION}" \
-    uv build --sdist --out-dir dist
+#
+# uv is what a developer here has; CI is inside a bare Fedora container and has
+# python3-build instead. Either produces the same sdist.
+if command -v uv >/dev/null; then
+    SETUPTOOLS_SCM_PRETEND_VERSION="${VERSION}" uv build --sdist --out-dir dist
+else
+    SETUPTOOLS_SCM_PRETEND_VERSION="${VERSION}" \
+        python3 -m build --sdist --outdir dist
+fi
 
 sdist="dist/gtkpass-${VERSION}.tar.gz"
 [ -f "$sdist" ] || { echo "error: expected sdist at $sdist" >&2; exit 1; }
 
-echo "==> rpmbuild in ${IMAGE}"
-podman run --rm \
-    -v "$PWD:/src:z" \
-    -e "SNAPSHOT=${SNAPSHOT}" \
-    -e "VERSION=${VERSION}" \
-    "$IMAGE" \
-    bash -euo pipefail -c '
-        dnf -y --setopt=install_weak_deps=False install \
-            rpm-build rpmdevtools python3-devel pyproject-rpm-macros \
-            desktop-file-utils libappstream-glib glib2-devel >/dev/null
+# Build here when this already *is* the Fedora being built for -- which is CI,
+# and anyone running a package-based Fedora. Otherwise a container, because the
+# ostree desktops this is developed on have no rpm-build and layering it to
+# package something is a reboot.
+if [ -z "${USE_CONTAINER:-}" ]; then
+    if [ "$(. /etc/os-release && echo "${VERSION_ID%%.*}")" = "$FEDORA_RELEASE" ] \
+        && command -v rpmbuild >/dev/null; then
+        USE_CONTAINER=0
+    else
+        USE_CONTAINER=1
+    fi
+fi
 
-        rpmdev-setuptree
-        cp "/src/dist/gtkpass-${VERSION}.tar.gz" ~/rpmbuild/SOURCES/
-
-        spec=/src/packaging/gtkpass.spec
-        define="--define=snapshot ${SNAPSHOT}"
-
-        dnf -y builddep --spec "$spec" >/dev/null
-
-        # %pyproject_buildrequires reports the project metadata dependencies by
-        # failing the source build with exit 11 and writing them into a
-        # buildreqs.nosrc.rpm. Install those and go round again; twice is enough
-        # in practice, and the bound stops a loop if it is not.
-        for _ in 1 2 3; do
-            if rpmbuild -br --nodeps "$define" "$spec"; then break; fi
-            dnf -y builddep ~/rpmbuild/SRPMS/gtkpass-*.buildreqs.nosrc.rpm >/dev/null
-        done
-
-        rpmbuild -ba "$define" "$spec"
-
-        cp ~/rpmbuild/RPMS/noarch/*.rpm /src/dist/rpm/
-        cp ~/rpmbuild/SRPMS/gtkpass-*.src.rpm /src/dist/rpm/
-    '
+if [ "$USE_CONTAINER" = "0" ]; then
+    echo "==> rpmbuild here (fedora ${FEDORA_RELEASE})"
+    VERSION="$VERSION" SNAPSHOT="$SNAPSHOT" SRC="$PWD" packaging/rpmbuild-here.sh
+else
+    echo "==> rpmbuild in ${IMAGE}"
+    podman run --rm \
+        -v "$PWD:/src:z" \
+        -e "SNAPSHOT=${SNAPSHOT}" \
+        -e "VERSION=${VERSION}" \
+        -e "SRC=/src" \
+        "$IMAGE" \
+        /src/packaging/rpmbuild-here.sh
+fi
 
 echo
 echo "==> built:"

@@ -232,5 +232,8 @@ application tell the user which `flatpak override` to run instead of failing at
 push time. It does **not** consult `$SSH_AUTH_SOCK`, which survives into a
 sandbox that was denied the socket and therefore lies.
 
-There is no CI. `make check` and `make test` are run locally, and the
-pre-commit hook installed by `make hooks` runs the former on the way in.
+`make check` and `make test` run locally, the pre-commit hook installed by
+`make hooks` runs the former on the way in, and `.github/workflows/ci.yml` runs
+both on push and pull request across two Fedora releases -- along with building
+the RPM, installing it, and smoke testing the installed copy, which is the only
+way the packaging is exercised as a user would meet it.

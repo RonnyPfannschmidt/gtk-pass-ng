@@ -158,6 +158,52 @@ to find it. If the icon does not appear in the shell, that is why.
 `ARCHITECTURE` is deliberately absent from the extension-release — systemd only
 checks it when set, and everything in the image is noarch.
 
+## What CI does with all this
+
+`.github/workflows/ci.yml` builds the RPM on Fedora 43 and 44, **installs** it,
+and runs `packaging/smoke-test-install.sh` against the installed copy under
+xvfb. That last step is the point: a package that builds and cannot be installed
+has wrong dependency metadata, and one that installs but cannot start has lost
+its `.ui` files or its schema — neither of which the build itself can see.
+
+The sysext job takes the RPM from that job rather than building its own, and the
+reason is worth stating because it is a trap. `build-sysext.sh` decides what to
+vendor by asking the running system what it lacks, and a *build* dependency
+installed alongside is indistinguishable from something the target already
+ships. Building the RPM in the same container pulls in `python3-gnupg` for
+`%pyproject_buildrequires`, after which the resolver sees it as present, leaves
+it out, and produces an image that reaches a real Fedora with its Direct GPG
+backend reporting unavailable. Nothing fails; the image is just quietly wrong.
+
+So the sysext job installs only what a GNOME desktop base image has — GTK4,
+libadwaita, PyGObject, secretstorage, gnupg2, `pass` — which makes its answer the
+one a Silverblue or Bluefin host would give, without pulling several gigabytes
+of those images. Three things guard the result: a manifest written into the
+image saying what it carries, a size ceiling in `inspect-sysext.sh` that fails
+if the desktop's own GTK ever ends up inside, and a check that `python3-gnupg`
+did travel. `build-sysext.sh` also warns when it is resolving on a machine with
+`rpm-build` installed, which is the same hazard met locally.
+
+CI images are targeted at `fedora <release>`. An image for a derivative is built
+on that derivative — `make sysext` on the machine it is for, which is also the
+only place it can be merged and actually tried.
+
+## Trying the image on a real machine
+
+```bash
+make sysext-test        # merge, smoke test, unmerge
+./packaging/test-sysext.sh --keep   # leave it merged
+```
+
+This is the step CI cannot do: `systemd-sysext merge` needs a running systemd
+and a writable `/run`, and a container has neither. The script inspects the image
+first, says what it is about to change, copies it into `/var/lib/extensions/`,
+merges, runs the same smoke test against the overlaid `/usr`, and unmerges again.
+Nothing is written to `/usr` itself — the merge is an overlay — and without
+`--keep` the image is removed from `/var/lib/extensions/` at the end, so a reboot
+comes back clean. If other extensions are already installed it says so first and
+waits, because merge and unmerge cover all of them at once.
+
 ## What has and has not been verified
 
 Built, and checked: the RPM builds clean in a Fedora 44 container, its contents
@@ -168,10 +214,15 @@ reporting the tree as an installed build rather than a checkout, the schema
 resolved from the private directory, and six entries listed and one decrypted
 from a scratch store.
 
+The RPM has been installed on a clean Fedora 44 and smoke tested there, which is
+what the CI job does on every push.
+
 Not done:
 
 - Neither artefact is signed, and there is no repository to install from. This is
   `make rpm` on a checkout, not a distribution channel.
 - No COPR build, and no Fedora review request.
-- The image has been built but not merged with `systemd-sysext merge` on a live
-  session, and the RPM has not been installed on a package-based Fedora.
+- No release tag, so every build is a snapshot.
+- The image has been built and inspected but never merged with `systemd-sysext
+  merge` on a live session. `make sysext-test` is what does that, and it has not
+  been run here.

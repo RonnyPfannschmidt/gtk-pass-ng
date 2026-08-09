@@ -115,7 +115,8 @@ make check   # lint, format and types, via pre-commit
 ```
 
 The pre-commit hook `make sync` installed runs `make check`'s hooks on the way
-in. There is no CI, so these are the entire gate.
+in, and CI runs both on the pull request. Running them here first is faster than
+finding out from a red run.
 
 #### 6. Submit Pull Request
 
@@ -207,8 +208,9 @@ Security is critical. Follow these practices:
 
 All contributions go through code review:
 
-1. **Automated Checks**: the pre-commit hook runs lint, format and types on
-   the way in. There is no CI, so `make test` is run by hand.
+1. **Automated Checks**: the pre-commit hook runs lint, format and
+   types on the way in, and CI runs the suite and the packaging jobs on the
+   pull request.
 2. **Manual Review**: Maintainers review code quality and design
 3. **Testing**: Reviewers may test functionality manually
 4. **Feedback**: Address review comments and update PR

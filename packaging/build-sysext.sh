@@ -78,6 +78,22 @@ fi
 #
 # Resolved against the running system rather than a package list, because the
 # answer depends on what the user has layered.
+#
+# Which means the resolving system has to be one the image is actually for. A
+# build dependency installed here is indistinguishable from something the target
+# already ships, and the failure is silent: %pyproject_buildrequires pulls in
+# python3-gnupg to build the RPM, and an image resolved afterwards leaves it out
+# and reaches the target with its Direct GPG backend reporting unavailable.
+#
+# On the ostree desktops this cannot happen -- rpmbuild runs in a container and
+# the host stays clean. Anywhere rpmbuild is installed, it is worth saying so.
+if command -v rpmbuild >/dev/null; then
+    echo "warning: rpm-build is installed here, so this machine may carry build" >&2
+    echo "         dependencies that a target system would not. Anything they" >&2
+    echo "         satisfy will be left out of the image. Resolve on a machine" >&2
+    echo "         that resembles the target, or check the manifest afterwards." >&2
+fi
+
 declare -a bundled=("$gtkpass_rpm")
 
 provided_by_bundle() {
@@ -103,6 +119,25 @@ missing_requires() {
         done
 }
 
+# Downloading is done in a container for the same reason the RPM is built in
+# one: the ostree desktop this targets has no writable package database and no
+# dnf worth invoking. CI already runs inside the base image it is building for,
+# where dnf is right there and a nested container would be both slower and a
+# different Fedora than the one being resolved against.
+download_package() {
+    local capability=$1
+    if [ "${USE_CONTAINER:-1}" = "0" ]; then
+        ( cd dist/sysext && dnf download "$capability" >/dev/null )
+    else
+        podman run --rm -v "$PWD/dist/sysext:/out:z" \
+            "registry.fedoraproject.org/fedora:${FEDORA_RELEASE}" \
+            bash -euo pipefail -c "
+                dnf -y install dnf-plugins-core >/dev/null
+                cd /out && dnf download '${capability}' >/dev/null
+            "
+    fi
+}
+
 mkdir -p dist/sysext
 # A queue rather than one pass: a package pulled in to satisfy the application
 # may itself need something the host has not got.
@@ -116,12 +151,7 @@ while [ ${#queue[@]} -gt 0 ]; do
         echo "==> vendoring a package for ${capability}"
 
         before=$(ls -1 dist/sysext/*.rpm 2>/dev/null || true)
-        podman run --rm -v "$PWD/dist/sysext:/out:z" \
-            "registry.fedoraproject.org/fedora:${FEDORA_RELEASE}" \
-            bash -euo pipefail -c "
-                dnf -y install dnf-plugins-core >/dev/null
-                cd /out && dnf download '${capability}' >/dev/null
-            "
+        download_package "$capability"
         # Only what this download added. dnf resolves a capability to one
         # package but may write more than one file, and re-queueing something
         # already bundled would extract it twice.
@@ -170,6 +200,19 @@ rm -rf "$STAGE/usr/share/glib-2.0"
 find "$STAGE" \( -name 'icon-theme.cache' -o -name 'mimeinfo.cache' \
     -o -name '*.cache' -a -path '*/share/*' \) -delete
 rm -rf "$STAGE/usr/lib/.build-id"
+
+echo "==> manifest"
+# What is in here, written into the image itself. The vendoring set is decided
+# by asking the running system what it lacks, so it is a property of the machine
+# that built this as much as of the project -- and an image that quietly started
+# carrying GTK would otherwise look exactly like one that did not.
+{
+    echo "# Packages unpacked into this extension."
+    echo "# Everything else is expected from ${SYSEXT_ID} ${SYSEXT_VERSION_ID}."
+    for rpm in "${bundled[@]}"; do
+        basename "$rpm"
+    done
+} > "$STAGE/usr/share/${NAME}/sysext-manifest.txt"
 
 echo "==> extension-release"
 mkdir -p "$STAGE/usr/lib/extension-release.d"

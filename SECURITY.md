@@ -153,9 +153,9 @@ GTKPass cannot protect against:
 - Static analysis: `ruff` and `mypy`, via `make check`
 - Test suite: `make test`
 
-Both are run by hand and by the pre-commit hook. There is no CI, no dependency
-scanning, and no external audit. The project has not been reviewed by anyone
-outside it.
+Both run by hand, on the way in through the pre-commit hook, and in CI on push
+and pull request. There is no dependency scanning and no external audit, and the
+project has not been reviewed by anyone outside it.
 
 ## Disclosure history
 

@@ -10,6 +10,8 @@ application; none of its dates survived contact with the work.
 - Project structure, `pyproject.toml`, uv-managed environment
 - Ruff, mypy and pre-commit, run by `make check` and by a git hook
 - Test suite, run headless by `make test`
+- CI: lint, format, types and the suite over two Fedora releases, plus building
+  the RPM, installing it, and smoke testing the installed copy
 - One canonical application identity in `config.py`
 - A throwaway development store, so nothing here reads real passwords
 
@@ -82,8 +84,10 @@ Roughly in the order that would make the application usable day to day.
   ready: no screenshots, no release tag, a placeholder icon and a manifest that
   builds from the working directory. See
   [docs/FLATHUB.md](docs/FLATHUB.md).
-- **CI.** There is none. `make check` and `make test` are the entire gate, and
-  they only run when someone remembers.
+- **Merging the sysext image in CI.** It is built and inspected there, but
+  `systemd-sysext merge` needs a running systemd and a writable `/run`, which a
+  container has neither of. `packaging/test-sysext.sh` does it on a real
+  machine; nothing does it automatically.
 
 Smaller things, worth doing when passing:
 
