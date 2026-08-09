@@ -13,11 +13,20 @@ decrypted password cannot be un-disclosed.
 
 - The backends refuse the real store, and the keyring, **whenever the code is
   running out of a checkout** — which is everything you will ever run here.
-  `safety.running_from_checkout()` decides that by looking for a
-  `pyproject.toml` above the package, which catches an editable install, a bare
-  `PYTHONPATH=src` run, and a checkout shadowed by an installed copy alike.
+  `safety.running_from_checkout()` asks the installed distribution: an editable
+  install records `dir_info.editable` in its `direct_url.json`, and that is the
+  only signal that *means* editable rather than resembling it. The metadata is
+  believed only when it describes the module actually running, so a checkout
+  ahead of an installed release on `sys.path` is still a checkout.
   An installed build is allowed, because refusing there would only mean every
   package shipping a wrapper to undo it.
+- **GTKPass has to be installed to run at all.** `safety.require_installed()`
+  runs on import of `gtkpass` and refuses a bare `PYTHONPATH=src` process,
+  which has no metadata and so settles nothing about what is executing. A
+  leftover `src/gtkpass.egg-info` does not count as an install either: it is a
+  build artefact inside a source tree, it carries no `direct_url.json`, and
+  before it was excluded it made a `PYTHONPATH` run look like a packaged one
+  and opened the guard. Use `make sync`.
 - `GTKPASS_ALLOW_REAL_STORE` overrides that in both directions. `run_app.sh`
   sets it to 1, launching a checkout being the one case where the checkout
   really is the application. If you are reaching for that variable anywhere

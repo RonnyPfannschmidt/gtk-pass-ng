@@ -129,7 +129,9 @@ download_package() {
     if [ "${USE_CONTAINER:-1}" = "0" ]; then
         ( cd dist/sysext && dnf download "$capability" >/dev/null )
     else
-        podman run --rm -v "$PWD/dist/sysext:/out:z" \
+        # shellcheck source=packaging/container-runtime.sh
+        . "$(dirname "$0")/container-runtime.sh"
+        "$CONTAINER_RUNTIME" run --rm -v "$PWD/dist/sysext:/out:z" \
             "registry.fedoraproject.org/fedora:${FEDORA_RELEASE}" \
             bash -euo pipefail -c "
                 dnf -y install dnf-plugins-core >/dev/null

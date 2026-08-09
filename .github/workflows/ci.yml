@@ -33,7 +33,7 @@ jobs:
       - name: install dependencies
         run: |
           dnf -y --setopt=install_weak_deps=False install \
-            git-core uv python3-devel python3-gobject gtk4 libadwaita \
+            make git-core uv python3-devel python3-gobject gtk4 libadwaita \
             gobject-introspection glib2-devel cairo-gobject-devel
 
       - uses: actions/checkout@v5
@@ -63,7 +63,7 @@ jobs:
       - name: install dependencies
         run: |
           dnf -y --setopt=install_weak_deps=False install \
-            git-core uv python3-devel python3-gobject gtk4 libadwaita \
+            make git-core uv python3-devel python3-gobject gtk4 libadwaita \
             gobject-introspection glib2-devel cairo-gobject-devel \
             gnupg2 pass xorg-x11-server-Xvfb dbus-daemon
 

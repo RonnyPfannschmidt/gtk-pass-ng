@@ -30,8 +30,8 @@ dnf -y builddep --spec "$spec" >/dev/null
 
 # %pyproject_buildrequires reports the project metadata dependencies by failing
 # the source build with exit 11 and writing them into a buildreqs.nosrc.rpm.
-# Install those and go round again; twice is enough in practice, and the bound
-# stops a loop if it ever is not.
+# Install those and go round again. One extra pass is enough in practice; three
+# attempts is the bound that stops this looping if it ever is not.
 for _ in 1 2 3; do
     if rpmbuild -br --nodeps "$define" "$spec"; then break; fi
     dnf -y builddep ~/rpmbuild/SRPMS/gtkpass-*.buildreqs.nosrc.rpm >/dev/null

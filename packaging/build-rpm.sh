@@ -75,8 +75,10 @@ if [ "$USE_CONTAINER" = "0" ]; then
     echo "==> rpmbuild here (fedora ${FEDORA_RELEASE})"
     VERSION="$VERSION" SNAPSHOT="$SNAPSHOT" SRC="$PWD" packaging/rpmbuild-here.sh
 else
-    echo "==> rpmbuild in ${IMAGE}"
-    podman run --rm \
+    # shellcheck source=packaging/container-runtime.sh
+    . "$(dirname "$0")/container-runtime.sh"
+    echo "==> rpmbuild in ${IMAGE} (${CONTAINER_RUNTIME})"
+    "$CONTAINER_RUNTIME" run --rm \
         -v "$PWD:/src:z" \
         -e "SNAPSHOT=${SNAPSHOT}" \
         -e "VERSION=${VERSION}" \

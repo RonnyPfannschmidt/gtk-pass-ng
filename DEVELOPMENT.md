@@ -76,8 +76,12 @@ testing and screenshots.
 
 The backends refuse `~/.password-store`, `$PASSWORD_STORE_DIR` and the session
 keyring whenever the code is running out of a checkout — which is everything you
-run here, including an editable install and a bare `PYTHONPATH=src` invocation.
-An installed build is allowed, being the application actually in use.
+run here, the editable install `make sync` creates included. An installed build
+is allowed, being the application actually in use.
+
+A bare `PYTHONPATH=src` run is refused outright, at import: with no distribution
+metadata there is nothing to establish what is running, and guessing is what the
+guard exists to avoid. `make sync` is the answer to that error.
 `GTKPASS_ALLOW_REAL_STORE` overrides the decision either way; `run_app.sh` sets
 it to 1, and `conftest.py` clears it so an exported value in your shell cannot
 re-enable it for a test run.

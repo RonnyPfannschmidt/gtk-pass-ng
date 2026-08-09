@@ -171,16 +171,28 @@ entry it did not understand is preserved verbatim through an edit.
 The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
 
 - `safety.py` refuses `~/.password-store`, `$PASSWORD_STORE_DIR` and the
-  session keyring when the code is running out of a checkout, which
-  `running_from_checkout()` decides by looking for a `pyproject.toml` above the
-  package. That one rule covers an editable install, a bare `PYTHONPATH=src`
-  run, and a checkout shadowed by an installed copy — the last being the case
-  `importlib.metadata` would get wrong, since the metadata it finds describes
-  the copy that is not running. An installed build is allowed, because the
-  alternative is every package shipping a launcher script to undo the guard, and
-  a wrapper that exists to disable a safety check is one nobody reads twice.
+  session keyring when the code is running out of a checkout.
+  `running_from_checkout()` asks the installed distribution rather than the
+  filesystem layout: an editable install records `dir_info.editable` in its
+  `direct_url.json` (PEP 610), which pip and uv both write, and which states
+  the fact instead of implying it. Two things qualify that answer. The metadata
+  is believed only when it *describes the module that is running*, so a checkout
+  ahead of an installed release on `sys.path` is a checkout rather than an
+  installed build on the strength of the other copy's metadata. And a
+  `.egg-info` is not an install: setuptools leaves one in the source tree, it
+  satisfies `importlib.metadata`, and it has no `direct_url.json` — so it read
+  as an ordinary packaged install until it was excluded.
+
+  An installed build is allowed, because the alternative is every package
+  shipping a launcher script to undo the guard, and a wrapper that exists to
+  disable a safety check is one nobody reads twice.
   `GTKPASS_ALLOW_REAL_STORE` overrides both ways; `run_app.sh` sets it to 1, and
   the test suite clears it so an exported value cannot re-enable it for a run.
+- `safety.require_installed()` runs on import of `gtkpass` and refuses a process
+  that was never installed. A `PYTHONPATH=src` run has no metadata, so nothing
+  about it can be established — not its version, and not whether it is somebody's
+  working copy. Failing at import with a message naming `make sync` is better
+  than carrying a fourth case through every question above.
 - A store carrying a `.gtkpass-scratch-store` marker is not treated as real,
   which is how `make run-dev` opens its own throwaway store without disabling
   the guard for everything else. The default store location cannot be marked.

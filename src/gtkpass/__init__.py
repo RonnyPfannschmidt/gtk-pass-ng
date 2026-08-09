@@ -1,10 +1,10 @@
-"""Main module for gtkpass."""
+"""A GTK4/Libadwaita frontend for pluggable password backends.
 
+Importing this requires GTKPass to have been installed -- see
+:func:`gtkpass.safety.require_installed` for why running from a bare source
+tree is refused rather than tolerated.
+"""
 
-def main():
-    """Entry point for gtkpass."""
-    print("gtkpass - replacement for qtpass/pass-otp")
+from gtkpass.safety import require_installed
 
-
-if __name__ == "__main__":
-    main()
+require_installed()
