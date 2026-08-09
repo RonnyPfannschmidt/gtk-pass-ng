@@ -1,51 +1,34 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-GTKPass is currently in development. Once released, we will maintain security updates for the following versions:
+None, in the sense that word usually carries. There has never been a release:
+no tag, no package in any repository, nothing signed. What exists is a git
+history, and the only version anyone can run is a checkout or a build made from
+one.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.x     | :white_check_mark: |
-| < 1.0   | :x:                |
+So there is no supported branch, no backporting, and no security release
+process to invoke. A fix lands on `main`, and anyone running this rebuilds.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-If you discover a security vulnerability in GTKPass, please follow responsible disclosure:
+Use [GitHub Security Advisories][advisories] on this repository, or email the
+maintainer at the address in the git history. Include what you did, what
+happened, and why you think it matters; a proof of concept is welcome but not
+required, and please never attach a real decrypted entry.
 
-### How to Report
+[advisories]: https://github.com/RonnyPfannschmidt/gtkpass/security/advisories
 
-1. **Email**: Send details to the maintainer (see GitHub profile for contact)
-2. **Include**:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if available)
-3. **GPG**: Encrypt sensitive reports with maintainer's GPG key (if available)
+This is one person working on this in their own time, so the honest expectation
+is a reply within a week or two rather than within hours. If a report turns out
+to be real, disclosure gets coordinated with whoever reported it, and they get
+the credit unless they would rather not.
 
-### What to Expect
+## What the application actually does
 
-- **Initial Response**: Within 48 hours
-- **Status Update**: Within 7 days
-- **Fix Timeline**: Depends on severity
-  - Critical: 1-7 days
-  - High: 1-2 weeks
-  - Medium: 2-4 weeks
-  - Low: Next release
-
-### Disclosure Policy
-
-- We will work with you to understand and fix the issue
-- We will credit you in the security advisory (unless you prefer anonymity)
-- We will coordinate public disclosure after a fix is available
-- Typical embargo period: 90 days or until fix is released
-
-## Security Measures
-
-What the application actually does today. Anything not listed here is not
-implemented, whatever other documents in this repository may suggest.
+Anything not listed here is not implemented.
 
 ### Encryption
 
@@ -87,33 +70,39 @@ refuse a clear requested by an application that is not focused.
 
 ### Development safeguards
 
-Development and test code is blocked from opening the real store or the
-keyring. The backends refuse `~/.password-store`, `$PASSWORD_STORE_DIR` and the
-session Secret Service unless `GTKPASS_ALLOW_REAL_STORE` is set, which
-`run_app.sh` does by default; the test suite clears it. This exists because a
-decrypted password that reaches a terminal, a CI log or an AI assistant's
-transcript cannot be un-disclosed.
+Code running out of a checkout is blocked from opening the real store or the
+keyring: the backends refuse `~/.password-store`, `$PASSWORD_STORE_DIR` and the
+session Secret Service. An installed build is not blocked, because it is the
+application actually being used. `GTKPASS_ALLOW_REAL_STORE` overrides the
+decision in both directions, and `run_app.sh` sets it to 1 — launching a
+checkout being the one case where the checkout really is the application.
+
+This exists because a decrypted password that reaches a terminal, a CI log or an
+AI assistant's transcript cannot be un-disclosed.
 
 The development store carries a marker file that exempts it, so the guard stays
 armed during a development run rather than being switched off wholesale. The
 default store location cannot be exempted this way.
 
 Note that this is a guard against mistakes by people working on GTKPass, not a
-security boundary. It is an environment variable: anything running as the user
-can set it.
+security boundary. It is an environment variable and a check on a file path:
+anything running as the user can defeat either.
 
 ### Not implemented
 
 Do not rely on any of these — they do not exist:
 
-- Session locking or auto-lock after inactivity
+- Session locking or auto-lock after inactivity. The GSettings schema carries an
+  `auto-lock-timeout` key that no code reads; it is not a feature, and reading
+  the schema is not evidence of one.
 - Storing the GPG passphrase in a keyring (GPG agent handles caching)
 - Screenshot prevention
 - Secure or locked memory allocation
-- Signature verification
-- Git integration of any kind, including signed commits
+- Signature verification, of entries or of anything else
+- Signed commits, and signed packages: neither the RPM nor the sysext image is
+  signed, and there is no repository to install either from
 
-## Known Limitations
+## What it cannot protect against
 
 GTKPass cannot protect against:
 
@@ -137,7 +126,7 @@ GTKPass cannot protect against:
    - Malicious clipboard managers
    - Screen capture software
 
-## Security Best Practices
+## Practices
 
 ### For users
 
@@ -159,7 +148,7 @@ GTKPass cannot protect against:
 5. **Keep dependencies few.** Every one of them can read the process memory
    that holds decrypted entries.
 
-## Security Audits
+## Review
 
 - Static analysis: `ruff` and `mypy`, via `make check`
 - Test suite: `make test`
@@ -168,64 +157,19 @@ Both are run by hand and by the pre-commit hook. There is no CI, no dependency
 scanning, and no external audit. The project has not been reviewed by anyone
 outside it.
 
-## Vulnerability Disclosure History
+## Disclosure history
 
-None yet (project in development).
+None. Nothing has been reported, and nothing has been released to report
+against.
 
-Once released, disclosed vulnerabilities will be listed here with:
-- CVE ID (if applicable)
-- Severity rating
-- Affected versions
-- Fixed version
-- Credit to reporter
+## Related reading
 
-## Security Contact
-
-For security concerns, contact the maintainers through:
-- GitHub Security Advisories (preferred)
-- Email (see GitHub profile)
-- GPG encrypted email for sensitive issues
-
-## Related Security Documentation
-
-- [REQUIREMENTS.md - Security Requirements](REQUIREMENTS.md#2-security-and-safety)
-- [ARCHITECTURE.md - Handling secrets](ARCHITECTURE.md#handling-secrets)
-- [passwordstore security](https://www.passwordstore.org/)
-- [GPG Best Practices](https://riseup.net/en/security/message-security/openpgp/best-practices)
-
-## Compliance
-
-GTKPass aims to follow:
-- OWASP Top 10 guidelines
-- CWE/SANS Top 25
-- GNOME security recommendations
-- Python security best practices
-
-## Security Roadmap
-
-Planned security enhancements:
-- [ ] Comprehensive security audit
-- [ ] Penetration testing
-- [ ] Hardware security key support (YubiKey)
-- [ ] Biometric authentication
-- [ ] Wayland security features
-- [ ] TPM integration
-- [ ] Memory encryption
-- [ ] FIDO2/WebAuthn support
-
-## Acknowledgments
-
-We thank the security research community for helping keep GTKPass secure.
-
-Security researchers who report vulnerabilities responsibly will be acknowledged in:
-- Security advisories
-- Release notes
-- SECURITY.md (this file)
-
-## License
-
-This security policy is part of GTKPass and is licensed under MPL-2.0.
-
----
-
-**Last Updated**: August 2026
+- [ARCHITECTURE.md — Handling secrets](ARCHITECTURE.md#handling-secrets), for
+  the mechanisms rather than the policy
+- [docs/TRUST-MODEL.md](docs/TRUST-MODEL.md), for per-machine keys, what TPM
+  binding does and does not protect against, and what decryption costs
+- [docs/FLATPAK.md](docs/FLATPAK.md), for every sandbox permission the Flatpak
+  asks for and the ones it deliberately refuses
+- [passwordstore](https://www.passwordstore.org/) and
+  [GPG best practices](https://riseup.net/en/security/message-security/openpgp/best-practices),
+  for the layer that actually does the encrypting

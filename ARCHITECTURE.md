@@ -14,16 +14,19 @@ src/gtkpass/
 ├── __main__.py          entry point; calls app.main()
 ├── app.py               GTKPassApp (Adw.Application): actions, CLI options
 ├── window.py            GTKPassWindow: backends, sidebar, detail pane, editing
-├── config.py            application identity and GSettings access
-├── safety.py            keeps development code out of the real store
+├── config.py            application identity, GSettings access, schema lookup
+├── safety.py            keeps checkout code out of the real store
+├── sandbox.py           what the Flatpak sandbox actually permits
 ├── _gi.py               the one place gi.require_version is called
 ├── backends/
 │   ├── __init__.py      the backend contract: PasswordBackend and its data
 │   ├── manager.py       discovery, instances, and the worker thread pool
+│   ├── git_store.py     the only thing in the tree that runs git
 │   ├── demo.py          invented entries, read-only
 │   ├── direct.py        GPG-encrypted files, read and written natively
 │   ├── pass_cli.py      delegates to the pass(1) executable
-│   └── secretservice.py the D-Bus Secret Service (keyrings)
+│   ├── secretservice.py the D-Bus Secret Service (keyrings)
+│   └── data/demo.json   the invented entries themselves
 ├── ui/
 │   ├── blueprints/      *.blp sources and their compiled *.ui
 │   ├── password_list.py the sidebar tree
@@ -47,6 +50,15 @@ Settings are reached through `config.get_settings()` and
 that function calls `g_error()` on a schema it cannot find, which aborts the
 process with no traceback. The helpers look the schema up first and raise
 `SchemaNotInstalledError` instead.
+
+Where they look is `config.schema_source()`, which is GLib's default source plus
+`/usr/share/gtkpass/schemas` when that exists. Only the systemd-sysext image
+ships such a directory, and it has to: the system `gschemas.compiled` is one
+file holding every application's schemas, and an overlay carrying its own copy
+would hide all of them. Adding to the search path rather than replacing it keeps
+the RPM and a checkout unaffected, and an unreadable directory there is logged
+and ignored rather than allowed to abort startup. See
+[docs/PACKAGING.md](docs/PACKAGING.md).
 
 Each configured backend instance gets its own settings, stored under a
 *relocatable* schema at `/io/github/RonnyPfannschmidt/GTKPass/backends/<id>/`.
@@ -99,9 +111,15 @@ names its own backend without a walk back up the tree. The row itself is
 declared in the Blueprint as a `BuilderListItemFactory` template, which is why
 the binding expressions there cast to `$GTKPassPasswordNode`.
 
-**The detail pane** shows one decrypted entry and emits `copy-requested`
-instead of touching the clipboard, leaving the window to apply the user's
-timeout and raise the toast.
+**The detail pane** (`password_detail.py`) shows one decrypted entry. It has
+rows of its own for the fields it understands — the password, and the
+username and URL under whichever of their several conventional spellings the
+store used — and renders everything else as the key and value it was written as.
+A store carries whatever its owner put there, and an entry with a field GTKPass
+has no opinion about is not a reason to hide it.
+
+It emits `copy-requested` instead of touching the clipboard, leaving the window
+to apply the user's timeout and raise the toast.
 
 **The edit dialog** splits an entry into the password and everything after it,
 and joins the two back on save. It never reserialises the fields it parsed:
@@ -153,9 +171,16 @@ entry it did not understand is preserved verbatim through an edit.
 The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
 
 - `safety.py` refuses `~/.password-store`, `$PASSWORD_STORE_DIR` and the
-  session keyring unless `GTKPASS_ALLOW_REAL_STORE` is set. `run_app.sh`
-  defaults it to 1, being the application actually being used; the test suite
-  clears it, so an exported value cannot re-enable it for a run.
+  session keyring when the code is running out of a checkout, which
+  `running_from_checkout()` decides by looking for a `pyproject.toml` above the
+  package. That one rule covers an editable install, a bare `PYTHONPATH=src`
+  run, and a checkout shadowed by an installed copy — the last being the case
+  `importlib.metadata` would get wrong, since the metadata it finds describes
+  the copy that is not running. An installed build is allowed, because the
+  alternative is every package shipping a launcher script to undo the guard, and
+  a wrapper that exists to disable a safety check is one nobody reads twice.
+  `GTKPASS_ALLOW_REAL_STORE` overrides both ways; `run_app.sh` sets it to 1, and
+  the test suite clears it so an exported value cannot re-enable it for a run.
 - A store carrying a `.gtkpass-scratch-store` marker is not treated as real,
   which is how `make run-dev` opens its own throwaway store without disabling
   the guard for everything else. The default store location cannot be marked.

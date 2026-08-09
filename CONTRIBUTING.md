@@ -20,7 +20,8 @@ Before creating bug reports, please check the existing issues to avoid duplicate
 - **Screenshots** if applicable
 - **Error messages or logs**
 
-Use the bug report template when available.
+There are no issue templates; the list above is what one would ask for.
+Never paste a decrypted entry into an issue.
 
 ### Suggesting Features
 
@@ -29,7 +30,8 @@ Feature suggestions are welcome! Please:
 - Check existing feature requests first
 - Explain the use case and benefits
 - Consider if it fits the project goals
-- Reference relevant requirements from REQUIREMENTS.md
+- Check [ROADMAP.md](ROADMAP.md) first: it lists what is already planned,
+  and what has been ruled out and why
 
 ### Code Contributions
 
@@ -118,8 +120,7 @@ in. There is no CI, so these are the entire gate.
 #### 6. Submit Pull Request
 
 - Push your branch to GitHub
-- Create a pull request
-- Fill out the PR template
+- Open a pull request describing what changed and why
 - Reference related issues
 - Wait for review and address feedback
 
@@ -136,6 +137,8 @@ gtkpass/
 │   └── utils/            # Threading and clipboard helpers
 ├── tests/                # Test suite, flat
 ├── data/                 # GSettings schema, desktop and AppStream files
+├── packaging/            # RPM spec and the RPM/sysext build scripts
+├── build-aux/            # Flatpak manifest
 └── docs/                 # Documentation
 ```
 
@@ -164,11 +167,11 @@ used.
 
 ### Documentation
 
-- Update documentation for new features
-- Add docstrings to public APIs
-- Update REQUIREMENTS.md if adding requirements
-- Update README.md if needed
-- Add examples for complex features
+- Update the documentation a change makes wrong. [ROADMAP.md](ROADMAP.md) and
+  [README.md](README.md) both make claims about what works, and a feature that
+  lands without moving them leaves the repository lying about itself.
+- Add docstrings to public APIs, and say *why* where the reason is not obvious
+  from the code
 
 ### Testing
 
@@ -213,17 +216,16 @@ All contributions go through code review:
 
 ## Questions?
 
-- Check existing documentation (README, REQUIREMENTS, ARCHITECTURE)
+- Check existing documentation ([README.md](README.md),
+  [ARCHITECTURE.md](ARCHITECTURE.md), [FAQ.md](FAQ.md))
 - Search existing issues and discussions
 - Ask in GitHub Discussions
 - Reach out to maintainers
 
 ## Recognition
 
-Contributors will be:
-- Listed in CONTRIBUTORS.md
-- Mentioned in release notes
-- Credited in commit history
+Contributions are credited in the commit history, which is the record that
+matters and the one that cannot drift out of date.
 
 ## License
 
@@ -231,8 +233,9 @@ By contributing to GTKPass, you agree that your contributions will be licensed u
 
 ## Getting Help
 
-- **Documentation**: Start with README.md and REQUIREMENTS.md
-- **Development**: See ARCHITECTURE.md and CLAUDE.md
+- **Documentation**: Start with [README.md](README.md) and [FAQ.md](FAQ.md)
+- **Development**: See [AGENTS.md](AGENTS.md), [DEVELOPMENT.md](DEVELOPMENT.md)
+  and [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Issues**: Browse existing issues
 - **Discussions**: Ask questions in GitHub Discussions
 - **Contact**: Reach out to maintainers
