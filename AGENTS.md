@@ -11,18 +11,25 @@ scripts must never open `~/.password-store` or the user's keyring. Whatever they
 print lands in a terminal, a CI log, or an AI assistant's transcript, and a
 decrypted password cannot be un-disclosed.
 
+- The backends refuse the real store, and the keyring, **whenever the code is
+  running out of a checkout** — which is everything you will ever run here.
+  `safety.running_from_checkout()` decides that by looking for a
+  `pyproject.toml` above the package, which catches an editable install, a bare
+  `PYTHONPATH=src` run, and a checkout shadowed by an installed copy alike.
+  An installed build is allowed, because refusing there would only mean every
+  package shipping a wrapper to undo it.
+- `GTKPASS_ALLOW_REAL_STORE` overrides that in both directions. `run_app.sh`
+  sets it to 1, launching a checkout being the one case where the checkout
+  really is the application. If you are reaching for that variable anywhere
+  else, stop.
 - `make devstore` creates a throwaway store under `.dev/` with invented
   passwords and its own GPG key. Use it for manual testing and screenshots. It
   drops a `.gtkpass-scratch-store` marker, which is what lets the guard open
   that store while still refusing everything else.
 - `make run-dev` launches against it **with the guard still armed**. It passes
   `GTKPASS_ALLOW_REAL_STORE=0` on purpose: it goes through `run_app.sh`, which
-  opts in by default, and without turning that back off the development run
-  would be the one thing running unguarded.
-- The backends refuse the real store, and the keyring, unless
-  `GTKPASS_ALLOW_REAL_STORE=1`. `run_app.sh` defaults it to 1 because that is
-  the application actually being used. If you are reaching for that variable in
-  anything else, stop.
+  opts in, and without turning that back off the development run would be the
+  one thing running unguarded.
 - The test suite clears the variable in `conftest.py`, so an exported value in
   your shell cannot re-enable it for a run.
 
@@ -69,8 +76,15 @@ present the widget and read back what it rendered.
 - `Gio.Settings.new()` on a missing schema calls `g_error()` and aborts the
   process without a traceback, so go through `config.get_settings()`.
 - Do not add dependencies without discussion. In particular not `keyring`,
-  `GitPython`, `pyotp`, `qrcode`, `pillow` or `opencv`: an earlier version of
-  this file prescribed all of them and none were ever used.
+  `GitPython`, `qrcode`, `pillow` or `opencv`: an earlier version of this file
+  prescribed all of them and none were ever used. `pyotp` is the one that has
+  since become arguable, OTP being planned — argue it rather than assume it,
+  because RFC 6238 over `hmac` and `hashlib` is a short function with no
+  dependency at all.
+- An installed build must work with nothing set in its environment. There is no
+  launcher script in any package, so anything the application needs arranged, it
+  arranges itself — see `safety.running_from_checkout()` and
+  `config.schema_source()`.
 
 ## Commands
 

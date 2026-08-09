@@ -65,6 +65,8 @@ The Makefile exports it for you.
 | `make ui` | compile `.blp` sources to `.ui` |
 | `make schemas` | compile the GSettings schema |
 | `make hooks` | install the pre-commit hook into `.git` |
+| `make rpm` | build the RPM in a Fedora container |
+| `make sysext` | build a systemd-sysext image for the ostree desktops |
 
 ## Never test against your own passwords
 
@@ -73,9 +75,12 @@ own GPG key, and `make run-dev` launches against it. Use those for manual
 testing and screenshots.
 
 The backends refuse `~/.password-store`, `$PASSWORD_STORE_DIR` and the session
-keyring unless `GTKPASS_ALLOW_REAL_STORE=1` is set. `run_app.sh` defaults it to
-1, because that is the application actually being used. `conftest.py` clears
-it, so an exported value in your shell cannot re-enable it for a test run.
+keyring whenever the code is running out of a checkout — which is everything you
+run here, including an editable install and a bare `PYTHONPATH=src` invocation.
+An installed build is allowed, being the application actually in use.
+`GTKPASS_ALLOW_REAL_STORE` overrides the decision either way; `run_app.sh` sets
+it to 1, and `conftest.py` clears it so an exported value in your shell cannot
+re-enable it for a test run.
 
 The development store is exempt on its own merits rather than by disabling the
 guard: `make devstore` writes a `.gtkpass-scratch-store` marker into it, and a

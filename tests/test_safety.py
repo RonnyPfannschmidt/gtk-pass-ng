@@ -18,6 +18,7 @@ from gtkpass.safety import (
     ensure_store_allowed,
     is_real_store,
     opted_in,
+    running_from_checkout,
 )
 
 
@@ -198,6 +199,71 @@ class TestBackendsHonourTheGuard:
 
         with pytest.raises(RealStoreBlocked):
             DirectBackend.create(DirectBackendSettings(password_store_dir=real))
+
+
+class TestWhereTheCodeIsRunningFrom:
+    """What decides the guard's default, now that nothing sets it for us.
+
+    An installed build is the application being used, and refusing its owner's
+    store would make it useless. A checkout is where the probes, experiments and
+    one-off scripts live, and that is what has to stay shut by default. So the
+    default follows which of the two is running, and anything it cannot tell
+    apart counts as a checkout.
+    """
+
+    def test_a_checkout_is_recognised(self, tmp_path):
+        package = tmp_path / "src" / "gtkpass"
+        package.mkdir(parents=True)
+        (tmp_path / "pyproject.toml").write_text("")
+        assert running_from_checkout(package / "safety.py")
+
+    def test_a_flat_checkout_is_recognised(self, tmp_path):
+        """Not every tree uses src/; an editable install of a flat one counts too."""
+        package = tmp_path / "gtkpass"
+        package.mkdir(parents=True)
+        (tmp_path / "pyproject.toml").write_text("")
+        assert running_from_checkout(package / "safety.py")
+
+    def test_an_installed_package_is_not(self, tmp_path):
+        package = tmp_path / "usr" / "lib" / "python3.14" / "site-packages" / "gtkpass"
+        package.mkdir(parents=True)
+        assert not running_from_checkout(package / "safety.py")
+
+    def test_this_very_test_run_is_a_checkout(self):
+        """The tripwire. If this ever fails, the suite is running unguarded."""
+        assert running_from_checkout()
+
+
+class TestTheDefaultFollowsWhereTheCodeIsFrom:
+    """The environment variable still decides when it is set, both ways."""
+
+    def test_a_checkout_defaults_to_refusing(self, monkeypatch):
+        monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
+        assert not opted_in()
+
+    def test_an_installed_build_defaults_to_allowing(self, monkeypatch):
+        monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: False)
+        assert opted_in()
+
+    def test_an_installed_build_can_still_be_turned_off(self, monkeypatch):
+        """Someone auditing an installed build gets to shut it, same as anyone."""
+        monkeypatch.setenv("GTKPASS_ALLOW_REAL_STORE", "0")
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: False)
+        assert not opted_in()
+
+    def test_a_checkout_can_still_opt_in(self, monkeypatch):
+        """run_app.sh does exactly this."""
+        monkeypatch.setenv("GTKPASS_ALLOW_REAL_STORE", "1")
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
+        assert opted_in()
+
+    def test_an_empty_value_does_not_count_as_a_decision(self, monkeypatch):
+        """`FOO= gtkpass` sets it to nothing; that is not an opt-out."""
+        monkeypatch.setenv("GTKPASS_ALLOW_REAL_STORE", "")
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: False)
+        assert opted_in()
 
 
 class TestTheGuardIsActiveDuringTests:

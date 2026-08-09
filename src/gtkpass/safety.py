@@ -5,16 +5,27 @@ experiments, one-off scripts. Pointed at the developer's own store, those read
 real passwords, and whatever they print ends up in a terminal, a CI log or an
 AI assistant's transcript.
 
-So the developer's own store is refused unless something deliberately opts in.
-``run_app.sh`` does, because that is the application actually being used.
-Nothing else should: use a scratch store instead (``make devstore``).
+So the developer's own store is refused *when the code is running out of a
+checkout*, which is where all of that lives. An installed build is the
+application actually being used and opens the store as any password manager
+would; refusing it there would only mean every packaged build needing a wrapper
+to undo this.
+
+``GTKPASS_ALLOW_REAL_STORE`` overrides the decision in both directions, and
+``run_app.sh`` sets it to 1 because launching a checkout is the one case where
+the checkout really is the application. ``make run-dev`` sets it to 0 and uses a
+scratch store (``make devstore``). Nothing else should set it at all.
 """
 
 import os
 from pathlib import Path
 
-#: Set by run_app.sh. Anything else touching the real store is a mistake.
+#: Overrides the default in both directions. Set to 1 by run_app.sh, and to 0 by
+#: `make run-dev`. Anything else reaching for it is a mistake.
 OPT_IN_VARIABLE = "GTKPASS_ALLOW_REAL_STORE"
+
+#: A source tree has one of these above the package; an installed one does not.
+CHECKOUT_MARKER = "pyproject.toml"
 
 DEFAULT_STORE = "~/.password-store"
 
@@ -62,8 +73,34 @@ def is_real_store(path: Path) -> bool:
     return _resolve(path) in real_store_paths()
 
 
+def running_from_checkout(module_file: Path | str | None = None) -> bool:
+    """Whether this code is being run out of a source tree.
+
+    Decided by looking for a ``pyproject.toml`` above the package rather than by
+    asking ``importlib.metadata``, because the answer has to cover three cases
+    with one rule: an editable install, whose module files stay in the checkout;
+    a plain ``PYTHONPATH=src`` run, which has no distribution metadata at all;
+    and a checkout that also has a released copy installed system-wide, where
+    the metadata describes the copy that is *not* running.
+
+    In every one of those the module sits inside the tree, one or two levels
+    below its ``pyproject.toml`` -- ``src/gtkpass/`` or a flat ``gtkpass/``. An
+    installed package sits in ``site-packages`` with no such file above it.
+    """
+    here = Path(module_file or __file__).resolve()
+    return any((parent / CHECKOUT_MARKER).exists() for parent in here.parents[1:3])
+
+
 def opted_in() -> bool:
-    return os.environ.get(OPT_IN_VARIABLE, "").lower() in {"1", "true", "yes"}
+    """Whether reading the user's own store and keyring is allowed.
+
+    The environment variable decides when it says anything; otherwise an
+    installed build is allowed and a checkout is not.
+    """
+    configured = os.environ.get(OPT_IN_VARIABLE, "")
+    if configured:
+        return configured.lower() in {"1", "true", "yes"}
+    return not running_from_checkout()
 
 
 def ensure_store_allowed(path: Path) -> None:

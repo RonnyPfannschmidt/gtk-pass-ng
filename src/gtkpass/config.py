@@ -5,7 +5,13 @@ file, the icon, the AppStream component, the WM class — has to be one and the
 same string, so it is defined once here.
 """
 
+import functools
+import logging
+from pathlib import Path
+
 from gtkpass._gi import Gio
+
+log = logging.getLogger(__name__)
 
 #: Reverse-DNS application identifier, following the GNOME/Flathub convention.
 APP_ID = "io.github.RonnyPfannschmidt.GTKPass"
@@ -23,8 +29,43 @@ BACKEND_SCHEMA_ID = SCHEMA_ID + ".backend.{backend_type}"
 BACKEND_SCHEMA_PATH = SCHEMA_PATH + "backends/{backend_id}/"
 
 
+#: Where a systemd-sysext build compiles this application's schema.
+#:
+#: It cannot install into ``/usr/share/glib-2.0/schemas``: the
+#: ``gschemas.compiled`` there is a single file holding every application's
+#: schemas, and a sysext is an overlay rather than a merge, so an image shipping
+#: its own copy would hide all of them and the session would come up without
+#: GNOME's own settings.  See docs/PACKAGING.md.
+#:
+#: The plain RPM does install into the system directory and ships nothing here,
+#: which is why this is added to the search path rather than used in place of it.
+BUNDLED_SCHEMA_DIR = Path("/usr/share/gtkpass/schemas")
+
+
 class SchemaNotInstalledError(RuntimeError):
     """Raised when the GSettings schema cannot be found."""
+
+
+@functools.cache
+def schema_source() -> Gio.SettingsSchemaSource | None:
+    """The schema source to look schemas up in, cached for the process.
+
+    GLib caches its own default source on first use, and this wraps that with
+    :data:`BUNDLED_SCHEMA_DIR` when a build has put a schema there.
+    """
+    default = Gio.SettingsSchemaSource.get_default()
+    if not (BUNDLED_SCHEMA_DIR / "gschemas.compiled").exists():
+        return default
+    try:
+        return Gio.SettingsSchemaSource.new_from_directory(
+            str(BUNDLED_SCHEMA_DIR), default, True
+        )
+    except Exception:
+        # A truncated or foreign gschemas.compiled must not take the
+        # application down at startup. Falling back leaves it reporting a
+        # missing schema, which someone can act on.
+        log.warning("ignoring unreadable schema directory %s", BUNDLED_SCHEMA_DIR)
+        return default
 
 
 def _lookup(schema_id: str) -> Gio.SettingsSchema:
@@ -34,7 +75,7 @@ def _lookup(schema_id: str) -> Gio.SettingsSchema:
     aborts the process outright — it is not a Python exception and leaves no
     traceback.  Always look the schema up first.
     """
-    source = Gio.SettingsSchemaSource.get_default()
+    source = schema_source()
     schema = source.lookup(schema_id, True) if source is not None else None
     if schema is None:
         raise SchemaNotInstalledError(
