@@ -33,6 +33,17 @@ def pytest_configure(config: pytest.Config) -> None:
     # Keep the accessibility bridge out of the way; it is noisy under xvfb.
     os.environ.setdefault("NO_AT_BRIDGE", "1")
 
+    # GTK4 renders with OpenGL by default, and the tests that present a widget
+    # realize one. On a machine with no GPU -- a CI container, which is the only
+    # place this bites -- libepoxy aborts inside gdk_gl_context_make_current and
+    # takes the whole process down: SIGABRT, no traceback, no test report, and
+    # every test after it simply never runs.
+    #
+    # The cairo renderer is software and needs no driver. setdefault, so anyone
+    # debugging a rendering problem can ask for the real one.
+    os.environ.setdefault("GSK_RENDERER", "cairo")
+    os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
+
     # No test has any business reading the developer's own passwords. Clearing
     # this rather than merely not setting it means an exported value in the
     # surrounding shell cannot quietly re-enable it for the whole run.
