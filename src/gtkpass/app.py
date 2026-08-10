@@ -40,22 +40,38 @@ class GTKPassApp(Adw.Application):
             "LEVEL",
         )
 
+    #: What --log-level accepts. getattr on the logging module accepted any
+    #: attribute name, so --log-level=basicConfig passed a function as the level
+    #: and the application died on startup rather than saying what was wrong.
+    LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
     def do_handle_local_options(self, options):
         """Handle command-line options."""
         # Configure logging based on options
         log_level = logging.INFO
+        unknown = ""
 
         if options.contains("debug"):
             log_level = logging.DEBUG
         elif options.contains("log-level"):
             level_str = options.lookup_value("log-level").get_string().upper()
-            log_level = getattr(logging, level_str, logging.INFO)
+            if level_str in self.LOG_LEVELS:
+                log_level = getattr(logging, level_str)
+            else:
+                unknown = level_str
 
         logging.basicConfig(
             level=log_level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             datefmt="%H:%M:%S",
         )
+
+        if unknown:
+            logger.warning(
+                "Unknown log level %r; using INFO. Known levels: %s",
+                unknown,
+                ", ".join(self.LOG_LEVELS),
+            )
 
         logger.info("Starting GTKPass application")
         logger.debug(f"Log level: {logging.getLevelName(log_level)}")
@@ -75,6 +91,19 @@ class GTKPassApp(Adw.Application):
         if not self.window:
             self.window = GTKPassWindow(application=self)
         self.window.present()
+
+    def do_shutdown(self):
+        """Leave nothing of a copied secret behind on the way out.
+
+        The clipboard timeout cannot fire once the process is gone, so quitting
+        inside it would otherwise leave the password there indefinitely. This is
+        the application's job rather than the window's: closing the last window
+        and Ctrl+Q both arrive here, while neither reliably destroys a window
+        that other references are still holding.
+        """
+        if self.window is not None:
+            self.window.discard_clipboard()
+        Adw.Application.do_shutdown(self)
 
     def do_startup(self):
         """Initialize application on startup."""

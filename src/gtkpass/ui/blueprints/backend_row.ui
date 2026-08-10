@@ -27,7 +27,7 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     </child>
     <child>
       <object class="AdwEntryRow" id="demo_path_row">
-        <property name="title" translatable="yes">Custom Data Path</property>
+        <property name="title" translatable="yes">Custom demo.json</property>
         <property name="visible">false</property>
         <signal name="changed" handler="_on_settings_changed"/>
       </object>

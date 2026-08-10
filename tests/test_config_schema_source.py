@@ -84,3 +84,40 @@ class TestTheBundledSchemaDirectory:
 
         assert config.get_settings().get_int("clipboard-timeout") == 45
         assert "unreadable schema directory" in caplog.text
+
+
+class TestNoSettingDoesNothing:
+    """A key nothing reads is a promise the application does not keep.
+
+    The schema is the most visible description of what GTKPass can be told to
+    do -- dconf-editor shows it, and so does `gsettings list-recursively` -- so a
+    key that exists and is never read reads as a feature that exists and never
+    works. Both of the ones this caught were exactly that: an auto-lock timeout
+    with no locking behind it, and a window geometry nothing restored.
+    """
+
+    def keys_of(self, schema_id: str) -> list[str]:
+        source = Gio.SettingsSchemaSource.get_default()
+        schema = source.lookup(schema_id, True)
+        assert schema is not None, f"{schema_id} is not installed"
+        return list(schema.list_keys())
+
+    def sources(self) -> str:
+        root = Path(__file__).resolve().parent.parent / "src" / "gtkpass"
+        return "\n".join(path.read_text() for path in sorted(root.rglob("*.py")))
+
+    @pytest.mark.parametrize(
+        "key",
+        sorted(
+            set(
+                Gio.SettingsSchemaSource.get_default()
+                .lookup(config.SCHEMA_ID, True)
+                .list_keys()
+            )
+        ),
+    )
+    def test_the_key_is_named_somewhere_in_the_code(self, key):
+        assert key in self.sources(), (
+            f"nothing in src/ mentions {key!r}, so the schema offers a setting "
+            f"that does nothing"
+        )

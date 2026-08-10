@@ -32,6 +32,24 @@ application; none of its dates survived contact with the work.
 - Showing a password rather than dotting it out, from the preference
 - Syncing a git-backed store: pull with rebase, then push, off the UI thread
 
+**Hardening**
+- The window opens at the size it was left at, and no schema key is offered that
+  nothing reads -- a test now fails on one
+- Every subprocess GTKPass owns has a deadline, and the pool is never joined
+  from the UI thread, so a passphrase prompt nobody answers cannot freeze or
+  trap the application
+- Backends are built and listed off the UI thread, so the window appears before
+  a store on a dead mount has answered
+- One lock per backend, so a save cannot collide with a sync in the same store
+- Entry writes are atomic: a failed encryption costs the edit, not the entry
+- Entry names reach `pass` after a `--`, so a name beginning with a dash is a
+  path rather than a flag
+- A copied secret is marked so clipboard managers do not record it, and is taken
+  back on navigation and at quit
+- A store whose `.gpg-id` no longer matches the approved recipient set is not
+  written to until somebody has reviewed the change; GTKPass never re-encrypts
+- The test suite uses its own X server and bus, never the developer's session
+
 **Host integration**
 - Every write to a git-backed store is committed, by `pass` or by GTKPass
 - Sandbox permissions read from `/.flatpak-info` rather than guessed from the
@@ -95,9 +113,6 @@ Smaller things, worth doing when passing:
   no longer matches the class.
 - `secretstorage` is not in the Flatpak, so the Secret Service backend reports
   itself unavailable there. It needs `cryptography`, which is a Rust build.
-- The GSettings schema carries an `auto-lock-timeout` key that no code reads.
-  Either auto-lock gets built or the key goes; a setting that does nothing is
-  worse than an absent one, because it reads as a promise.
 - Neither the RPM nor the sysext image is signed, and there is no repository to
   install either from. A release attaches them to a GitHub page, which is
   transport security and not provenance.

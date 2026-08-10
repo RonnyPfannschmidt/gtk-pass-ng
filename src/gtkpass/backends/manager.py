@@ -9,6 +9,7 @@ from collections.abc import Callable
 from importlib.metadata import entry_points
 
 from . import PasswordBackend, PasswordEntry, PasswordMetadata, SyncCapability
+from .serialized import SerializedBackend
 
 logger = logging.getLogger(__name__)
 
@@ -76,15 +77,33 @@ class BackendManager:
         if backend is None:
             raise RuntimeError(f"Backend '{backend_id}' initialization failed")
 
-        self._backends[backend_id] = backend
+        # Through add_backend, so this one is wrapped like every other.
+        self.add_backend(backend_id, backend)
+
+    def submit(self, function: Callable, *args) -> concurrent.futures.Future:
+        """Run something on the pool the backends already use.
+
+        Building a backend belongs here as much as using one does: a constructor
+        runs git over the store and opens a D-Bus connection, so the window can
+        no more do it on the UI thread than it can decrypt there. Sharing the
+        pool rather than starting a thread means the same shutdown covers it.
+        """
+        return self._executor.submit(function, *args)
 
     def add_backend(self, backend_id: str, backend: PasswordBackend) -> None:
         """Add an already-initialized backend.
+
+        The backend is wrapped so that the four workers cannot be inside it at
+        once; see :mod:`gtkpass.backends.serialized`. This is the only way a
+        backend gets into the manager, so it is the only place that has to
+        remember.
 
         Args:
             backend_id: Unique identifier for this backend instance
             backend: Initialized backend instance
         """
+        if not isinstance(backend, SerializedBackend):
+            backend = SerializedBackend(backend)
         self._backends[backend_id] = backend
 
     def get_backend(self, backend_id: str) -> PasswordBackend | None:
@@ -312,6 +331,20 @@ class BackendManager:
             dest.add_password(dest_name, entry.content)
 
     def shutdown(self):
-        """Shutdown backend manager and cleanup resources."""
-        self._executor.shutdown(wait=True)
+        """Stop accepting work and let go of the backends, without waiting.
+
+        Called from the UI thread: at quit, and on every settings change, which
+        replaces the manager wholesale. Waiting for the pool there meant a
+        worker sitting on an unanswered passphrase prompt froze the window
+        instead -- the settings dialog first, and then the quit that would have
+        got out of it.
+
+        ``cancel_futures`` drops what has not started. Work already running
+        cannot be cancelled, so it finishes on its own; the deadline on every
+        subprocess (``SUBPROCESS_TIMEOUT_SECONDS``) is what bounds that, and it
+        is why this alone is not the whole fix. The interpreter still joins the
+        pool's threads at exit, so a command with no deadline would keep the
+        process alive whatever this method does.
+        """
+        self._executor.shutdown(wait=False, cancel_futures=True)
         self._backends.clear()

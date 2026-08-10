@@ -27,6 +27,7 @@ from pathlib import Path
 from gtkpass import sandbox
 
 from . import (
+    SUBPROCESS_TIMEOUT_SECONDS,
     GitError,
     SyncCapability,
     SyncNotPermitted,
@@ -36,14 +37,29 @@ from . import (
 
 logger = logging.getLogger(__name__)
 
-#: No git operation here is interactive, so anything that has not finished by
-#: now is stuck. The manager's pool has four workers and shutdown() waits on
-#: them from the UI thread, so a stuck one freezes the window.
-TIMEOUT_SECONDS = 120
-
 #: `user:password@host` in a remote URL. git echoes the URL in its errors, and
 #: those errors are shown to the user and written to the log.
 _CREDENTIALS = re.compile(r"://[^/@\s]+@")
+
+#: Configuration every git command here runs with.
+#:
+#: Signing is off because GTKPass's commits are bookkeeping -- they record that
+#: a file changed -- rather than a claim about who wrote the entry, which is
+#: what a signature would assert. The commit runs on a worker thread straight
+#: after a save, so a store with commit.gpgsign set would raise a pinentry
+#: nobody asked for in the middle of writing a password, and where one cannot
+#: appear (a sandbox without the agent socket, a headless session) leave the
+#: worker sitting on its deadline instead.
+#:
+#: The store owner's setting still governs the commits they make themselves;
+#: this only covers the ones made from here, which is why their history can end
+#: up mixed. That is the cost, and it is smaller than a save that prompts.
+_CONFIG = ("-c", "commit.gpgsign=false")
+
+#: What ssh says when the remote's host key is not in known_hosts, or no longer
+#: matches it. Matched on rather than parsed: it is the one failure with a
+#: remedy the user has to carry out somewhere else.
+_UNKNOWN_HOST_KEY = "Host key verification failed"
 
 
 def redact(text: str) -> str:
@@ -57,6 +73,9 @@ class GitStore:
     def __init__(self, store_dir: Path, git_binary: str, commit_on_write: bool) -> None:
         self.store_dir = store_dir
         self.git_binary = git_binary
+        #: The remote's URL, when probe() found one. Only ever used to name the
+        #: host in advice; nothing is decided by it.
+        self.remote_url: str | None = None
         #: False for backends that commit their own writes -- pass does, on
         #: every insert, rm, mv and cp -- so commit() is a no-op for them.
         self.commit_on_write = commit_on_write
@@ -79,9 +98,18 @@ class GitStore:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = ""
         env["SSH_ASKPASS"] = ""
-        env["GIT_SSH_COMMAND"] = (
-            "ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new"
-        )
+        # StrictHostKeyChecking=yes, not accept-new. accept-new takes whatever
+        # key answers the first connection from a machine, which is precisely
+        # when somebody in the way cannot be detected. What that would cost is
+        # not the entries -- they are ciphertext -- but the set of entry names,
+        # and the ability to serve an old copy of the store back, restoring a
+        # password that was rotated.
+        #
+        # Batch mode cannot ask, so the first sync on a new machine fails; the
+        # remedy is a command, and explain() puts it on screen. Checking a
+        # fingerprint against the server is a step worth taking deliberately
+        # rather than one to click past.
+        env["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes -oStrictHostKeyChecking=yes"
         return env
 
     # -- running git ---------------------------------------------------------
@@ -94,12 +122,12 @@ class GitStore:
         """
         try:
             result = subprocess.run(
-                [self.git_binary, "-C", str(self.store_dir), *args],
+                [self.git_binary, "-C", str(self.store_dir), *_CONFIG, *args],
                 capture_output=True,
                 text=True,
                 check=False,
                 env=self._env,
-                timeout=TIMEOUT_SECONDS,
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as error:
             raise GitError(f"git {args[0]} timed out") from error
@@ -108,8 +136,58 @@ class GitStore:
 
         if result.returncode != 0:
             detail = redact(result.stderr.strip() or result.stdout.strip())
-            raise GitError(f"git {args[0]} failed: {detail}")
+            raise GitError(f"git {args[0]} failed: {self.explain(detail)}")
         return result.stdout.strip()
+
+    def explain(self, detail: str) -> str:
+        """Add the remedy to a failure that has one somewhere else.
+
+        Only the unknown host key: it is the one thing GTKPass refuses that the
+        user is expected to go and resolve, and being strict about it is only
+        defensible if what to do about it is on screen.
+        """
+        if _UNKNOWN_HOST_KEY not in detail:
+            return detail
+
+        host = self.ssh_host(self.remote_url or "")
+        if host is None:
+            return (
+                f"{detail}\nThe remote's host key is not one this machine has "
+                f"accepted before."
+            )
+        return (
+            f"{detail}\nThe host key for {host} is not one this machine has "
+            f"accepted before. Check its fingerprint against the server, then "
+            f"connect once with 'ssh {host}' in a terminal, or add it with "
+            f"'ssh-keyscan {host} >> ~/.ssh/known_hosts'."
+        )
+
+    @staticmethod
+    def ssh_host(url: str) -> str | None:
+        """The host an ssh remote names, or None when it is not one.
+
+        Only ever used to name it in advice, so an answer it is not sure of is
+        worse than none: a wrong hostname sends somebody to check a fingerprint
+        that was never in question.
+        """
+        remainder = url
+        if "://" in url:
+            scheme, _, remainder = url.partition("://")
+            if scheme not in {"ssh", "git+ssh"}:
+                return None
+        elif ":" not in url or url.startswith("/"):
+            # A local path, and scp syntax needs the colon that separates it
+            # from the path.
+            return None
+
+        _, _, authority = remainder.rpartition("@")
+        authority = authority.split("/")[0]
+        if authority.startswith("["):
+            # A bracketed IPv6 literal, which carries colons of its own.
+            address, _, _ = authority.partition("]")
+            return address[1:] or None
+        host = authority.split(":")[0]
+        return host or None
 
     def _try(self, *args: str) -> str | None:
         """Run a command whose failure is an answer rather than a problem."""
@@ -168,6 +246,7 @@ class GitStore:
             )
 
         remote = remotes.splitlines()[0]
+        store.remote_url = store._try("remote", "get-url", remote)
         branch = store._try("rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
         return store, SyncCapability(
             supported=True,
@@ -234,13 +313,29 @@ class GitStore:
                 sandbox.override_command(),
             )
 
-        if self._run("status", "--porcelain"):
+        # --untracked-files=no: a rebase over modified *tracked* files is what
+        # this refuses, and that is what git itself refuses too. A file git
+        # never tracked -- an editor backup, a .gpg-id nobody committed -- is
+        # not the store's business, and counting it disabled syncing for good
+        # while telling the user to discard something they may want kept.
+        # An incoming commit that would overwrite one still fails, in git's own
+        # words, which name the file.
+        if self._run("status", "--porcelain", "--untracked-files=no"):
             raise GitError(
                 "The store has uncommitted changes. Commit or discard them "
                 "before syncing."
             )
 
         before = self._revision_count()
+
+        # Fetch before pulling, so what the remote now says can be compared with
+        # what it said last time. `pull --rebase` would do the fetch itself and
+        # rebase onto the result in the same breath, leaving no moment at which
+        # to look. The extra round trip is nearly free: the pull that follows
+        # has nothing left to fetch.
+        previous = self._try("rev-parse", "@{upstream}")
+        self._run("fetch")
+        self._refuse_rewritten_history(previous)
 
         try:
             self._run("pull", "--rebase", "--no-autostash")
@@ -265,6 +360,41 @@ class GitStore:
             self._run("push")
 
         return SyncResult(pulled=pulled, pushed=pushed)
+
+    def _refuse_rewritten_history(self, previous: str | None) -> None:
+        """Stop if the remote no longer contains the commit this store was on.
+
+        A force-push can drop entries, or restore the ciphertext of a password
+        that was rotated -- which still decrypts. Rebasing onto that history
+        adopts it silently, and a store of ciphertext offers nothing afterwards
+        that would look wrong.
+
+        Only history that *disappeared* is refused. A remote that has grown, and
+        one that has grown while this store committed as well, are the ordinary
+        cases and go through as before.
+        """
+        if previous is None:
+            # Nothing fetched from this remote before, so there is no claim to
+            # compare against. The host key is what covers a first connection.
+            return
+
+        current = self._try("rev-parse", "@{upstream}")
+        if current is None or current == previous:
+            return
+
+        # `--is-ancestor` answers by exit status and prints nothing, so the
+        # empty string it returns on success is the yes. `is not None` rather
+        # than a truth test, which would read every yes as a no.
+        if self._try("merge-base", "--is-ancestor", previous, current) is not None:
+            return
+
+        raise GitError(
+            "Sync stopped: the remote's history no longer contains the commit "
+            "this store was last synced with. A rewritten remote can drop "
+            "entries, or bring back an old copy of one. Nothing has been "
+            "changed here; compare the two with git, and reset this store to "
+            "the remote yourself if the rewrite was meant."
+        )
 
     def _commits_ahead(self) -> int:
         """Local commits the remote does not have yet.

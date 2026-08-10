@@ -4,6 +4,31 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Only for the annotation below: recipients imports from this module at
+    # runtime, and naming it here for real would close the circle.
+    from .recipients import RecipientAudit
+
+#: How long a backend may leave a subprocess running before it is treated as
+#: stuck, in seconds.
+#:
+#: Shared by every subprocess GTKPass owns -- git in ``git_store``, pass in
+#: ``pass_cli`` -- because the reason is the same in both places and one number
+#: is easier to reason about than two. None of these commands is interactive
+#: from GTKPass's side: git is run in an environment where it cannot ask a
+#: question, and pass reads its input from stdin.
+#:
+#: What pass *can* do is raise a pinentry prompt, which is a person typing a
+#: passphrase rather than a hung process, so this has to be patient enough for
+#: that. Two minutes is: a prompt left unanswered that long has been abandoned,
+#: and abandoning it back costs a retry rather than an entry.
+#:
+#: The deadline matters because the manager's pool has four workers and the
+#: window quits by shutting that pool down. A command with no deadline is a
+#: worker that never returns.
+SUBPROCESS_TIMEOUT_SECONDS = 120
 
 
 @dataclass
@@ -354,6 +379,17 @@ class PasswordBackend(ABC):
         """
         raise BackendError(f"{self.metadata.name} cannot sync.")
 
+    # -- recipients ----------------------------------------------------------
+
+    def recipient_audit(self) -> "RecipientAudit | None":
+        """Whether who this store is encrypted to has changed since it was approved.
+
+        None for a backend that has no .gpg-id to read -- the keyring, the demo
+        data -- which is why this is not abstract. Answered from what the
+        backend found when it was built, so it does not block.
+        """
+        return None
+
 
 class BackendError(Exception):
     """Base exception for backend errors."""
@@ -371,6 +407,23 @@ class GitError(BackendError):
     """Exception for git-related errors."""
 
     pass
+
+
+class RecipientsChanged(BackendError):
+    """A store's recipients differ from the set last approved for it.
+
+    Raised instead of writing. Encrypting now would encrypt to whoever the file
+    names today, and the whole question is whether that is who it should name --
+    so the write waits for a person to say. Reading is unaffected: nothing newly
+    named can decrypt what is already there.
+
+    ``audit`` carries the RecipientAudit, so the interface can show what changed
+    without asking the store again.
+    """
+
+    def __init__(self, message: str, audit) -> None:
+        super().__init__(message)
+        self.audit = audit
 
 
 class SyncNotPermitted(GitError):

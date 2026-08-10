@@ -15,6 +15,7 @@ from pathlib import Path
 from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 from . import (
+    SUBPROCESS_TIMEOUT_SECONDS,
     BackendError,
     BackendMetadata,
     BackendSettings,
@@ -26,6 +27,7 @@ from . import (
     SyncUnavailable,
 )
 from .git_store import GitStore
+from .recipients import audit, ensure_approved
 
 
 @dataclass
@@ -40,6 +42,9 @@ class PassBackendSettings(BackendSettings):
 
     password_store_dir: Path | None = None
     use_git: bool = True
+    #: The recipient set last approved for this store, as recorded by
+    #: gtkpass.backends.recipients. Empty means it has not been seen before.
+    approved_recipients: str = ""
 
 
 class PassBackend(PasswordBackend):
@@ -68,6 +73,7 @@ class PassBackend(PasswordBackend):
         env: dict,
         password_store_dir: Path,
         use_git: bool = True,
+        approved_recipients: str = "",
     ):
         """Initialize Pass backend.
 
@@ -80,6 +86,9 @@ class PassBackend(PasswordBackend):
         self._pass_cmd = pass_cmd
         self._env = env
         self.password_store_dir = password_store_dir
+        # pass encrypts to whatever .gpg-id names, exactly as DirectBackend
+        # does, so the same question has to be asked before writing here.
+        self._recipient_audit = audit(password_store_dir, approved=approved_recipients)
         # commit_on_write=False, and this is the whole difference from
         # DirectBackend: pass commits by itself on every insert, rm, mv and cp
         # whenever the store is a repository, so a commit from here would add a
@@ -151,7 +160,13 @@ class PassBackend(PasswordBackend):
             env=env,
             password_store_dir=store_dir,
             use_git=settings.use_git,
+            approved_recipients=settings.approved_recipients,
         )
+
+    # -- recipients ----------------------------------------------------------
+
+    def recipient_audit(self):
+        return self._recipient_audit
 
     # -- syncing -------------------------------------------------------------
 
@@ -189,14 +204,18 @@ class PassBackend(PasswordBackend):
         """Run pass command with arguments.
 
         Args:
-            args: Arguments to pass command
+            args: Arguments to pass command. Every entry name goes after a
+                ``--``: names are filenames out of the store, a store can come
+                from a remote, and `-c.gpg` is a legal file. Without the
+                terminator getopt reads such a name as a flag -- `pass show -c`
+                copies to the system clipboard and prints nothing.
             input_data: Optional input data to pass via stdin
 
         Returns:
             Completed process
 
         Raises:
-            BackendError: If command fails
+            BackendError: If command fails, including when it does not finish.
         """
         cmd = self._pass_cmd + args
 
@@ -208,8 +227,15 @@ class PassBackend(PasswordBackend):
                 text=True,
                 check=True,
                 env=self._env,
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
             return result
+        except subprocess.TimeoutExpired:
+            # Before the blanket handler below, and phrased without e: a decrypt
+            # that is killed mid-flight carries whatever it had already printed
+            # on the exception, and for `pass show` that is the entry itself.
+            # This message reaches a toast and the log.
+            raise BackendError(f"pass {args[0]} timed out") from None
         except subprocess.CalledProcessError as e:
             raise BackendError(f"pass command failed: {e.stderr}") from e
         except Exception as e:
@@ -258,7 +284,7 @@ class PassBackend(PasswordBackend):
             BackendError: If retrieval fails
         """
         path = self._existing(name)
-        result = self._run_pass(["show", name])
+        result = self._run_pass(["show", "--", name])
 
         return PasswordEntry(
             name=name,
@@ -278,13 +304,14 @@ class PassBackend(PasswordBackend):
             FileExistsError: If password already exists
             BackendError: If creation fails
         """
+        ensure_approved(self._recipient_audit)
         if self._path_for(name).exists():
             raise FileExistsError(f"Password '{name}' already exists")
 
         # Through _run_pass, which is the only thing that carries the store
         # location. Calling subprocess.run here directly meant a configured
         # PASSWORD_STORE_DIR was read from but written to ~/.password-store.
-        self._run_pass(["insert", "-m", name], input_data=content)
+        self._run_pass(["insert", "-m", "--", name], input_data=content)
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         """Edit an existing password entry.
@@ -298,11 +325,12 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If update fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(name)
 
         # pass has no edit-in-place command, so this is insert with force.
         # Through _run_pass for the same reason as add_password.
-        self._run_pass(["insert", "-m", "-f", name], input_data=content)
+        self._run_pass(["insert", "-m", "-f", "--", name], input_data=content)
 
     def delete_password(self, name: str, commit: bool = True) -> None:
         """Delete a password entry.
@@ -315,8 +343,9 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If deletion fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(name)
-        self._run_pass(["rm", "-f", name])
+        self._run_pass(["rm", "-f", "--", name])
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         """Move/rename a password entry.
@@ -331,12 +360,13 @@ class PassBackend(PasswordBackend):
             FileExistsError: If new name already exists
             BackendError: If move fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(old_name)
         self._path_for(new_name)
 
         # pass, not a filesystem move: crossing into a subtree with its own
         # .gpg-id has to re-encrypt to that subtree's recipients.
-        self._run_pass(["mv", "-f", old_name, new_name])
+        self._run_pass(["mv", "-f", "--", old_name, new_name])
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         """Copy a password entry.
@@ -351,9 +381,10 @@ class PassBackend(PasswordBackend):
             FileExistsError: If destination already exists
             BackendError: If copy fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(source)
         self._path_for(dest)
-        self._run_pass(["cp", "-f", source, dest])
+        self._run_pass(["cp", "-f", "--", source, dest])
 
     def search(self, query: str) -> list[PasswordMetadata]:
         """Match names only, as DirectBackend does.

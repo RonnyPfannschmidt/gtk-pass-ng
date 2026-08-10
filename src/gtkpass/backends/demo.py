@@ -5,6 +5,7 @@ Useful for demos, testing UI, and screenshots.
 """
 
 import json
+import logging
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -18,13 +19,16 @@ from . import (
     PasswordMetadata,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DemoBackendSettings(BackendSettings):
     """Settings for demo backend.
 
     Attributes:
-        custom_data_path: Optional path to custom demo.json file (None = use default)
+        custom_data_path: Optional path to a demo.json (or to a directory
+            holding one). None uses the entries packaged with the application.
     """
 
     custom_data_path: Path | None = None
@@ -68,20 +72,29 @@ class DemoBackend(PasswordBackend):
 
     @staticmethod
     def _load_default_data() -> list[dict]:
-        """Load default demo data from package resources."""
+        """Load default demo data from package resources.
+
+        The fallback is written in the same shape as the packaged file -- a
+        name and a `content` in passwordstore format -- because that is what
+        get_password() reads. It used to spell the fields out as separate keys,
+        so a wheel this could not read out of turned one failure into a
+        KeyError somewhere else entirely.
+        """
         try:
             data_file = files("gtkpass.backends") / "data" / "demo.json"
             with data_file.open("r") as f:
                 return json.load(f)
         except Exception:
-            # Fallback to minimal data
+            logger.warning("Could not read the packaged demo data; using a stand-in")
             return [
                 {
                     "name": "example/email",
-                    "password": "demo_password_123",
-                    "username": "user@example.com",
-                    "url": "https://mail.example.com",
-                    "notes": "Demo email account",
+                    "content": (
+                        "demo_password_123\n"
+                        "username: user@example.com\n"
+                        "url: https://mail.example.com\n"
+                        "notes: Demo email account"
+                    ),
                 }
             ]
 
@@ -113,18 +126,31 @@ class DemoBackend(PasswordBackend):
         if settings is None:
             settings = DemoBackendSettings()
 
-        # Load demo data
-        if settings.custom_data_path and settings.custom_data_path.exists():
-            demo_file = settings.custom_data_path / "demo.json"
-            if demo_file.exists():
-                with open(demo_file) as f:
-                    demo_data = json.load(f)
-            else:
-                demo_data = cls._load_default_data()
-        else:
-            demo_data = cls._load_default_data()
+        if settings.custom_data_path is None:
+            return cls(demo_data=cls._load_default_data())
+        return cls(demo_data=cls._read_custom_data(settings.custom_data_path))
 
-        return cls(demo_data=demo_data)
+    @staticmethod
+    def _read_custom_data(path: Path) -> list[dict]:
+        """Read the demo entries somebody pointed this instance at.
+
+        The setting names a demo.json, and was read as the directory holding
+        one -- so pointing it at a file did nothing at all. Both are accepted
+        now, since the setting has been described as a file for long enough
+        that somebody may have written a directory into it.
+
+        A path that cannot be read is reported rather than quietly replaced
+        with the built-in entries: falling back looks exactly like the setting
+        having worked, which is the one reading that is never true.
+        """
+        demo_file = path / "demo.json" if path.is_dir() else path
+        try:
+            with open(demo_file) as handle:
+                return json.load(handle)
+        except OSError as error:
+            raise BackendError(f"Could not read demo data from {demo_file}") from error
+        except ValueError as error:
+            raise BackendError(f"{demo_file} is not valid JSON: {error}") from error
 
     def list_passwords(self, prefix: str = "") -> list[PasswordMetadata]:
         """List all passwords, optionally filtered by prefix.

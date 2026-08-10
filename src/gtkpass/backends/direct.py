@@ -6,7 +6,9 @@ are the same, so a store is usable from either.
 """
 
 import logging
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +32,7 @@ from gtkpass.backends import (
     SyncResult,
 )
 from gtkpass.backends.git_store import GitStore
+from gtkpass.backends.recipients import GPG_ID, audit, ensure_approved, read_gpg_id
 from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,9 @@ class DirectBackendSettings(BackendSettings):
 
     password_store_dir: Path | None = None
     gpg_home: Path | None = None
+    #: The recipient set last approved for this store, as recorded by
+    #: gtkpass.backends.recipients. Empty means it has not been seen before.
+    approved_recipients: str = ""
 
 
 class DirectBackend(PasswordBackend):
@@ -59,9 +65,14 @@ class DirectBackend(PasswordBackend):
         description="Direct access to GPG-encrypted password files",
     )
 
-    def __init__(self, password_store_dir: Path, gpg):
+    def __init__(self, password_store_dir: Path, gpg, gpg_home=None, approved=""):
         self.password_store_dir = password_store_dir
         self.gpg = gpg
+        # Read once, here, for the same reason the git probe is: it runs gpg,
+        # and only when the recipients differ from what was approved.
+        self._recipient_audit = audit(
+            password_store_dir, approved=approved, gpg_home=gpg_home
+        )
         # Probed once, here, rather than per call: it runs three git commands,
         # and sync_capability() is read on the UI thread to decide whether the
         # sync button is sensitive.
@@ -112,7 +123,12 @@ class DirectBackend(PasswordBackend):
         except Exception as e:
             raise GPGError(f"Could not initialise GPG: {e}") from e
 
-        return cls(password_store_dir=store, gpg=gpg)
+        return cls(
+            password_store_dir=store,
+            gpg=gpg,
+            gpg_home=settings.gpg_home,
+            approved=settings.approved_recipients,
+        )
 
     # -- paths and recipients ------------------------------------------------
 
@@ -134,13 +150,13 @@ class DirectBackend(PasswordBackend):
         root = self.password_store_dir.resolve()
         directory = path.resolve().parent
         while True:
-            gpg_id = directory / ".gpg-id"
+            gpg_id = directory / GPG_ID
             if gpg_id.is_file():
-                recipients = [
-                    line.strip()
-                    for line in gpg_id.read_text().splitlines()
-                    if line.strip() and not line.startswith("#")
-                ]
+                # Through the recipients module, which is where the audit reads
+                # the same files. Two readings of .gpg-id could disagree about
+                # what a store says, and then a store could pass the audit and
+                # be encrypted to something else.
+                recipients = list(read_gpg_id(gpg_id))
                 if recipients:
                     return recipients
             if directory == root or root not in directory.parents:
@@ -150,14 +166,58 @@ class DirectBackend(PasswordBackend):
             f"No .gpg-id found for '{path.name}'. Run 'pass init <gpg-id>' first."
         )
 
+    def recipient_audit(self):
+        return self._recipient_audit
+
     def _encrypt_to_file(self, path: Path, content: str) -> None:
+        """Write the encrypted content, or leave the entry exactly as it was.
+
+        gpg opens its ``--output`` for writing before it knows whether it can
+        encrypt at all, so pointing it straight at the entry means an unusable
+        recipient, a full disk or a signal truncates the only copy of it.
+        Editing is the one destructive operation the interface offers, there is
+        no undo, and a store without git has no history to recover from.
+
+        So the ciphertext is built beside the entry and moved onto it with
+        ``os.replace``, which within a filesystem either happens or does not.
+        The temporary is a dotfile in the entry's own directory: the same
+        filesystem, so the move cannot degrade into a copy, and invisible to
+        ``list_passwords``, which skips path components beginning with a dot.
+        """
         recipients = self._recipients_for(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        result = self.gpg.encrypt(
-            content, recipients, armor=False, output=str(path), always_trust=True
-        )
-        if not result.ok:
-            raise GPGError(f"Failed to encrypt '{path.name}': {result.status}")
+
+        handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        os.close(handle)
+        temporary = Path(name)
+        try:
+            result = self.gpg.encrypt(
+                content,
+                recipients,
+                armor=False,
+                output=str(temporary),
+                always_trust=True,
+            )
+            if not result.ok:
+                raise GPGError(f"Failed to encrypt '{path.name}': {result.status}")
+
+            # Without this the rename can reach the disk before the bytes it
+            # points at do, which after a crash is an entry that exists and is
+            # empty -- the outcome this whole method exists to avoid.
+            with open(temporary, "rb") as written:
+                os.fsync(written.fileno())
+
+            # os.replace carries the temporary's mode rather than the entry's,
+            # so a store kept at 0600 would be relaxed to whatever the umask
+            # gave, one entry at a time, as they were edited. A new entry keeps
+            # mkstemp's 0600, which is the safer end of the difference.
+            if path.exists():
+                temporary.chmod(path.stat().st_mode & 0o777)
+            os.replace(temporary, path)
+        finally:
+            # Nothing to remove on the way through, the replace having renamed
+            # it; this is the failure path, where gpg has left a partial file.
+            temporary.unlink(missing_ok=True)
 
     # -- reading -------------------------------------------------------------
 
@@ -205,6 +265,7 @@ class DirectBackend(PasswordBackend):
     # -- writing -------------------------------------------------------------
 
     def add_password(self, name: str, content: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         path = self._path_for(name)
         if path.exists():
             raise FileExistsError(f"'{name}' already exists")
@@ -212,6 +273,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [path], f"Add password for {name} using gtkpass.")
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         path = self._path_for(name)
         if not path.is_file():
             raise FileNotFoundError(f"No password named '{name}'")
@@ -219,6 +281,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [path], f"Edit password for {name} using gtkpass.")
 
     def delete_password(self, name: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         path = self._path_for(name)
         if not path.is_file():
             raise FileNotFoundError(f"No password named '{name}'")
@@ -229,6 +292,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [path], f"Remove {name} from store.")
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         source = self._path_for(old_name)
         destination = self._path_for(new_name)
         if not source.is_file():
@@ -240,6 +304,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [source, destination], f"Rename {old_name} to {new_name}.")
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         source_path = self._path_for(source)
         dest_path = self._path_for(dest)
         if not source_path.is_file():

@@ -60,6 +60,17 @@ template $GTKPassWindow : Adw.ApplicationWindow {
       }
     }
 
+    // Who a store is encrypted to has changed since it was last approved, so
+    // writing to it is refused until somebody has looked. A banner rather than
+    // a dialog: it has to stay on screen for as long as the refusal stands,
+    // and reading the store is still perfectly fine meanwhile.
+    [top]
+    Adw.Banner recipient_banner {
+      revealed: false;
+      button-label: _("Review");
+      button-clicked => $_on_review_recipients();
+    }
+
     // Wraps the split view so toasts appear over the whole window, which is
     // the libadwaita convention.
     content: Adw.ToastOverlay toast_overlay {

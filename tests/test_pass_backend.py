@@ -7,8 +7,10 @@ arbitrary command execution outside the sandbox, which is not a trade a
 password manager should make.
 """
 
+import os
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -326,6 +328,76 @@ class TestNamesCannotEscapeTheStore:
         assert recorded_runs == []
 
 
+class TestAnEntryNameIsNeverReadAsAnOption:
+    """An entry name reaches pass in argument position, where getopt reads it.
+
+    Names come out of the store as filenames, and a store can come from a
+    remote: `-c.gpg` is a legal file for anyone who can write to one. `pass show
+    -c` then copies the entry to the system clipboard -- with none of the
+    timeout or the toast GTKPass puts around a copy -- and prints nothing, so
+    the entry silently reads as empty. `pass rm -f -r` is a question about
+    recursion. Terminating the options is the whole fix, and it has to be at
+    every call site rather than the one that motivated it.
+
+    pass consumes `--` in show, insert, delete and copy_move, which is all four
+    of the subcommands used here.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    @pytest.fixture
+    def populated(self, store):
+        (store / "-c.gpg").write_bytes(b"\x01ciphertext")
+        return store
+
+    def names_in(self, cmd):
+        """Everything pass will read as a path rather than as a flag."""
+        assert "--" in cmd, f"{cmd} leaves the name where getopt can reach it"
+        return cmd[cmd.index("--") + 1 :]
+
+    def test_reading(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).get_password("-c")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_adding(self, pass_on_path, store, recorded_runs):
+        self.create(store).add_password("-c", "secret")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_editing(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).edit_password("-c", "secret")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_deleting(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).delete_password("-c")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_moving(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).move_password("-c", "-r")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c", "-r"]
+
+    def test_copying(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).copy_password("-c", "-r")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c", "-r"]
+
+    def test_an_ordinary_name_is_terminated_too(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        """No conditional escaping: it either always happens or it is forgotten."""
+        (populated / "email").mkdir()
+        (populated / "email" / "work.gpg").write_bytes(b"\x01ciphertext")
+
+        self.create(populated).get_password("email/work")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["email/work"]
+
+
 class TestSearchMatchesNames:
     """Search must not decrypt.
 
@@ -362,6 +434,64 @@ class TestSearchMatchesNames:
         self.create(populated).search("work")
 
         assert recorded_runs == []
+
+
+class TestPassCannotRunForever:
+    """Every pass invocation is bounded, as every git invocation already is.
+
+    A decrypt raises a pinentry prompt, and gpg waits for it indefinitely -- so
+    a prompt nobody answers, or one that never appears because there is no
+    pinentry to run, leaves pass running and the worker that called it wedged.
+    The manager's pool has four of those, and the window joins them at quit.
+    """
+
+    def backend(self, store, command):
+        """A backend pointed at ``command`` instead of at pass.
+
+        Constructed directly: create() insists on a real pass on PATH, and what
+        is being tested is what happens once one is running.
+        """
+        return PassBackend(
+            pass_cmd=command,
+            env=dict(os.environ),
+            password_store_dir=store,
+            use_git=False,
+        )
+
+    @pytest.fixture
+    def impatient(self, monkeypatch):
+        """Shorten the deadline, so the test does not have to wait it out."""
+        monkeypatch.setattr("gtkpass.backends.pass_cli.SUBPROCESS_TIMEOUT_SECONDS", 0.2)
+
+    def test_a_pass_that_never_returns_is_given_up_on(self, store, impatient):
+        backend = self.backend(store, ["sh", "-c", "sleep 30"])
+
+        with pytest.raises(BackendError, match="timed out"):
+            backend._run_pass(["show", "anything"])
+
+    def test_it_gives_up_rather_than_waiting_for_the_process(self, store, impatient):
+        backend = self.backend(store, ["sh", "-c", "sleep 30"])
+        started = time.monotonic()
+
+        with pytest.raises(BackendError):
+            backend._run_pass(["show", "anything"])
+
+        assert time.monotonic() - started < 10
+
+    def test_what_it_printed_before_hanging_stays_out_of_the_error(
+        self, store, impatient
+    ):
+        """TimeoutExpired carries the output captured so far.
+
+        For `pass show` that output is the decrypted entry, and this error is
+        shown to the user in a toast and written to the log.
+        """
+        backend = self.backend(store, ["sh", "-c", "echo SUPERSECRET; sleep 30"])
+
+        with pytest.raises(BackendError) as raised:
+            backend._run_pass(["show", "anything"])
+
+        assert "SUPERSECRET" not in str(raised.value)
 
 
 class TestGitIsNotAnEnvironmentSetting:

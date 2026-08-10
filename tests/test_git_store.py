@@ -133,6 +133,136 @@ class TestGitIsNeverAllowedToPrompt:
         assert env["SSH_ASKPASS"] == ""
 
 
+class TestTheRemoteHasToBeKnownAlready:
+    """A store's remote is trusted on the strength of its host key, or not.
+
+    accept-new means the first connection from a machine takes whatever key
+    answers. What is at stake is not the entries, which are ciphertext, but the
+    set of entry names and the ability to serve an old copy of the store back --
+    and the first connection is exactly when somebody in the way is undetectable.
+    """
+
+    def test_an_unknown_host_key_is_not_accepted(self, store_repo):
+        env = GitStore(store_repo, "git", commit_on_write=True)._env
+
+        assert "StrictHostKeyChecking=yes" in env["GIT_SSH_COMMAND"]
+        assert "accept-new" not in env["GIT_SSH_COMMAND"]
+
+    @pytest.mark.parametrize(
+        ("url", "host"),
+        [
+            ("git@github.com:me/store.git", "github.com"),
+            ("ssh://git@example.org/srv/store.git", "example.org"),
+            ("ssh://git@example.org:2222/srv/store.git", "example.org"),
+            ("me@[2001:db8::1]:store.git", "2001:db8::1"),
+            ("https://example.org/store.git", None),
+            ("/srv/store.git", None),
+        ],
+    )
+    def test_the_host_is_read_out_of_the_remote_url(self, store_repo, url, host):
+        """Only to name it in the advice, so a wrong answer must be no answer."""
+        assert GitStore.ssh_host(url) == host
+
+    def test_a_rejected_host_key_says_what_to_do(self, store_repo, bare_remote):
+        """Strict is only defensible if the way past it is on screen.
+
+        Batch mode cannot ask, so the remedy is a command -- and the fingerprint
+        wants checking against the server anyway, which is the step a prompt
+        invites people to skip.
+        """
+        store = open_store(store_repo)
+        store.remote_url = "git@example.org:me/store.git"
+
+        explained = store.explain("Host key verification failed.")
+
+        assert "example.org" in explained
+        assert "ssh-keyscan" in explained or "ssh " in explained
+
+    def test_anything_else_is_passed_through_unchanged(self, store_repo):
+        store = open_store(store_repo)
+
+        assert store.explain("some other failure") == "some other failure"
+
+
+class TestARewrittenRemoteIsRefused:
+    """`pull --rebase` accepts whatever history the remote offers.
+
+    A remote that was force-pushed can drop entries, or restore the ciphertext
+    of a password that was rotated -- which still decrypts. Rebasing onto it
+    adopts that history without a word, and for a store of ciphertext there is
+    nothing on screen afterwards that would look wrong.
+    """
+
+    def rewritten(self, store_repo, other_clone, bare_remote):
+        """Sync once, then have the remote drop the commit that brought."""
+        from conftest import git
+
+        entry(other_clone, "shared")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Add shared", cwd=other_clone)
+        git("push", cwd=other_clone)
+        open_store(store_repo).sync()
+
+        # The remote loses that commit and gains a different one in its place.
+        git("reset", "--hard", "HEAD~1", cwd=other_clone)
+        entry(other_clone, "replacement")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Something else entirely", cwd=other_clone)
+        git("push", "--force", cwd=other_clone)
+
+    def test_it_is_reported_rather_than_rebased_onto(
+        self, store_repo, bare_remote, other_clone
+    ):
+        self.rewritten(store_repo, other_clone, bare_remote)
+
+        with pytest.raises(GitError, match="no longer contains"):
+            open_store(store_repo).sync()
+
+    def test_the_store_is_left_where_it_was(self, store_repo, bare_remote, other_clone):
+        from conftest import git
+
+        self.rewritten(store_repo, other_clone, bare_remote)
+        before = git("rev-parse", "HEAD", cwd=store_repo)
+
+        with pytest.raises(GitError):
+            open_store(store_repo).sync()
+
+        assert git("rev-parse", "HEAD", cwd=store_repo) == before
+
+    def test_an_ordinary_pull_is_not_mistaken_for_one(
+        self, store_repo, bare_remote, other_clone
+    ):
+        """The remote growing is the common case and must stay silent."""
+        from conftest import git
+
+        entry(other_clone, "added-elsewhere")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Add one", cwd=other_clone)
+        git("push", cwd=other_clone)
+
+        result = open_store(store_repo).sync()
+
+        assert result.pulled == 1
+
+    def test_a_local_commit_alongside_a_remote_one_is_not_one_either(
+        self, store_repo, bare_remote, other_clone
+    ):
+        """Diverged histories rebase, as they did before; nothing was dropped."""
+        from conftest import git
+
+        entry(other_clone, "theirs")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Theirs", cwd=other_clone)
+        git("push", cwd=other_clone)
+
+        store = open_store(store_repo)
+        store.commit([entry(store_repo, "mine")], "Mine")
+
+        result = store.sync()
+
+        assert result.pushed == 1
+
+
 class TestCommitting:
     def test_a_new_entry_is_committed(self, store_repo):
         store = GitStore(store_repo, "git", commit_on_write=True)
@@ -179,6 +309,46 @@ class TestCommitting:
         message = git("log", "-1", "--pretty=%B", cwd=store_repo)
         assert "email/work" in message
         assert "hunter2" not in message
+
+
+class TestCommittingNeverAsksForASignature:
+    """A store that signs its commits must not make saving a password prompt.
+
+    The commit happens on a worker thread after an entry is written, so a
+    pinentry raised there is a dialog nobody asked for in the middle of a save
+    -- and where one cannot appear, inside a sandbox without the agent socket
+    or on a headless session, it is a worker sitting on a deadline instead.
+
+    GTKPass's commits are bookkeeping: they record that a file changed. They
+    are not a claim about who wrote the entry, which is what a signature would
+    be asserting.
+    """
+
+    @pytest.fixture
+    def signing_store(self, store_repo, tmp_path, monkeypatch):
+        """A store configured to sign, with no key that could."""
+        # Away from the developer's own keyring: nothing here has any business
+        # asking gpg-agent about their keys.
+        monkeypatch.setenv("GNUPGHOME", str(tmp_path / "gnupg-empty"))
+        git("config", "commit.gpgsign", "true", cwd=store_repo)
+        git("config", "user.signingkey", "0000000000000000", cwd=store_repo)
+        return store_repo
+
+    def test_a_write_is_committed_anyway(self, signing_store):
+        store = open_store(signing_store)
+        before = git("rev-list", "--count", "HEAD", cwd=signing_store)
+
+        store.commit([entry(signing_store, "email/work")], "Add work")
+
+        assert git("rev-list", "--count", "HEAD", cwd=signing_store) != before
+
+    def test_the_commit_it_made_is_not_signed(self, signing_store):
+        store = open_store(signing_store)
+
+        store.commit([entry(signing_store, "email/work")], "Add work")
+
+        # %G? is 'N' for a commit carrying no signature at all.
+        assert git("log", "-1", "--pretty=%G?", cwd=signing_store) == "N"
 
 
 class TestSyncing:
@@ -276,16 +446,40 @@ class TestSyncingRefusesToLeaveAMess:
 
         assert "email/work" in str(raised.value)
 
-    def test_an_uncommitted_change_is_reported_before_anything_moves(
+    def test_a_modified_entry_is_reported_before_anything_moves(
         self, store_repo, bare_remote
     ):
+        """A rebase over a dirty worktree is what this exists to prevent."""
         store = open_store(store_repo)
-        entry(store_repo, "email/work")
+        store.commit([entry(store_repo, "email/work")], "Add work")
+        entry(store_repo, "email/work", content=b"\x01changed")
 
         with pytest.raises(GitError) as raised:
             store.sync()
 
         assert "uncommitted" in str(raised.value).lower()
+
+    def test_an_untracked_file_does_not_stop_a_sync(
+        self, store_repo, bare_remote, other_clone
+    ):
+        """git never tracked it, so it is not this store's business.
+
+        A stray editor backup or a .gpg-id nobody committed used to disable the
+        sync button permanently, with a message telling the user to commit or
+        discard something they may well have wanted left alone.
+        """
+        from conftest import git
+
+        entry(other_clone, "theirs")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Theirs", cwd=other_clone)
+        git("push", cwd=other_clone)
+        (store_repo / "notes.txt~").write_text("an editor left this here")
+
+        result = open_store(store_repo).sync()
+
+        assert result.pulled == 1
+        assert (store_repo / "notes.txt~").exists(), "the sync took it away"
 
     def test_an_unreachable_remote_is_reported(self, store_repo, tmp_path):
         git("remote", "add", "origin", str(tmp_path / "nowhere.git"), cwd=store_repo)

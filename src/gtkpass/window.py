@@ -5,11 +5,17 @@ import logging
 from pathlib import Path
 
 from gtkpass._gi import Adw, Gio, Gtk
-from gtkpass.backends import BackendError, SyncNotPermitted, SyncUnavailable
+from gtkpass.backends import (
+    BackendError,
+    PasswordBackend,
+    SyncNotPermitted,
+    SyncUnavailable,
+)
 from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
 from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 from gtkpass.backends.manager import BackendManager
 from gtkpass.backends.pass_cli import PassBackend, PassBackendSettings
+from gtkpass.backends.recipients import describe
 from gtkpass.backends.secretservice import (
     SecretServiceBackend,
     SecretServiceBackendSettings,
@@ -59,6 +65,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     password_detail = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
     sync_stack = Gtk.Template.Child()
+    recipient_banner = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -67,7 +74,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Initialize backend manager and GSettings
         self.backend_manager = BackendManager()
         self.settings = get_settings()
-        self.failed_backends = []  # Track backends that failed to load
+        # (instance id, backend type, what went wrong)
+        self.failed_backends: list[tuple[str, str, str]] = []
         self.backend_types: dict[str, str] = {}  # instance id -> backend type
         # Kept alive deliberately: a Gio.Settings that gets collected stops
         # emitting, and these are what tell us a backend was renamed.
@@ -77,17 +85,49 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # (backend id, name) of the entry on display, or None.
         self._shown: tuple[str, str] | None = None
         self._clipboard = ClipboardCopier(self)
+        # The entry a copied secret came from, so moving off it can take the
+        # copy back rather than leaving it there for the timeout to reach.
+        self._copied_from: tuple[str, str] | None = None
         # Backends whose stores have a remote, refreshed whenever they load.
         self._syncable_backends: list[str] = []
         self._pending_syncs: list[str] = []
+        # Bumped per load, so a superseded one cannot deliver into the window
+        # it no longer describes. Both run on the pool, and the settings dialog
+        # can start a second before the first has come back.
+        self._backend_request = 0
+        self._listing_request = 0
+        # Listings still outstanding, and whether any of them found an entry.
+        # The empty-store placeholder can only be decided once they are all in.
+        self._pending_listings = 0
+        self._listed_anything = False
+        # Backends whose store no longer matches the recipient set approved for
+        # it. Writing to those is refused until somebody has looked.
+        self._changed_recipients: list[str] = []
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
 
+        self._restore_geometry()
         self._setup_actions()
-        self._load_backends()
-        self._refresh_sync_action()
         self._setup_password_list()
+        self._refresh_sync_action()
+        self._load_backends()
+
+    def _restore_geometry(self):
+        """Open at the size the window was last left at.
+
+        Bound rather than read and written by hand: GTK4 keeps default-width and
+        default-height in step with the window as it is resized, which is what
+        makes this the whole of it. The three keys were in the schema from the
+        start with nothing reading them, so the size reset on every launch while
+        the settings said otherwise.
+        """
+        for key, prop in (
+            ("window-width", "default-width"),
+            ("window-height", "default-height"),
+            ("window-maximized", "maximized"),
+        ):
+            self.settings.bind(key, self, prop, Gio.SettingsBindFlags.DEFAULT)
 
     def _setup_actions(self):
         """Set up window actions."""
@@ -112,38 +152,113 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.add_action(sync_action)
 
     def _load_backends(self):
-        """Load backend instances from GSettings."""
+        """Read the configuration here, build the backends on a worker.
+
+        Building one is neither cheap nor bounded. GitStore.probe runs three git
+        commands per store; the Secret Service backend opens a D-Bus connection,
+        waits up to five seconds for an answer and may then unlock a collection,
+        which prompts. All of that used to happen inside __init__, so the window
+        did not appear until every configured backend had finished answering --
+        and for a store on a mount that had gone away, it never did.
+
+        GSettings is read on this thread, before the worker starts. Those keys
+        are a dconf lookup rather than I/O, and keeping every GSettings access
+        on the thread that owns the change handlers is worth more than moving
+        it.
+        """
+        self._backend_request += 1
+        request = self._backend_request
+        self.failed_backends = []
+
+        specs = []
+        for backend_id, backend_type in self._configured_instances():
+            self.backend_types[backend_id] = backend_type
+            self._watch_display_name(backend_id, backend_type)
+            settings = self._load_backend_settings(backend_id, backend_type)
+            if settings is None:
+                logger.error(f"Failed to load settings for backend: {backend_id}")
+                self.failed_backends.append(
+                    (backend_id, backend_type, "Failed to load settings")
+                )
+                continue
+            specs.append((backend_id, backend_type, settings))
+
+        if not specs:
+            logger.info("No backends to load")
+            self._backends_ready(request, [])
+            return
+
+        logger.info(f"Loading {len(specs)} backend(s)...")
+        future = self.backend_manager.submit(self._build_backends, specs)
+        on_ui_thread(
+            future,
+            lambda built: self._backends_ready(request, built),
+            lambda error: self._backends_failed(request, error),
+        )
+
+    def _configured_instances(self) -> list[tuple[str, str]]:
+        """The (id, type) pairs recorded in GSettings, or none if unreadable."""
         try:
-            instances = self.settings.get_value("backend-instances")
-
-            if len(instances) == 0:
-                logger.info("No backends configured in GSettings")
-                return
-
-            logger.info(f"Loading {len(instances)} backend(s)...")
-
-            for backend_id, backend_type in instances:
-                self.backend_types[backend_id] = backend_type
-                self._watch_display_name(backend_id, backend_type)
-                try:
-                    logger.debug(f"Loading backend: {backend_id} ({backend_type})")
-                    settings = self._load_backend_settings(backend_id, backend_type)
-                    if settings:
-                        backend = self._create_backend(backend_type, settings)
-                        self.backend_manager.add_backend(backend_id, backend)
-                        logger.info(f"Successfully loaded backend: {backend_id}")
-                    else:
-                        logger.error(
-                            f"Failed to load settings for backend: {backend_id}"
-                        )
-                        self.failed_backends.append(
-                            (backend_id, backend_type, "Failed to load settings")
-                        )
-                except Exception as e:
-                    logger.exception(f"Exception loading backend {backend_id}: {e}")
-                    self.failed_backends.append((backend_id, backend_type, str(e)))
+            return [
+                (str(i), str(t))
+                for i, t in self.settings.get_value("backend-instances")
+            ]
         except Exception as e:
-            logger.exception(f"Error loading backends: {e}")
+            logger.exception(f"Error reading the configured backends: {e}")
+            return []
+
+    def _build_backends(
+        self, specs: list[tuple[str, str, object]]
+    ) -> list[tuple[str, str, PasswordBackend | None, str]]:
+        """Construct every configured backend. Runs on a worker thread.
+
+        Touches no widget and no GSettings: what it returns reaches the window
+        through _backends_ready, on the UI thread. A backend that will not build
+        is carried back as its message rather than raised, so one bad store does
+        not cost the others.
+        """
+        built: list[tuple[str, str, PasswordBackend | None, str]] = []
+        for backend_id, backend_type, settings in specs:
+            logger.debug(f"Loading backend: {backend_id} ({backend_type})")
+            try:
+                backend = self._create_backend(backend_type, settings)
+            except Exception as e:
+                logger.exception(f"Exception loading backend {backend_id}: {e}")
+                built.append((backend_id, backend_type, None, str(e)))
+            else:
+                built.append((backend_id, backend_type, backend, ""))
+        return built
+
+    def _backends_ready(
+        self,
+        request: int,
+        built: list[tuple[str, str, PasswordBackend | None, str]],
+    ) -> None:
+        """Install what the worker built, unless a newer load has replaced it."""
+        if request != self._backend_request:
+            # The configuration changed while this was in flight, and what it
+            # holds was built against a manager that has since been shut down.
+            logger.debug("Discarding a superseded backend load")
+            return
+
+        for backend_id, backend_type, backend, error in built:
+            if backend is None:
+                self.failed_backends.append((backend_id, backend_type, error))
+            else:
+                self.backend_manager.add_backend(backend_id, backend)
+                logger.info(f"Successfully loaded backend: {backend_id}")
+
+        self._refresh_sync_action()
+        self._refresh_recipient_banner()
+        self._show_backend_errors()
+        self._load_passwords()
+
+    def _backends_failed(self, request: int, error: BaseException) -> None:
+        """The build itself fell over, rather than one backend in it."""
+        if request != self._backend_request:
+            return
+        logger.error(f"Error loading backends: {error}")
+        self._load_passwords()
 
     def _watch_display_name(self, backend_id: str, backend_type: str) -> None:
         """Refresh the sidebar when this backend is renamed.
@@ -181,12 +296,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.backend_types = {}
         self._backend_settings = {}
 
-        # Reload backends
-        self._load_backends()
+        # Anything the old manager still has in flight belongs to backends that
+        # no longer exist; bumping the listing here drops it on arrival rather
+        # than letting it append to the tree the new load is about to build.
+        self._listing_request += 1
+        self.password_list.clear_all()
         self._refresh_sync_action()
 
-        # Refresh the password list
-        self._load_passwords()
+        # Reload backends. The listing follows once they are built.
+        self._load_backends()
 
     def _load_backend_settings(self, backend_id: str, backend_type: str):
         """Load settings for a specific backend instance."""
@@ -207,6 +325,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 return PassBackendSettings(
                     password_store_dir=Path(store_dir) if store_dir else None,
                     use_git=use_git,
+                    approved_recipients=backend_gsettings.get_string(
+                        "approved-recipients"
+                    ),
                 )
             elif backend_type == "direct":
                 store_dir = backend_gsettings.get_string("password-store-dir")
@@ -214,6 +335,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 return DirectBackendSettings(
                     password_store_dir=Path(store_dir) if store_dir else None,
                     gpg_home=Path(gpg_home) if gpg_home else None,
+                    approved_recipients=backend_gsettings.get_string(
+                        "approved-recipients"
+                    ),
                 )
         except Exception as e:
             logger.error(
@@ -253,15 +377,17 @@ class GTKPassWindow(Adw.ApplicationWindow):
         )
         self._apply_reveal_preference()
 
-        # Show warning for failed backends
-        if len(self.failed_backends) > 0:
-            self._show_backend_errors()
-
-        # Load passwords from backends
-        self._load_passwords()
-
     def _load_passwords(self):
-        """Load passwords from all backends and display them."""
+        """Rebuild the sidebar, asking each backend for its entries off the UI thread.
+
+        Listing walks a store's whole directory tree, or goes out over D-Bus, so
+        it belongs on the pool with every other backend call. The rows arrive
+        per backend as each one answers rather than all together, which is why
+        the empty-store placeholder waits for the last of them.
+        """
+        self._listing_request += 1
+        request = self._listing_request
+
         # Clear existing tree
         self.password_list.clear_all()
 
@@ -274,58 +400,74 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._show_configuration_prompt()
             return
 
-        has_any_passwords = False
+        self._pending_listings = len(loaded_backends)
+        self._listed_anything = False
 
         # Add each loaded backend as a root node
-        for backend_id, backend in loaded_backends.items():
-            # Determine icon based on backend type
-            # Using green checkmark for available/healthy backends
-            icon_name = "emblem-default-symbolic"  # Green checkmark
-
-            # Create friendly display name
-            display_name = self._get_backend_display_name(backend_id)
-
-            # Add backend to tree
+        for backend_id in loaded_backends:
             backend_node = self.password_list.add_backend(
-                backend_id=backend_id, backend_name=display_name, icon_name=icon_name
+                backend_id=backend_id,
+                backend_name=self._get_backend_display_name(backend_id),
+                # Green checkmark for an available, healthy backend.
+                icon_name="emblem-default-symbolic",
             )
-
-            # Load passwords from this backend
-            try:
-                passwords = list(backend.list_passwords())
-                logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
-
-                if len(passwords) > 0:
-                    has_any_passwords = True
-
-                # Add passwords under the backend
-                for password in sorted(passwords, key=lambda p: p.name):
-                    self.password_list.add_password(backend_node, password.name)
-            except Exception as e:
-                logger.error(f"Error loading passwords from {backend_id}: {e}")
+            self._list_into(request, backend_id, backend_node)
 
         # Add failed backends with error icon
         for backend_id, _backend_type, _error in self.failed_backends:
-            icon_name = "dialog-error-symbolic"  # Red error icon for unavailable
             display_name = self._get_backend_display_name(backend_id)
             self.password_list.add_backend(
                 backend_id=backend_id,
                 backend_name=f"{display_name} (unavailable)",
-                icon_name=icon_name,
+                icon_name="dialog-error-symbolic",
             )
 
-        # Expand all backend nodes
+        # The backend rows exist; their entries append to a model the tree is
+        # already watching, so expanding does not have to wait for them.
         self.password_list.expand_first_level()
 
-        if not has_any_passwords and len(loaded_backends) > 0:
-            # Backends loaded but no passwords
-            self.placeholder_page.set_title("No Passwords Found")
-            self.placeholder_page.set_description(
-                "Your password store is empty.\nAdd a password to get started."
-            )
-            self.placeholder_page.set_icon_name("dialog-password-symbolic")
-            # The configuration prompt reveals this and nothing else hides it.
-            self.open_preferences_button.set_visible(False)
+    def _list_into(self, request: int, backend_id: str, node) -> None:
+        """Fill one backend's row in, when its listing comes back."""
+
+        def show(passwords):
+            if request != self._listing_request:
+                return
+            logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
+            for password in sorted(passwords, key=lambda p: p.name):
+                self.password_list.add_password(node, password.name)
+            self._listing_answered(request, listed=bool(passwords))
+
+        def report(error):
+            if request != self._listing_request:
+                return
+            logger.error(f"Error loading passwords from {backend_id}: {error}")
+            self._listing_answered(request, listed=False)
+
+        try:
+            future = self.backend_manager.list_passwords_async(backend_id)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, show, report)
+
+    def _listing_answered(self, request: int, listed: bool) -> None:
+        """Count one backend in, and decide the placeholder once all have answered."""
+        if request != self._listing_request:
+            return
+
+        self._listed_anything = self._listed_anything or listed
+        self._pending_listings -= 1
+        if self._pending_listings > 0 or self._listed_anything:
+            return
+
+        # Backends loaded but no passwords
+        self.placeholder_page.set_title("No Passwords Found")
+        self.placeholder_page.set_description(
+            "Your password store is empty.\nAdd a password to get started."
+        )
+        self.placeholder_page.set_icon_name("dialog-password-symbolic")
+        # The configuration prompt reveals this and nothing else hides it.
+        self.open_preferences_button.set_visible(False)
 
     def _get_backend_display_name(self, backend_id: str) -> str:
         """Name to show for a configured backend instance.
@@ -369,6 +511,112 @@ class GTKPassWindow(Adw.ApplicationWindow):
         logger.warning(f"Failed backends: {message}")
         for backend_id, backend_type, error in self.failed_backends:
             logger.warning(f"  - {backend_id} ({backend_type}): {error}")
+
+    # -- recipients ----------------------------------------------------------
+
+    def _refresh_recipient_banner(self) -> None:
+        """Say so, and keep saying so, while a store's recipients are unapproved.
+
+        Writing to such a store is refused by the backend; this is what makes
+        that visible before somebody runs into it, and what offers the only way
+        to lift it.
+        """
+
+        def unapproved(backend) -> bool:
+            audit = backend.recipient_audit()
+            return audit is not None and audit.changed
+
+        self._changed_recipients = [
+            backend_id
+            for backend_id, backend in self.backend_manager.get_all_backends().items()
+            if unapproved(backend)
+        ]
+
+        self.recipient_banner.set_revealed(bool(self._changed_recipients))
+        if not self._changed_recipients:
+            return
+
+        first = self._changed_recipients[0]
+        name = self._get_backend_display_name(first)
+        if len(self._changed_recipients) > 1:
+            title = f"{len(self._changed_recipients)} stores have new recipients"
+        else:
+            title = f"{name}: who this store is encrypted to has changed"
+        self.recipient_banner.set_title(title)
+
+    @Gtk.Template.Callback()
+    def _on_review_recipients(self, _banner) -> None:
+        self._open_recipients_dialog()
+
+    def _open_recipients_dialog(self):
+        """Show what changed, and offer to record it as approved.
+
+        Returns the dialog, as _open_edit_dialog does, so a test can drive it to
+        a response rather than only proving it was built.
+        """
+        if not self._changed_recipients:
+            return None
+        backend_id = self._changed_recipients[0]
+        backend = self.backend_manager.get_backend(backend_id)
+        if backend is None:
+            return None
+        audit = backend.recipient_audit()
+        if audit is None:
+            return None
+
+        builder = Gtk.Builder.new_from_file(
+            str(
+                importlib.resources.files("gtkpass.ui.blueprints")
+                / "recipients_changed.ui"
+            )
+        )
+        dialog = builder.get_object("recipients_changed_dialog")
+        builder.get_object("summary_label").set_label(
+            f"{self._get_backend_display_name(backend_id)}: {describe(audit)}"
+        )
+        builder.get_object("changed_label").set_label(_recipient_lines(audit))
+
+        stale = audit.stale_entries
+        builder.get_object("stale_heading").set_visible(bool(stale))
+        builder.get_object("stale_scroller").set_visible(bool(stale))
+        builder.get_object("stale_label").set_label("\n".join(stale))
+
+        def responded(_dialog, response):
+            if response == "accept":
+                self._approve_recipients(backend_id, audit.record)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+        return dialog
+
+    def _approve_recipients(self, backend_id: str, record: str) -> None:
+        """Record a recipient set as the one this store is expected to have.
+
+        Written to the instance's own settings rather than into the store: the
+        record is what a later change gets compared against, so it has to live
+        where whoever can write to the remote cannot reach it.
+
+        The backends read it when they are built, so this reloads them -- which
+        is also what lifts the refusal on writing.
+        """
+        backend_type = self.backend_types.get(backend_id, "")
+        try:
+            get_backend_settings(backend_type, backend_id).set_string(
+                "approved-recipients", record
+            )
+        except Exception as e:
+            logger.error(f"Could not record the recipients for {backend_id}: {e}")
+            self._toast(f"Could not record the recipients: {e}")
+            return
+
+        self._toast(
+            f"Recipients accepted for {self._get_backend_display_name(backend_id)}"
+        )
+        self.backend_manager.shutdown()
+        self.backend_manager = BackendManager()
+        self._listing_request += 1
+        self.password_list.clear_all()
+        self._load_backends()
 
     # -- syncing -------------------------------------------------------------
 
@@ -473,8 +721,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         def responded(_dialog, response):
             if response == "copy":
-                # No timeout: this is a shell command, not a secret.
-                self._clipboard.copy(error.override_command, 0)
+                # No timeout, and not marked as a secret: this is a shell
+                # command to run, and it belongs in the clipboard history.
+                self._clipboard.copy(error.override_command, 0, secret=False)
                 self._toast("Command copied")
 
         dialog.connect("response", responded)
@@ -497,7 +746,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             backend_id: ID of the backend containing the password
             password_name: Name of the selected password
         """
-        logger.debug(f"Selected password: {password_name} from backend: {backend_id}")
+        # The name deliberately does not appear in the log. An entry name says
+        # which account somebody holds, the log goes to the journal when the
+        # application is launched from the desktop, and -d is exactly the flag
+        # somebody turns on when something is wrong. The toasts below carry the
+        # name, on screen, where it belongs.
+        logger.debug(f"Opening an entry from backend: {backend_id}")
 
         self._detail_request += 1
         request = self._detail_request
@@ -517,7 +771,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         def report(error):
             if request != self._detail_request:
                 return
-            logger.error(f"Could not open {password_name}: {error}")
+            logger.error(f"Could not open an entry from {backend_id}: {error}")
             self.password_detail.clear()
             self.content_stack.set_visible_child_name("placeholder")
             self._set_shown(None)
@@ -538,6 +792,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _set_shown(self, shown: tuple[str, str] | None) -> None:
         """Record which entry the detail pane holds, and offer editing for it."""
+        if self._copied_from is not None and shown != self._copied_from:
+            # Moving off the entry a secret was copied from ends the reason to
+            # keep it. Re-opening the same one does not -- saving an edit
+            # re-selects it, and that must not throw the copy away.
+            self._clipboard.clear_if_ours()
+            self._copied_from = None
         self._shown = shown
         action = self.lookup_action("edit-password")
         if action is not None:
@@ -583,7 +843,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._on_password_selected(backend_id, password_name)
 
         def report(error):
-            logger.error(f"Could not save {password_name}: {error}")
+            logger.error(f"Could not save an entry to {backend_id}: {error}")
             self._toast(f"Could not save {password_name}: {error}")
 
         try:
@@ -599,10 +859,35 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """Copy a field from the detail pane, clearing it again later."""
         timeout = self.settings.get_int("clipboard-timeout")
         self._clipboard.copy(value, timeout)
+        self._copied_from = self._shown
         if timeout > 0:
             self._toast(f"{field} copied, clearing in {timeout}s")
         else:
             self._toast(f"{field} copied")
 
+    def discard_clipboard(self) -> None:
+        """Take a copied secret back before the application goes away.
+
+        Called from GTKPassApp.do_shutdown rather than from a signal here. The
+        "destroy" signal is emitted when a window is disposed, not when it is
+        told to close: gtk_window_destroy only drops GTK's own reference, and
+        this window is still held by the settings handlers and by whatever the
+        pool has in flight, so it can outlive the application that owned it.
+        A copy left on the clipboard would outlive both.
+        """
+        self._clipboard.clear_at_shutdown()
+
     def _toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast.new(message))
+
+
+def _recipient_lines(audit) -> str:
+    """The change itself, spelled out for the review dialog."""
+    lines = []
+    for name in audit.added:
+        lines.append(f"+ {name}")
+    for name in audit.removed:
+        lines.append(f"- {name}")
+    for name in audit.unknown_recipients:
+        lines.append(f"? {name}  (no key for this recipient here)")
+    return "\n".join(lines) or "(the file changed without changing who it names)"
