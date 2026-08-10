@@ -1,7 +1,8 @@
 # Cutting a release.
 #
 # Pushing a v* tag builds everything, checks it, publishes the wheel and sdist
-# to PyPI, and attaches the RPMs and sysext images to a GitHub release. See
+# to PyPI, and attaches the RPMs, the sysext images and the Windows zip and
+# installer to a GitHub release. See
 # docs/RELEASING.md, which also covers the one-time PyPI setup this needs.
 #
 # Running it by hand (workflow_dispatch) builds and checks everything and
@@ -97,6 +98,14 @@ jobs:
           find artefacts -name '*.raw' -exec cp {} upload/ \;
           find artefacts -name '*.tar.gz' -o -name '*.whl' \
             | xargs -r -I{} cp {} upload/
+
+          # The Windows build is non-blocking, so this is the one place that
+          # has to cope with an artefact simply not being there. `find` matching
+          # nothing is not an error, and the release goes out with what exists;
+          # a job that failed says so on its own, in the run.
+          find artefacts -name 'gtkpass-*-windows-x64.zip' -exec cp {} upload/ \;
+          find artefacts -name 'gtkpass-*-windows-x64-setup.exe' -exec cp {} upload/ \;
+
           ls -1 upload/
 
       # What changed, and where to read about the rest. Install instructions
@@ -123,7 +132,8 @@ jobs:
             echo
             echo 'Installing: [README](https://github.com/'"${GITHUB_REPOSITORY}"'#running-it) ·' \
                  '[RPM and systemd-sysext](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/PACKAGING.md) ·' \
-                 '[Flatpak](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/FLATPAK.md)'
+                 '[Flatpak](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/FLATPAK.md) ·' \
+                 '[Windows](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/WINDOWS.md)'
             echo
             echo 'Nothing here is signed, and there is no repository to install from.'
           } > notes.md

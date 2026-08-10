@@ -79,8 +79,8 @@ There is an issue open about claiming the original name.
 
 1. **verify** — the whole of `ci.yml`, called as a reusable workflow. It builds
    the wheel, the sdist and the RPMs, then runs the test suite against each of
-   them *installed*, builds and inspects the sysext images, and runs lint and
-   types. Everything else waits for this.
+   them *installed*, builds and inspects the sysext images, freezes and checks
+   the Windows bundle, and runs lint and types. Everything else waits for this.
 2. **pypi** — uploads the wheel and sdist that verify already built and tested,
    after checking the version setuptools-scm derived is exactly the tag. A tag
    that is not on the built commit yields `0.2.0.dev3+g1234567`, which would
@@ -154,7 +154,15 @@ instructions belong, and the notes link to it at the tag they were cut from.
 ## What is released, and what is not
 
 Attached to the release: the wheel and sdist, the RPMs and source RPMs for each
-Fedora built, and one sysext image per target.
+Fedora built, one sysext image per target, and — when its job succeeded — the
+Windows portable zip and installer.
+
+That qualification is deliberate. The Windows job is non-blocking, because
+everything it depends on comes from off this repository and none of it is under
+the control of whoever is cutting the release. The release goes out with what
+exists; the failed job says so itself, in the run.
+[WINDOWS.md](WINDOWS.md) has the rest of the reasoning, including when to take
+that off.
 
 The sysext images are named `gtkpass-fedora-<release>.raw`, and systemd takes an
 extension's identity from that filename — so it will merge on Fedora and refuse

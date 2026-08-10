@@ -14,9 +14,10 @@ speaks it.
 ## Status
 
 **Early, and honest about it.** The application runs, reads and edits, and is
-covered by a test suite. It builds as a Flatpak, an RPM and a systemd-sysext
-image, and tagging would publish them — but no release has been made, nothing is
-signed, and there is no repository to install from.
+covered by a test suite. It builds as a Flatpak, an RPM, a systemd-sysext image
+and a Windows executable with an installer, and tagging would publish them — but
+no release has been made, nothing is signed, and there is no repository to
+install from.
 
 What works today:
 
@@ -78,6 +79,16 @@ make sysext    # a systemd-sysext image for Bluefin, Silverblue and the rest
 the last two. Tagging publishes all of it — see
 [docs/RELEASING.md](docs/RELEASING.md) — but no release has been made yet.
 
+On Windows there is no `make`, and GTK comes from the bundle rather than from
+the system:
+
+```powershell
+pwsh -File packaging\windows\build.ps1   # an .exe, a portable zip and an installer
+```
+
+[docs/WINDOWS.md](docs/WINDOWS.md) covers that one, including which backends
+work there — the Secret Service is a D-Bus interface and does not.
+
 The distribution is called `gtk-pass-ng` on PyPI: `gtkpass` there belongs to an
 unrelated project, and `gtk-pass` was refused as too similar to it. The command,
 the package and the RPM all keep this project's name.
@@ -116,6 +127,7 @@ a code.
 - [SECURITY.md](SECURITY.md) — threat model and reporting
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
 - [docs/PACKAGING.md](docs/PACKAGING.md) — the RPM and the sysext image
+- [docs/WINDOWS.md](docs/WINDOWS.md) — the Windows build, and what works there
 - [docs/RELEASING.md](docs/RELEASING.md) — what tagging does, and PyPI setup
 - [docs/FLATPAK.md](docs/FLATPAK.md) — the Flatpak, and its sandbox permissions
 - [docs/FLATHUB.md](docs/FLATHUB.md) — what publishing it would take

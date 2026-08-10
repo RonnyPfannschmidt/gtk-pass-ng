@@ -23,6 +23,8 @@ import json
 import os
 from pathlib import Path
 
+from gtkpass import frozen
+
 #: Overrides the default in both directions. Set to 1 by run_app.sh, and to 0 by
 #: `make run-dev`. Anything else reaching for it is a mistake.
 OPT_IN_VARIABLE = "GTKPASS_ALLOW_REAL_STORE"
@@ -156,6 +158,14 @@ def require_installed() -> None:
     Raises:
         NotInstalled: If nothing describes this code as installed.
     """
+    if frozen.is_frozen():
+        # A bundle is an install by construction -- it is built out of one, by
+        # a release job -- and there is no PYTHONPATH process inside one to
+        # catch. Refusing on absent metadata would only mean an application a
+        # user installed declining to start over a packaging fault, with advice
+        # ('run make sync') that means nothing on the machine reading it.
+        return
+
     dist = _own_distribution()
     if dist is not None and not _from_source_tree_metadata(dist):
         return
@@ -209,6 +219,13 @@ def running_from_checkout(module_file: Path | str | None = None) -> bool:
     while the code executing is the working copy -- the one case where being
     wrong opens the guard rather than closing it.
     """
+    if frozen.is_frozen():
+        # There is no source tree inside a bundle. What it holds was installed
+        # from a wheel at build time, and the metadata that survives says so
+        # about the wheel's build directory rather than about this machine --
+        # a path that does not exist here and would answer nothing.
+        return False
+
     package_dir = Path(module_file or __file__).resolve().parent
 
     dist = _own_distribution()
