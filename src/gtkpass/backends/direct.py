@@ -6,7 +6,9 @@ are the same, so a store is usable from either.
 """
 
 import logging
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -151,13 +153,54 @@ class DirectBackend(PasswordBackend):
         )
 
     def _encrypt_to_file(self, path: Path, content: str) -> None:
+        """Write the encrypted content, or leave the entry exactly as it was.
+
+        gpg opens its ``--output`` for writing before it knows whether it can
+        encrypt at all, so pointing it straight at the entry means an unusable
+        recipient, a full disk or a signal truncates the only copy of it.
+        Editing is the one destructive operation the interface offers, there is
+        no undo, and a store without git has no history to recover from.
+
+        So the ciphertext is built beside the entry and moved onto it with
+        ``os.replace``, which within a filesystem either happens or does not.
+        The temporary is a dotfile in the entry's own directory: the same
+        filesystem, so the move cannot degrade into a copy, and invisible to
+        ``list_passwords``, which skips path components beginning with a dot.
+        """
         recipients = self._recipients_for(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        result = self.gpg.encrypt(
-            content, recipients, armor=False, output=str(path), always_trust=True
-        )
-        if not result.ok:
-            raise GPGError(f"Failed to encrypt '{path.name}': {result.status}")
+
+        handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        os.close(handle)
+        temporary = Path(name)
+        try:
+            result = self.gpg.encrypt(
+                content,
+                recipients,
+                armor=False,
+                output=str(temporary),
+                always_trust=True,
+            )
+            if not result.ok:
+                raise GPGError(f"Failed to encrypt '{path.name}': {result.status}")
+
+            # Without this the rename can reach the disk before the bytes it
+            # points at do, which after a crash is an entry that exists and is
+            # empty -- the outcome this whole method exists to avoid.
+            with open(temporary, "rb") as written:
+                os.fsync(written.fileno())
+
+            # os.replace carries the temporary's mode rather than the entry's,
+            # so a store kept at 0600 would be relaxed to whatever the umask
+            # gave, one entry at a time, as they were edited. A new entry keeps
+            # mkstemp's 0600, which is the safer end of the difference.
+            if path.exists():
+                temporary.chmod(path.stat().st_mode & 0o777)
+            os.replace(temporary, path)
+        finally:
+            # Nothing to remove on the way through, the replace having renamed
+            # it; this is the failure path, where gpg has left a partial file.
+            temporary.unlink(missing_ok=True)
 
     # -- reading -------------------------------------------------------------
 
