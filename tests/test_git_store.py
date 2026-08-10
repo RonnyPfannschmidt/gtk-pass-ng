@@ -133,6 +133,57 @@ class TestGitIsNeverAllowedToPrompt:
         assert env["SSH_ASKPASS"] == ""
 
 
+class TestTheRemoteHasToBeKnownAlready:
+    """A store's remote is trusted on the strength of its host key, or not.
+
+    accept-new means the first connection from a machine takes whatever key
+    answers. What is at stake is not the entries, which are ciphertext, but the
+    set of entry names and the ability to serve an old copy of the store back --
+    and the first connection is exactly when somebody in the way is undetectable.
+    """
+
+    def test_an_unknown_host_key_is_not_accepted(self, store_repo):
+        env = GitStore(store_repo, "git", commit_on_write=True)._env
+
+        assert "StrictHostKeyChecking=yes" in env["GIT_SSH_COMMAND"]
+        assert "accept-new" not in env["GIT_SSH_COMMAND"]
+
+    @pytest.mark.parametrize(
+        ("url", "host"),
+        [
+            ("git@github.com:me/store.git", "github.com"),
+            ("ssh://git@example.org/srv/store.git", "example.org"),
+            ("ssh://git@example.org:2222/srv/store.git", "example.org"),
+            ("me@[2001:db8::1]:store.git", "2001:db8::1"),
+            ("https://example.org/store.git", None),
+            ("/srv/store.git", None),
+        ],
+    )
+    def test_the_host_is_read_out_of_the_remote_url(self, store_repo, url, host):
+        """Only to name it in the advice, so a wrong answer must be no answer."""
+        assert GitStore.ssh_host(url) == host
+
+    def test_a_rejected_host_key_says_what_to_do(self, store_repo, bare_remote):
+        """Strict is only defensible if the way past it is on screen.
+
+        Batch mode cannot ask, so the remedy is a command -- and the fingerprint
+        wants checking against the server anyway, which is the step a prompt
+        invites people to skip.
+        """
+        store = open_store(store_repo)
+        store.remote_url = "git@example.org:me/store.git"
+
+        explained = store.explain("Host key verification failed.")
+
+        assert "example.org" in explained
+        assert "ssh-keyscan" in explained or "ssh " in explained
+
+    def test_anything_else_is_passed_through_unchanged(self, store_repo):
+        store = open_store(store_repo)
+
+        assert store.explain("some other failure") == "some other failure"
+
+
 class TestCommitting:
     def test_a_new_entry_is_committed(self, store_repo):
         store = GitStore(store_repo, "git", commit_on_write=True)

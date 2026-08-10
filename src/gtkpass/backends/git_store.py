@@ -41,6 +41,11 @@ logger = logging.getLogger(__name__)
 #: those errors are shown to the user and written to the log.
 _CREDENTIALS = re.compile(r"://[^/@\s]+@")
 
+#: What ssh says when the remote's host key is not in known_hosts, or no longer
+#: matches it. Matched on rather than parsed: it is the one failure with a
+#: remedy the user has to carry out somewhere else.
+_UNKNOWN_HOST_KEY = "Host key verification failed"
+
 
 def redact(text: str) -> str:
     """Strip credentials out of any URL before the text is shown or logged."""
@@ -53,6 +58,9 @@ class GitStore:
     def __init__(self, store_dir: Path, git_binary: str, commit_on_write: bool) -> None:
         self.store_dir = store_dir
         self.git_binary = git_binary
+        #: The remote's URL, when probe() found one. Only ever used to name the
+        #: host in advice; nothing is decided by it.
+        self.remote_url: str | None = None
         #: False for backends that commit their own writes -- pass does, on
         #: every insert, rm, mv and cp -- so commit() is a no-op for them.
         self.commit_on_write = commit_on_write
@@ -75,9 +83,18 @@ class GitStore:
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = ""
         env["SSH_ASKPASS"] = ""
-        env["GIT_SSH_COMMAND"] = (
-            "ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new"
-        )
+        # StrictHostKeyChecking=yes, not accept-new. accept-new takes whatever
+        # key answers the first connection from a machine, which is precisely
+        # when somebody in the way cannot be detected. What that would cost is
+        # not the entries -- they are ciphertext -- but the set of entry names,
+        # and the ability to serve an old copy of the store back, restoring a
+        # password that was rotated.
+        #
+        # Batch mode cannot ask, so the first sync on a new machine fails; the
+        # remedy is a command, and explain() puts it on screen. Checking a
+        # fingerprint against the server is a step worth taking deliberately
+        # rather than one to click past.
+        env["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes -oStrictHostKeyChecking=yes"
         return env
 
     # -- running git ---------------------------------------------------------
@@ -104,8 +121,58 @@ class GitStore:
 
         if result.returncode != 0:
             detail = redact(result.stderr.strip() or result.stdout.strip())
-            raise GitError(f"git {args[0]} failed: {detail}")
+            raise GitError(f"git {args[0]} failed: {self.explain(detail)}")
         return result.stdout.strip()
+
+    def explain(self, detail: str) -> str:
+        """Add the remedy to a failure that has one somewhere else.
+
+        Only the unknown host key: it is the one thing GTKPass refuses that the
+        user is expected to go and resolve, and being strict about it is only
+        defensible if what to do about it is on screen.
+        """
+        if _UNKNOWN_HOST_KEY not in detail:
+            return detail
+
+        host = self.ssh_host(self.remote_url or "")
+        if host is None:
+            return (
+                f"{detail}\nThe remote's host key is not one this machine has "
+                f"accepted before."
+            )
+        return (
+            f"{detail}\nThe host key for {host} is not one this machine has "
+            f"accepted before. Check its fingerprint against the server, then "
+            f"connect once with 'ssh {host}' in a terminal, or add it with "
+            f"'ssh-keyscan {host} >> ~/.ssh/known_hosts'."
+        )
+
+    @staticmethod
+    def ssh_host(url: str) -> str | None:
+        """The host an ssh remote names, or None when it is not one.
+
+        Only ever used to name it in advice, so an answer it is not sure of is
+        worse than none: a wrong hostname sends somebody to check a fingerprint
+        that was never in question.
+        """
+        remainder = url
+        if "://" in url:
+            scheme, _, remainder = url.partition("://")
+            if scheme not in {"ssh", "git+ssh"}:
+                return None
+        elif ":" not in url or url.startswith("/"):
+            # A local path, and scp syntax needs the colon that separates it
+            # from the path.
+            return None
+
+        _, _, authority = remainder.rpartition("@")
+        authority = authority.split("/")[0]
+        if authority.startswith("["):
+            # A bracketed IPv6 literal, which carries colons of its own.
+            address, _, _ = authority.partition("]")
+            return address[1:] or None
+        host = authority.split(":")[0]
+        return host or None
 
     def _try(self, *args: str) -> str | None:
         """Run a command whose failure is an answer rather than a problem."""
@@ -164,6 +231,7 @@ class GitStore:
             )
 
         remote = remotes.splitlines()[0]
+        store.remote_url = store._try("remote", "get-url", remote)
         branch = store._try("rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
         return store, SyncCapability(
             supported=True,

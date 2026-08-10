@@ -76,6 +76,22 @@ establish who *should* be able to read somebody's store, and refusing to write
 to every existing store until it had been re-approved would only teach people to
 click the button without reading it.
 
+### Syncing with a remote
+
+Sync is `git pull --rebase` followed by `git push`, over whatever transport the
+store's remote uses. What reaches the remote is the ciphertext plus the entry
+*names*, since the names are the filenames — exactly what `pass git push`
+already sends. Git history also keeps the ciphertext of deleted entries. Both
+are inherent to a git-backed store rather than choices GTKPass makes.
+
+Over ssh, the remote's host key has to be known already:
+`StrictHostKeyChecking=yes`, not `accept-new`. Taking whatever key answers the
+first connection from a machine trusts it at exactly the moment somebody in the
+way cannot be detected, and while the entries are ciphertext, the entry names
+are not, and an old copy of the store served back restores a password you
+rotated. So the first sync from a new machine fails, and says which host to
+check the fingerprint of and what to run.
+
 ### Handling decrypted data
 
 - Entries are decrypted only when opened, one at a time.
