@@ -188,9 +188,9 @@ anything running as the user can defeat either.
 
 Do not rely on any of these — they do not exist:
 
-- Session locking or auto-lock after inactivity. The GSettings schema carries an
-  `auto-lock-timeout` key that no code reads; it is not a feature, and reading
-  the schema is not evidence of one.
+- Session locking or auto-lock after inactivity. The schema used to carry an
+  `auto-lock-timeout` key that nothing read, which is worse than the absence:
+  it is now gone, and a test fails on any key the code never mentions.
 - Storing the GPG passphrase in a keyring (GPG agent handles caching)
 - Screenshot prevention
 - Secure or locked memory allocation

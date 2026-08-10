@@ -107,10 +107,27 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
 
+        self._restore_geometry()
         self._setup_actions()
         self._setup_password_list()
         self._refresh_sync_action()
         self._load_backends()
+
+    def _restore_geometry(self):
+        """Open at the size the window was last left at.
+
+        Bound rather than read and written by hand: GTK4 keeps default-width and
+        default-height in step with the window as it is resized, which is what
+        makes this the whole of it. The three keys were in the schema from the
+        start with nothing reading them, so the size reset on every launch while
+        the settings said otherwise.
+        """
+        for key, prop in (
+            ("window-width", "default-width"),
+            ("window-height", "default-height"),
+            ("window-maximized", "maximized"),
+        ):
+            self.settings.bind(key, self, prop, Gio.SettingsBindFlags.DEFAULT)
 
     def _setup_actions(self):
         """Set up window actions."""

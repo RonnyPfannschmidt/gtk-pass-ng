@@ -51,14 +51,6 @@
         Seconds before automatically clearing clipboard. 0 to disable.
       </description>
     </key>
-
-    <key name="auto-lock-timeout" type="i">
-      <default>300</default>
-      <summary>Auto-lock timeout</summary>
-      <description>
-        Seconds of inactivity before auto-locking. 0 to disable.
-      </description>
-    </key>
   </schema>
 
   <!-- Demo backend schema (relocatable) -->

@@ -33,6 +33,8 @@ application; none of its dates survived contact with the work.
 - Syncing a git-backed store: pull with rebase, then push, off the UI thread
 
 **Hardening**
+- The window opens at the size it was left at, and no schema key is offered that
+  nothing reads -- a test now fails on one
 - Every subprocess GTKPass owns has a deadline, and the pool is never joined
   from the UI thread, so a passphrase prompt nobody answers cannot freeze or
   trap the application
@@ -111,9 +113,6 @@ Smaller things, worth doing when passing:
   no longer matches the class.
 - `secretstorage` is not in the Flatpak, so the Secret Service backend reports
   itself unavailable there. It needs `cryptography`, which is a Rust build.
-- The GSettings schema carries an `auto-lock-timeout` key that no code reads.
-  Either auto-lock gets built or the key goes; a setting that does nothing is
-  worse than an absent one, because it reads as a promise.
 - Neither the RPM nor the sysext image is signed, and there is no repository to
   install either from. A release attaches them to a GitHub page, which is
   transport security and not provenance.

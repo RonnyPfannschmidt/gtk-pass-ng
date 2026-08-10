@@ -137,6 +137,46 @@ class TestWindowWithoutBackends:
         assert title == "No Backends Configured"
 
 
+class TestTheWindowOpensWhereItWasLeft:
+    """Three schema keys existed from the start with nothing reading them.
+
+    The window reset to its default size on every launch while dconf held a
+    size somebody had chosen, which is worse than not offering the setting.
+    """
+
+    @pytest.fixture
+    def stored_size(self):
+        settings = get_settings()
+        previous = (
+            settings.get_int("window-width"),
+            settings.get_int("window-height"),
+        )
+        settings.set_int("window-width", 1234)
+        settings.set_int("window-height", 567)
+        yield
+        settings.set_int("window-width", previous[0])
+        settings.set_int("window-height", previous[1])
+
+    def test_the_stored_size_is_applied(self, stored_size):
+        from gtkpass.window import GTKPassWindow
+
+        size = run_in_application(
+            lambda app: GTKPassWindow(application=app).get_default_size()
+        )
+
+        assert tuple(size) == (1234, 567)
+
+    def test_a_resize_is_remembered(self, stored_size):
+        from gtkpass.window import GTKPassWindow
+
+        def resize(app):
+            window = GTKPassWindow(application=app)
+            window.set_default_size(800, 600)
+            return get_settings().get_int("window-width")
+
+        assert run_in_application(resize) == 800
+
+
 class TestWindowWithDemoBackend:
     @pytest.fixture
     def rows(self, demo_backend_configured):
