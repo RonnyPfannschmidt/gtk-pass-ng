@@ -33,6 +33,20 @@ def pytest_configure(config: pytest.Config) -> None:
     # Keep the accessibility bridge out of the way; it is noisy under xvfb.
     os.environ.setdefault("NO_AT_BRIDGE", "1")
 
+    # Use the X server xvfb-run provides, rather than whatever session the
+    # developer is sitting in front of. GDK ignores DISPLAY whenever
+    # WAYLAND_DISPLAY is set, so `make test` on a Wayland desktop ran every gui
+    # test against the real session: windows appeared on screen, and a clipboard
+    # test overwrites whatever the developer had copied -- which, working on
+    # this, may well have been a password. Xvfb was started, and nothing used it.
+    #
+    # Set rather than setdefault, unlike everything above it. A desktop session
+    # exports GDK_BACKEND=wayland itself, so the value that has to be overridden
+    # is precisely the one that is already there; a default would never win.
+    # Someone who needs the real backend can say so by not going through pytest.
+    os.environ["GDK_BACKEND"] = "x11"
+    os.environ.pop("WAYLAND_DISPLAY", None)
+
     # GTK4 renders with OpenGL by default, and the tests that present a widget
     # realize one. On a machine with no GPU -- a CI container, which is the only
     # place this bites -- libepoxy aborts inside gdk_gl_context_make_current and

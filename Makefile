@@ -24,7 +24,15 @@ export UV_NO_SYNC := 1
 
 # GTK4 has no usable headless backend, and a private bus keeps the tests away
 # from the developer's real keyring.
-HEADLESS := xvfb-run -a dbus-run-session --
+#
+# The env prefix is not decoration. GDK ignores DISPLAY whenever WAYLAND_DISPLAY
+# is set, and a Wayland session commonly exports GDK_BACKEND=wayland outright,
+# so xvfb-run on its own connected to the developer's own compositor: windows
+# appeared on their screen and the clipboard tests overwrote whatever they had
+# copied -- which, working on this, may well have been a password. Xvfb was
+# started, and nothing used it.
+ISOLATE := env -u WAYLAND_DISPLAY GDK_BACKEND=x11
+HEADLESS := $(ISOLATE) xvfb-run -a dbus-run-session --
 
 FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
