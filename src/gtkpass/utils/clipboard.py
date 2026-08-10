@@ -3,6 +3,13 @@
 Clearing is best effort. A clipboard manager may already have taken a copy, and
 under Wayland a compositor may refuse a clear from an unfocused application.
 Treat the timeout as damage limitation, not as a guarantee.
+
+The timeout in particular protects against the wrong thing on its own. A
+clipboard manager takes its copy the moment the selection changes, so by the
+time the timer fires the password is already in a history that outlives both the
+timer and the application. Nothing this side of the clipboard can reach into
+that history; the only thing that keeps a secret out of it is asking not to be
+recorded, which is what the hint below does.
 """
 
 import logging
@@ -10,6 +17,18 @@ import logging
 from gtkpass._gi import Gdk, GLib, GObject, Gtk
 
 logger = logging.getLogger(__name__)
+
+#: Offered alongside the text to mean "do not keep a copy of this".
+#:
+#: There is no specification for it. This spelling is Klipper's, and it is what
+#: KeePassXC, Bitwarden and the other password managers offer, which makes it
+#: the convention by use rather than by agreement. A clipboard manager that does
+#: not know the type is no worse off than before: the text is offered next to
+#: it, and that is what pasting reads.
+PASSWORD_MANAGER_HINT = "x-kde-passwordManagerHint"
+
+#: The hint's value. Its presence is what is read, but managers compare it.
+SECRET_HINT = b"secret"
 
 
 class ClipboardCopier:
@@ -26,10 +45,15 @@ class ClipboardCopier:
         self._timeout_id: int | None = None
         self._pending: str | None = None
 
-    def copy(self, text: str, timeout_seconds: int) -> None:
+    def copy(self, text: str, timeout_seconds: int, secret: bool = True) -> None:
         """Put text on the clipboard, clearing it after ``timeout_seconds``.
 
         A timeout of zero disables clearing.
+
+        ``secret`` decides whether clipboard managers are asked not to keep it.
+        Not everything copied from a password manager is a password -- the sync
+        dialog offers a shell command to run -- and marking those would take
+        them out of the history the user wants them in.
         """
         if not text:
             return
@@ -39,11 +63,7 @@ class ClipboardCopier:
             logger.warning("No display; cannot copy to the clipboard")
             return
 
-        # Gdk.Clipboard.set() is a varargs C function whose Python override is
-        # not available in every PyGObject build; set_content always is.
-        clipboard.set_content(
-            Gdk.ContentProvider.new_for_value(GObject.Value(str, text))
-        )
+        clipboard.set_content(self._content_for(text, secret))
 
         self.cancel_pending_clear()
         if timeout_seconds > 0:
@@ -52,12 +72,66 @@ class ClipboardCopier:
                 timeout_seconds, self._clear_if_unchanged
             )
 
+    @staticmethod
+    def _content_for(text: str, secret: bool) -> Gdk.ContentProvider:
+        """What to offer the clipboard, and under which types.
+
+        Gdk.Clipboard.set() is a varargs C function whose Python override is not
+        available in every PyGObject build; set_content always is.
+        """
+        # The text comes first, so a paste that takes the first format it
+        # recognises gets what the user meant to paste.
+        text_provider = Gdk.ContentProvider.new_for_value(GObject.Value(str, text))
+        if not secret:
+            return text_provider
+        return Gdk.ContentProvider.new_union(
+            [
+                text_provider,
+                Gdk.ContentProvider.new_for_bytes(
+                    PASSWORD_MANAGER_HINT, GLib.Bytes.new(SECRET_HINT)
+                ),
+            ]
+        )
+
     def cancel_pending_clear(self) -> None:
         """Drop a scheduled clear without performing it."""
         if self._timeout_id is not None:
             GLib.source_remove(self._timeout_id)
             self._timeout_id = None
         self._pending = None
+
+    def clear_if_ours(self) -> None:
+        """Take the copy back now rather than at the end of the timeout.
+
+        For when the reason to keep it has gone -- the entry it came from is no
+        longer the one on display. Same read-back check as the timeout, so
+        clearing early cannot throw away something copied from somewhere else in
+        the meantime.
+        """
+        if self._timeout_id is not None:
+            GLib.source_remove(self._timeout_id)
+            self._timeout_id = None
+        self._clear_if_unchanged()
+
+    def clear_at_shutdown(self) -> None:
+        """Empty the clipboard on the way out, without the read-back check.
+
+        That check is asynchronous, and a window being destroyed has no main
+        loop left to deliver the answer to. So this is the one clear that
+        happens without knowing whether the value is still the one we put there
+        -- bounded by there being a clear outstanding at all, which means a
+        secret was copied within the timeout and has not been taken back.
+
+        On Wayland the offer usually dies with the process anyway. This is for
+        the sessions where it does not.
+        """
+        if self._pending is None:
+            return
+        self.cancel_pending_clear()
+        clipboard = self._clipboard()
+        if clipboard is not None:
+            clipboard.set_content(None)
+            logger.debug("Cleared the clipboard on the way out")
 
     def _clipboard(self) -> Gdk.Clipboard | None:
         display = self._widget.get_display()

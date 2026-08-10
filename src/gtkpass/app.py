@@ -76,6 +76,19 @@ class GTKPassApp(Adw.Application):
             self.window = GTKPassWindow(application=self)
         self.window.present()
 
+    def do_shutdown(self):
+        """Leave nothing of a copied secret behind on the way out.
+
+        The clipboard timeout cannot fire once the process is gone, so quitting
+        inside it would otherwise leave the password there indefinitely. This is
+        the application's job rather than the window's: closing the last window
+        and Ctrl+Q both arrive here, while neither reliably destroys a window
+        that other references are still holding.
+        """
+        if self.window is not None:
+            self.window.discard_clipboard()
+        Adw.Application.do_shutdown(self)
+
     def do_startup(self):
         """Initialize application on startup."""
         Adw.Application.do_startup(self)

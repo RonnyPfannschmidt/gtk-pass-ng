@@ -492,6 +492,64 @@ class TestEditing:
         assert shown == expected
 
 
+class TestACopiedSecretIsTakenBack:
+    """A copy is kept for as long as there is a reason to keep it.
+
+    The timeout is the outer bound. Moving to another entry ends the reason
+    sooner, and closing the window ends it altogether.
+    """
+
+    def copy_from_first_entry(self, app):
+        """A window with a password copied out of the entry on display."""
+        window, name = TestShowingDetails().open_first_password(app)
+        cleared: list[str] = []
+        window._clipboard.clear_if_ours = lambda: cleared.append(  # type: ignore[method-assign]
+            "taken back"
+        )
+        window._on_copy_requested(None, "Password", "hunter2")
+        return window, name, cleared
+
+    def test_opening_another_entry_takes_it_back(self, demo_backend_configured):
+        def check(app):
+            window, name, cleared = self.copy_from_first_entry(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            assert backend is not None
+            other = next(p.name for p in backend.list_passwords() if p.name != name)
+
+            window._on_password_selected(DEMO_BACKEND_ID, other)
+            pump_until(lambda: bool(cleared))
+            return cleared
+
+        assert run_in_application(check) == ["taken back"]
+
+    def test_re_opening_the_same_entry_does_not(self, demo_backend_configured):
+        """Saving an edit re-selects the entry; that is not moving off it."""
+
+        def check(app):
+            window, name, cleared = self.copy_from_first_entry(app)
+
+            window._on_password_selected(DEMO_BACKEND_ID, name)
+            pump_until(lambda: bool(cleared), timeout_seconds=1.0)
+            return cleared
+
+        assert run_in_application(check) == []
+
+    def test_the_window_can_be_told_to_give_it_up(self, demo_backend_configured):
+        """What GTKPassApp.do_shutdown calls; see test_app.py for the hook."""
+
+        def check(app):
+            window = loaded_window(app)
+            emptied: list[str] = []
+            window._clipboard.clear_at_shutdown = lambda: emptied.append(  # type: ignore[method-assign]
+                "emptied"
+            )
+
+            window.discard_clipboard()
+            return emptied
+
+        assert run_in_application(check) == ["emptied"]
+
+
 class TestSyncing:
     """The sync action, from the button through to a toast.
 

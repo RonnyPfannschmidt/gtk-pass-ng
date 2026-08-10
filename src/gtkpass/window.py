@@ -83,6 +83,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # (backend id, name) of the entry on display, or None.
         self._shown: tuple[str, str] | None = None
         self._clipboard = ClipboardCopier(self)
+        # The entry a copied secret came from, so moving off it can take the
+        # copy back rather than leaving it there for the timeout to reach.
+        self._copied_from: tuple[str, str] | None = None
         # Backends whose stores have a remote, refreshed whenever they load.
         self._syncable_backends: list[str] = []
         self._pending_syncs: list[str] = []
@@ -583,8 +586,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         def responded(_dialog, response):
             if response == "copy":
-                # No timeout: this is a shell command, not a secret.
-                self._clipboard.copy(error.override_command, 0)
+                # No timeout, and not marked as a secret: this is a shell
+                # command to run, and it belongs in the clipboard history.
+                self._clipboard.copy(error.override_command, 0, secret=False)
                 self._toast("Command copied")
 
         dialog.connect("response", responded)
@@ -648,6 +652,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _set_shown(self, shown: tuple[str, str] | None) -> None:
         """Record which entry the detail pane holds, and offer editing for it."""
+        if self._copied_from is not None and shown != self._copied_from:
+            # Moving off the entry a secret was copied from ends the reason to
+            # keep it. Re-opening the same one does not -- saving an edit
+            # re-selects it, and that must not throw the copy away.
+            self._clipboard.clear_if_ours()
+            self._copied_from = None
         self._shown = shown
         action = self.lookup_action("edit-password")
         if action is not None:
@@ -709,10 +719,23 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """Copy a field from the detail pane, clearing it again later."""
         timeout = self.settings.get_int("clipboard-timeout")
         self._clipboard.copy(value, timeout)
+        self._copied_from = self._shown
         if timeout > 0:
             self._toast(f"{field} copied, clearing in {timeout}s")
         else:
             self._toast(f"{field} copied")
+
+    def discard_clipboard(self) -> None:
+        """Take a copied secret back before the application goes away.
+
+        Called from GTKPassApp.do_shutdown rather than from a signal here. The
+        "destroy" signal is emitted when a window is disposed, not when it is
+        told to close: gtk_window_destroy only drops GTK's own reference, and
+        this window is still held by the settings handlers and by whatever the
+        pool has in flight, so it can outlive the application that owned it.
+        A copy left on the clipboard would outlive both.
+        """
+        self._clipboard.clear_at_shutdown()
 
     def _toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast.new(message))
