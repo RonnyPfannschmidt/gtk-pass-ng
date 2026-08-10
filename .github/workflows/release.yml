@@ -1,0 +1,156 @@
+# Cutting a release.
+#
+# Pushing a v* tag builds everything, checks it, publishes the wheel and sdist
+# to PyPI, and attaches the RPMs and sysext images to a GitHub release. See
+# docs/RELEASING.md, which also covers the one-time PyPI setup this needs.
+#
+# Running it by hand (workflow_dispatch) builds and checks everything and
+# uploads the artefacts to the run, but publishes nothing. That is the dry run:
+# publishing is guarded on the ref being a tag, in every job that does it, so a
+# manual run cannot release by accident.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The whole of CI: lint, types, the suite on two Fedora releases, and the RPM
+  # and sysext jobs -- which install and inspect what they build. Everything
+  # below waits for this, and the packages it uploads are what gets published.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  distribution:
+    name: sdist and wheel
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # setuptools-scm reads the version out of git, and reads it wrong
+          # without the tags and the history between them.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: build
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir dist
+
+      # The version is derived, so this is where it becomes visible. A tag of
+      # v0.1.0 must produce 0.1.0 and not 0.1.0.dev3+g1234567, which is what
+      # setuptools-scm returns when the tag is not where it thinks it is.
+      - name: the version matches the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag=${GITHUB_REF#refs/tags/v}
+          built=$(ls dist/*.tar.gz | sed -E 's|.*/gtk_pass_ng-(.*)\.tar\.gz|\1|')
+          echo "tag=$tag built=$built"
+          test "$tag" = "$built" || {
+            echo "::error::built $built from tag $tag; the tag is not on this commit"
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: dist/*
+          if-no-files-found: error
+
+  pypi:
+    name: publish to PyPI
+    needs: distribution
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    # Trusted publishing: PyPI verifies this workflow's identity through OIDC,
+    # so there is no API token to store, leak or rotate. The environment is what
+    # PyPI's publisher configuration names, and what a protection rule would
+    # attach to. docs/RELEASING.md has the setup.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/gtk-pass-ng
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: attach packages to the release
+    needs: [verify, distribution]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Everything the run built, including the artefacts uploaded by the
+      # reusable CI workflow -- the same files that were installed and inspected
+      # there, rather than a second build nobody checked.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefacts
+
+      - name: collect what to publish
+        run: |
+          mkdir -p upload
+          find artefacts -name '*.rpm' -exec cp {} upload/ \;
+          find artefacts -name '*.raw' -exec cp {} upload/ \;
+          find artefacts -name '*.tar.gz' -o -name '*.whl' \
+            | xargs -r -I{} cp {} upload/
+          ls -1 upload/
+
+      # Notes are generated from the commits since the previous tag. The sysext
+      # note is not decoration: an image only merges on the system named in its
+      # own filename, and systemd refuses it anywhere else, so anyone downloading
+      # one needs to be told which is which.
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=${GITHUB_REF#refs/tags/}
+          cat > notes.md <<'EOF'
+          ## Installing
+
+          **pip** — `pip install gtk-pass-ng`. GTK4, libadwaita and PyGObject have to
+          come from your distribution; see the README.
+
+          **RPM** — `gtkpass-*.fc43.noarch.rpm` and `gtkpass-*.fc44.noarch.rpm`,
+          built for that Fedora and no other: the files land under a path that
+          names the interpreter version.
+
+          **systemd-sysext** — for Silverblue, Bluefin, Bazzite and the rest,
+          where a package means rebuilding the deployment. Take the image whose
+          name matches your system, and note that systemd will refuse to merge it
+          on anything else:
+
+          ```
+          sudo cp gtkpass-fedora-44.raw /var/lib/extensions/
+          sudo systemd-sysext merge
+          ```
+
+          An image for a derivative reports its own ID, so build one with
+          `make sysext` on that machine. See docs/PACKAGING.md.
+
+          Nothing here is signed, and there is no repository to install from.
+          EOF
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes "$(cat notes.md)" \
+            --generate-notes \
+            upload/*

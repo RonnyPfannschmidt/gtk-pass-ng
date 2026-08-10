@@ -17,6 +17,7 @@ the checkout really is the application. ``make run-dev`` sets it to 0 and uses a
 scratch store (``make devstore``). Nothing else should set it at all.
 """
 
+import functools
 import importlib.metadata
 import json
 import os
@@ -27,7 +28,12 @@ from pathlib import Path
 OPT_IN_VARIABLE = "GTKPASS_ALLOW_REAL_STORE"
 
 #: The distribution this code belongs to, as installed.
-DISTRIBUTION_NAME = "gtkpass"
+#:
+#: Not "gtkpass": that name on PyPI is an unrelated project, and "gtk-pass" was
+#: refused as too similar to it, so this is distributed as gtk-pass-ng while the
+#: package it installs stays gtkpass. ``importlib.metadata`` normalises
+#: separators, so the underscored spelling resolves just as well.
+DISTRIBUTION_NAME = "gtk-pass-ng"
 
 #: Metadata directories that live *in* a source tree rather than in an install.
 #:
@@ -89,12 +95,41 @@ def is_real_store(path: Path) -> bool:
     return _resolve(path) in real_store_paths()
 
 
+def _distributions_named() -> list[importlib.metadata.Distribution]:
+    """Every distribution on the path claiming to be this one.
+
+    There can be more than one. ``importlib.metadata`` deduplicates by name, but
+    only after normalising it, and a source tree readily offers two spellings at
+    once -- a leftover ``src/gtkpass.egg-info`` from before this was renamed
+    alongside the current ``src/gtk_pass_ng.egg-info``, both reachable because an
+    editable install puts ``src/`` on the path.
+    """
+    wanted = DISTRIBUTION_NAME.replace("_", "-").lower()
+    return [
+        dist
+        for dist in importlib.metadata.distributions()
+        if (dist.metadata["Name"] or "").strip().replace("_", "-").lower() == wanted
+    ]
+
+
+@functools.cache
 def _own_distribution() -> importlib.metadata.Distribution | None:
-    """The installed distribution this code belongs to, if there is one."""
-    try:
-        return importlib.metadata.distribution(DISTRIBUTION_NAME)
-    except importlib.metadata.PackageNotFoundError:
-        return None
+    """The distribution this code belongs to, preferring a real install.
+
+    Cached because the guard asks on every store access and this walks the whole
+    path. Anything replacing what it sees has to call ``cache_clear()``.
+
+    A real install is preferred over a source tree's ``.egg-info`` deliberately:
+    with both present the answer would otherwise depend on which
+    ``importlib.metadata`` reached first, and that decides whether the
+    application starts at all.
+    """
+    found = None
+    for dist in _distributions_named():
+        if not _from_source_tree_metadata(dist):
+            return dist
+        found = found or dist
+    return found
 
 
 def _from_source_tree_metadata(dist: importlib.metadata.Distribution) -> bool:

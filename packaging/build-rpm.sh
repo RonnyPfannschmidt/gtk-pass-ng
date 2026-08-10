@@ -16,20 +16,42 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The version the spec declares. There is no tag to derive one from, so the
-# sdist is pinned to it and the commit goes into Release instead.
-VERSION=0.1.0
-
 # The commit's own date, not today's, so building the same commit twice gives
 # the same package.
 commit_date=$(git log -1 --format=%cd --date=format:%Y%m%d)
 commit_hash=$(git rev-parse --short HEAD)
+
+# The %changelog entry is generated rather than maintained by hand, because the
+# version it has to agree with comes from git and a hand-written one drifts the
+# moment a tag is made -- rpmlint calls that incoherent-version-in-changelog,
+# and it is right to. LC_ALL=C because rpm wants English day and month names
+# whatever locale the person building happens to run in.
+CHANGELOG_DATE=$(LC_ALL=C git log -1 --format=%cd --date=format:"%a %b %d %Y")
 SNAPSHOT="${commit_date}git${commit_hash}"
 
 # A tree with uncommitted changes does not describe the commit it names.
 if ! git diff --quiet HEAD; then
     SNAPSHOT="${SNAPSHOT}.dirty"
     echo "note: working tree is dirty, building ${SNAPSHOT}" >&2
+fi
+
+# Version and release come from git, in the three states a checkout can be in.
+# The point of the Release forms is that upgrades work in the right direction:
+# rpm sorts 0.1.<snap> before 1, and 2.<snap> after it.
+if tag=$(git describe --exact-match --tags HEAD 2>/dev/null); then
+    # On a tag: this is that release.
+    VERSION="${tag#v}"
+    RELEASE=1
+elif previous=$(git describe --abbrev=0 --tags HEAD 2>/dev/null); then
+    # After a tag: a snapshot of work since it, so it must sort *after* the
+    # release it is named for, or an upgrade would go backwards onto it.
+    VERSION="${previous#v}"
+    RELEASE="2.${SNAPSHOT}"
+else
+    # Before any tag has ever been made: a snapshot of the release to come, so
+    # it must sort before it, and the eventual 0.1.0-1 upgrades over this.
+    VERSION=0.1.0
+    RELEASE="0.1.${SNAPSHOT}"
 fi
 
 # VERSION_ID rather than ID, because the derivatives this is aimed at --
@@ -40,7 +62,7 @@ fi
 
 IMAGE="registry.fedoraproject.org/fedora:${FEDORA_RELEASE}"
 
-echo "==> sdist ${VERSION} (snapshot ${SNAPSHOT})"
+echo "==> ${VERSION}-${RELEASE}"
 rm -rf dist/rpm
 mkdir -p dist/rpm
 # Without this setuptools-scm derives a version from git describe, which with no
@@ -55,7 +77,8 @@ else
         python3 -m build --sdist --outdir dist
 fi
 
-sdist="dist/gtkpass-${VERSION}.tar.gz"
+# Named for the distribution, gtk-pass-ng, underscored per PEP 625.
+sdist="dist/gtk_pass_ng-${VERSION}.tar.gz"
 [ -f "$sdist" ] || { echo "error: expected sdist at $sdist" >&2; exit 1; }
 
 # Build here when this already *is* the Fedora being built for -- which is CI,
@@ -73,15 +96,17 @@ fi
 
 if [ "$USE_CONTAINER" = "0" ]; then
     echo "==> rpmbuild here (fedora ${FEDORA_RELEASE})"
-    VERSION="$VERSION" SNAPSHOT="$SNAPSHOT" SRC="$PWD" packaging/rpmbuild-here.sh
+    VERSION="$VERSION" RELEASE="$RELEASE" CHANGELOG_DATE="$CHANGELOG_DATE" \
+        SRC="$PWD" packaging/rpmbuild-here.sh
 else
     # shellcheck source=packaging/container-runtime.sh
     . "$(dirname "$0")/container-runtime.sh"
     echo "==> rpmbuild in ${IMAGE} (${CONTAINER_RUNTIME})"
     "$CONTAINER_RUNTIME" run --rm \
         -v "$PWD:/src:z" \
-        -e "SNAPSHOT=${SNAPSHOT}" \
         -e "VERSION=${VERSION}" \
+        -e "RELEASE=${RELEASE}" \
+        -e "CHANGELOG_DATE=${CHANGELOG_DATE}" \
         -e "SRC=/src" \
         "$IMAGE" \
         /src/packaging/rpmbuild-here.sh

@@ -37,7 +37,7 @@ sudo pacman -S python gtk4 libadwaita python-gobject \
 ## Setting up
 
 ```bash
-git clone https://github.com/RonnyPfannschmidt/gtkpass.git
+git clone https://github.com/RonnyPfannschmidt/gtk-pass-ng.git
 cd gtkpass
 make sync
 ```
