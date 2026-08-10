@@ -193,6 +193,82 @@ class TestOtherFields:
         assert {"host", "db.example.com"} <= rendered
 
 
+class TestFieldsThatAreThemselvesSecrets:
+    """The first line is not the only secret an entry carries.
+
+    An `otpauth://` line is a shared secret that generates every future code; a
+    `pin` or a `recovery` field is a password by another name. All of them were
+    rendered as plain labels the moment the entry was selected, while the
+    password above them was dotted out -- so a shoulder, a screen share or a
+    screenshot got the parts nobody thought to hide.
+    """
+
+    def displayed(self, view):
+        model = view.extra_fields
+        return {
+            model.get_item(index).key: model.get_item(index).display
+            for index in range(model.get_n_items())
+        }
+
+    def test_a_one_time_password_seed_is_masked(self, view):
+        view.show_entry(entry("s3cret\notpauth: otpauth://totp/x?secret=ABCDEF"))
+
+        assert "ABCDEF" not in self.displayed(view)["otpauth"]
+
+    @pytest.mark.parametrize(
+        "key", ["otp", "totp", "pin", "secret", "token", "recovery", "seed", "key"]
+    )
+    def test_the_keys_that_name_a_secret_are_masked(self, view, key):
+        view.show_entry(entry(f"s3cret\n{key}: 123456"))
+
+        assert self.displayed(view)[key] != "123456"
+
+    def test_an_ordinary_field_is_left_alone(self, view):
+        """Masking a hostname would be a worse interface for no benefit."""
+        view.show_entry(entry("s3cret\nhost: db.example.com\nport: 5432"))
+
+        assert self.displayed(view) == {"host": "db.example.com", "port": "5432"}
+
+    def test_revealing_shows_them(self, view):
+        view.show_entry(entry("s3cret\npin: 1234\nhost: db.example.com"))
+
+        view.set_reveal_extras(True)
+
+        assert self.displayed(view)["pin"] == "1234"
+
+    def test_the_control_is_offered_only_when_something_is_hidden(self, view):
+        view.show_entry(entry("s3cret\nhost: db.example.com"))
+        assert not view.reveal_extras_button.get_visible()
+
+        view.show_entry(entry("s3cret\npin: 1234", name="second"))
+
+        assert view.reveal_extras_button.get_visible()
+
+    def test_moving_to_another_entry_hides_them_again(self, view):
+        view.show_entry(entry("s3cret\npin: 1234"))
+        view.set_reveal_extras(True)
+
+        view.show_entry(entry("other\npin: 9999", name="second"))
+
+        assert self.displayed(view)["pin"] != "9999"
+
+    def test_the_masking_reaches_the_display(self, view):
+        """The row template binds a property; the model alone proves nothing."""
+        view.show_entry(entry("s3cret\npin: 1234"))
+
+        rendered = present_until(view, lambda v: "pin" in labels_of(v.extras_view))
+
+        assert "1234" not in rendered
+
+    def test_the_revealed_value_reaches_the_display(self, view):
+        view.show_entry(entry("s3cret\npin: 1234"))
+        view.set_reveal_extras(True)
+
+        rendered = present_until(view, lambda v: "1234" in labels_of(v.extras_view))
+
+        assert "1234" in rendered
+
+
 class TestNotes:
     def test_a_notes_key_is_shown(self, view):
         """This is how the demo data and pass templates write notes."""

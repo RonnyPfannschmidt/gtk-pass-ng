@@ -149,6 +149,14 @@ store used — and renders everything else as the key and value it was written a
 A store carries whatever its owner put there, and an entry with a field GTKPass
 has no opinion about is not a reason to hide it.
 
+Fields whose *name* says they are secrets — `otp`, `pin`, `recovery` and the
+rest of `SENSITIVE_KEYS` — are dotted out like the password, with one control on
+the group that shows them. One control rather than one per row because a
+`BuilderListItemFactory` template cannot connect a signal, there being no object
+to connect it to, and `action-target` takes a `GVariant` that a string property
+cannot be bound to. The row binds `display`, which the item recomputes and
+notifies when it is revealed.
+
 It emits `copy-requested` instead of touching the clipboard, leaving the window
 to apply the user's timeout and raise the toast.
 

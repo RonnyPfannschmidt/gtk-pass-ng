@@ -17,7 +17,43 @@ URL_KEYS = ("url", "website", "uri")
 #: written rather than dropped: a store carries whatever its owner put there.
 KNOWN_KEYS = frozenset(USERNAME_KEYS + URL_KEYS + ("notes",))
 
+#: Keys whose value is a secret in its own right.
+#:
+#: The first line is not the only one worth hiding. An ``otpauth://`` line is the
+#: shared secret every future code comes from; a PIN or a recovery code is a
+#: password by another name. All of them used to be plain labels the moment an
+#: entry was selected, while the password above them was dotted out.
+#:
+#: A list of keys rather than a guess at the value: it is predictable, and a
+#: field nobody thought of stays visible rather than a hostname being hidden.
+SENSITIVE_KEYS = frozenset(
+    {
+        "otp",
+        "otpauth",
+        "totp",
+        "pin",
+        "secret",
+        "token",
+        "key",
+        "seed",
+        "recovery",
+        "recovery-codes",
+        "passphrase",
+        "password",
+        "api-key",
+        "apikey",
+    }
+)
+
 PLACEHOLDER = "—"
+
+#: What a masked field shows instead of itself.
+DOTS = "••••••••"
+
+
+def looks_sensitive(key: str) -> bool:
+    """Whether a field's name says its value is a secret."""
+    return key.strip().lower() in SENSITIVE_KEYS
 
 
 class MetadataField(GObject.Object):
@@ -32,6 +68,29 @@ class MetadataField(GObject.Object):
 
     key = GObject.Property(type=str, default="")
     value = GObject.Property(type=str, default="")
+    sensitive = GObject.Property(type=bool, default=False)
+
+    def __init__(self, key: str = "", value: str = "") -> None:
+        super().__init__(key=key, value=value, sensitive=looks_sensitive(key))
+        self._revealed = False
+
+    @GObject.Property(type=str, default="")
+    def display(self) -> str:
+        """What the row shows: the value, or dots while it is hidden."""
+        if self.sensitive and not self._revealed:
+            return DOTS
+        return self.value
+
+    def reveal(self, revealed: bool) -> None:
+        """Show or hide this field's value.
+
+        Notifying ``display`` is what redraws the row: the template binds that
+        property, and nothing else about the object has changed.
+        """
+        if self._revealed == revealed:
+            return
+        self._revealed = revealed
+        self.notify("display")
 
 
 @Gtk.Template(
@@ -65,6 +124,7 @@ class PasswordDetailView(Gtk.Box):
     extras_view: Gtk.ListView = Gtk.Template.Child()
     notes_group: Adw.PreferencesGroup = Gtk.Template.Child()
     notes_label: Gtk.Label = Gtk.Template.Child()
+    reveal_extras_button: Gtk.ToggleButton = Gtk.Template.Child()
     copy_username_btn: Gtk.Button = Gtk.Template.Child()
     copy_password_btn: Gtk.Button = Gtk.Template.Child()
     copy_url_btn: Gtk.Button = Gtk.Template.Child()
@@ -75,6 +135,9 @@ class PasswordDetailView(Gtk.Box):
         #: Whether passwords are shown rather than dotted out. Kept so that
         #: moving to another entry does not silently re-hide one.
         self._reveal_password = False
+        #: Whether the fields that are secrets are shown. Reset per entry: a
+        #: reveal is about the entry on screen, not a mode the pane is left in.
+        self._reveal_extras = False
         #: Fields with no row of their own, in the order the store wrote them.
         self.extra_fields: Gio.ListStore = Gio.ListStore(item_type=MetadataField)
         self.extras_view.set_model(Gtk.NoSelection(model=self.extra_fields))
@@ -137,7 +200,27 @@ class PasswordDetailView(Gtk.Box):
         for key, value in metadata.items():
             if key not in KNOWN_KEYS and value:
                 self.extra_fields.append(MetadataField(key=key, value=value))
+        hidden = any(
+            self.extra_fields.get_item(index).sensitive
+            for index in range(self.extra_fields.get_n_items())
+        )
+        self.reveal_extras_button.set_visible(hidden)
+        # Follows the same preference the password row does: somebody who asked
+        # for passwords to be shown did not mean "except these".
+        self.set_reveal_extras(self._reveal_password if hidden else False)
         self.extras_group.set_visible(bool(self.extra_fields.get_n_items()))
+
+    def set_reveal_extras(self, reveal: bool) -> None:
+        """Show or hide every field that is a secret in its own right."""
+        self._reveal_extras = reveal
+        if self.reveal_extras_button.get_active() != reveal:
+            self.reveal_extras_button.set_active(reveal)
+        for index in range(self.extra_fields.get_n_items()):
+            self.extra_fields.get_item(index).reveal(reveal)
+
+    @Gtk.Template.Callback()
+    def _on_reveal_extras_toggled(self, button) -> None:
+        self.set_reveal_extras(button.get_active())
 
     def clear(self) -> None:
         """Forget the entry and blank the rows."""

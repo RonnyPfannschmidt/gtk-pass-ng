@@ -104,6 +104,12 @@ key, and commits are neither signed nor verified.
 ### Handling decrypted data
 
 - Entries are decrypted only when opened, one at a time.
+- The first line is not the only field treated as a secret. A field whose name
+  says its value is one — `otp`, `otpauth`, `pin`, `secret`, `token`, `key`,
+  `seed`, `recovery` and a few spellings of those — is dotted out with the
+  password rather than rendered as a plain label, and shown on request. It is a
+  list of names rather than a guess at the value, so a field nobody thought of
+  stays visible rather than a hostname being hidden.
 - A write builds its ciphertext beside the entry and moves it into place, so an
   encryption that fails half way costs the edit rather than the entry. `gpg
   --output` is opened for writing before gpg knows whether it can encrypt, so
