@@ -80,6 +80,18 @@ present the widget and read back what it rendered.
 - Import GI namespaces from `gtkpass._gi`, which pins the versions once. Never
   call `gi.require_version` anywhere else.
 - Nothing outside `backends/manager.py` imports a backend module directly.
+- The window loads its backends asynchronously, so a test that wants one has to
+  turn the main loop until it arrives -- `loaded_window` and `listed_window` in
+  `tests/test_window.py` are the two places that wait. Nothing slow may be added
+  to `GTKPassWindow.__init__`: a constructor that runs git or talks to D-Bus is
+  a window that does not appear.
+- What the manager hands out is a `SerializedBackend`, not the backend itself.
+  A method added to the backend contract has to be forwarded there too, or it
+  will answer for the proxy instead of for the backend; the contract suite
+  checks that.
+- Backends must never re-encrypt a store to a changed recipient set. Reporting
+  the change is `backends/recipients.py`; acting on it is `pass init`, and doing
+  it automatically would carry out the attack it exists to detect.
 - Application identity lives in `gtkpass/config.py`. The D-Bus name, desktop
   file, icon, AppStream id and GSettings schema all have to stay the same string.
 - `Gio.Settings.new()` on a missing schema calls `g_error()` and aborts the
@@ -104,7 +116,12 @@ present the widget and read back what it rendered.
 ## Commands
 
 `make help` lists them. `make check` runs lint, format and types via pre-commit;
-`make test` runs the suite headless under xvfb.
+`make test` runs the suite headless under xvfb, on its own X server and its own
+D-Bus session. Both halves are deliberate: GDK ignores `DISPLAY` whenever
+`WAYLAND_DISPLAY` is set, and a desktop session exports `GDK_BACKEND=wayland`
+itself, so xvfb alone put every window on the real screen and let a clipboard
+test overwrite whatever the developer had copied. conftest sets the same thing
+again for a bare `pytest`.
 
 CI packages first and tests the packages: it builds the wheel, sdist and RPMs,
 then runs this suite against each of them installed, over two Fedora releases.

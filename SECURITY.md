@@ -48,9 +48,42 @@ terminal.
 The Secret Service backend stores nothing itself: it hands entries to the
 session keyring over D-Bus.
 
+### Who a store is encrypted to
+
+`.gpg-id` decides who can read everything written from now on, and nothing
+verifies it. That was a local question while the store was local; sync made it a
+remote one, because whoever can write to the remote can add a recipient and
+every entry saved afterwards is encrypted to them too.
+
+What such a change cannot bring with it is a rekey: re-encrypting the existing
+entries means decrypting them first, which is exactly what the party making the
+change cannot do. So GTKPass records the recipient set each store was last
+approved with — in the instance's own settings, outside the store, where a
+remote cannot reach it — and compares on every load. A store whose `.gpg-id` no
+longer matches is not written to until somebody has looked at what changed:
+which recipients were added or removed, and which entries were left encrypted to
+the old set. Reading is unaffected, because nothing newly named there can
+decrypt what is already stored.
+
+Accepting records the new set and nothing else. **GTKPass never re-encrypts.**
+Rekeying a store is `pass init <ids...>`, a deliberate act by somebody who has
+decided the new recipient belongs; doing it automatically on the strength of the
+file under suspicion would take every entry the changer could not read and hand
+them a copy they can.
+
+A store seen for the first time is taken as it stands. Nothing here can
+establish who *should* be able to read somebody's store, and refusing to write
+to every existing store until it had been re-approved would only teach people to
+click the button without reading it.
+
 ### Handling decrypted data
 
 - Entries are decrypted only when opened, one at a time.
+- A write builds its ciphertext beside the entry and moves it into place, so an
+  encryption that fails half way costs the edit rather than the entry. `gpg
+  --output` is opened for writing before gpg knows whether it can encrypt, so
+  writing in place left a truncated entry with no undo and, in a store that is
+  not a repository, no history to recover from.
 - The plaintext is dropped when the detail pane moves on to another entry.
 - `PasswordEntry` excludes its content from its `repr`, which is redacted by
   hand. The generated dataclass repr would otherwise have put plaintext into
@@ -63,10 +96,26 @@ reduces exposure; it does not eliminate it.
 
 ### Clipboard
 
-Copying a field puts it on the clipboard and clears it again after a
-configurable delay. Treat this as damage limitation, not a guarantee: a
-clipboard manager may already have taken a copy, and a Wayland compositor may
-refuse a clear requested by an application that is not focused.
+A copied secret is offered with `x-kde-passwordManagerHint` alongside the text,
+which is what asks a clipboard manager not to keep it. There is no specification
+for that type — the spelling is Klipper's, and it is what KeePassXC and Bitwarden
+offer, which makes it the convention by use rather than by agreement. A manager
+that does not know it is no worse off, since the text is offered next to it.
+
+That hint matters more than the timeout does. A clipboard manager takes its copy
+the moment the selection changes, so by the time the timer fires the password is
+already in a history that outlives the timer, the window and the application, and
+nothing this side of the clipboard can reach into it.
+
+The copy is taken back when the timeout expires, when the detail pane moves to
+another entry, and when the application quits — the last because a timeout
+cannot fire in a process that has exited. The first two check that the clipboard
+still holds what GTKPass put there before clearing it; the one at shutdown
+cannot, there being no main loop left to deliver that answer.
+
+Treat all of it as damage limitation, not a guarantee: a manager that ignores the
+hint has its copy, and a Wayland compositor may refuse a clear requested by an
+application that is not focused.
 
 ### Development safeguards
 
@@ -84,6 +133,13 @@ The development store carries a marker file that exempts it, so the guard stays
 armed during a development run rather than being switched off wholesale. The
 default store location cannot be exempted this way.
 
+The test suite runs against its own X server and its own D-Bus session rather
+than the one the developer is sitting in front of. GDK ignores `DISPLAY`
+whenever `WAYLAND_DISPLAY` is set, and a desktop session exports
+`GDK_BACKEND=wayland` itself, so `xvfb-run` alone was not enough: windows opened
+on the real screen, and a clipboard test would overwrite whatever the developer
+had copied — which, working on this, may well have been a password.
+
 Note that this is a guard against mistakes by people working on GTKPass, not a
 security boundary. It is an environment variable and a check on a file path:
 anything running as the user can defeat either.
@@ -98,7 +154,12 @@ Do not rely on any of these — they do not exist:
 - Storing the GPG passphrase in a keyring (GPG agent handles caching)
 - Screenshot prevention
 - Secure or locked memory allocation
-- Signature verification, of entries or of anything else
+- Signature verification, of entries or of anything else. `pass` can sign
+  `.gpg-id` (`PASSWORD_STORE_SIGNING_KEY`, `.gpg-id.sig`) and GTKPass neither
+  writes nor checks that signature. What it does instead is compare the
+  recipient set against the one last approved, and refuse to write when they
+  differ — which is a different guarantee, and a weaker one: it detects a change
+  rather than proving who made it
 - Signed commits, and signed packages: neither the RPM nor the sysext image is
   signed, and there is no repository to install either from
 

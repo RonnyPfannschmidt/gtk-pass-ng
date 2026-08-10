@@ -32,6 +32,22 @@ application; none of its dates survived contact with the work.
 - Showing a password rather than dotting it out, from the preference
 - Syncing a git-backed store: pull with rebase, then push, off the UI thread
 
+**Hardening**
+- Every subprocess GTKPass owns has a deadline, and the pool is never joined
+  from the UI thread, so a passphrase prompt nobody answers cannot freeze or
+  trap the application
+- Backends are built and listed off the UI thread, so the window appears before
+  a store on a dead mount has answered
+- One lock per backend, so a save cannot collide with a sync in the same store
+- Entry writes are atomic: a failed encryption costs the edit, not the entry
+- Entry names reach `pass` after a `--`, so a name beginning with a dash is a
+  path rather than a flag
+- A copied secret is marked so clipboard managers do not record it, and is taken
+  back on navigation and at quit
+- A store whose `.gpg-id` no longer matches the approved recipient set is not
+  written to until somebody has reviewed the change; GTKPass never re-encrypts
+- The test suite uses its own X server and bus, never the developer's session
+
 **Host integration**
 - Every write to a git-backed store is committed, by `pass` or by GTKPass
 - Sandbox permissions read from `/.flatpak-info` rather than guessed from the

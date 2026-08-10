@@ -17,10 +17,13 @@ src/gtkpass/
 ├── config.py            application identity, GSettings access, schema lookup
 ├── safety.py            keeps checkout code out of the real store
 ├── sandbox.py           what the Flatpak sandbox actually permits
+├── frozen.py            what a PyInstaller bundle has to arrange for itself
 ├── _gi.py               the one place gi.require_version is called
 ├── backends/
 │   ├── __init__.py      the backend contract: PasswordBackend and its data
 │   ├── manager.py       discovery, instances, and the worker thread pool
+│   ├── serialized.py    the proxy that keeps one backend to one call at a time
+│   ├── recipients.py    who a store is encrypted to, and whether that changed
 │   ├── git_store.py     the only thing in the tree that runs git
 │   ├── demo.py          invented entries, read-only
 │   ├── direct.py        GPG-encrypted files, read and written natively
@@ -78,7 +81,12 @@ plus the application's own preferences.
   Its `password` property is the first line and `metadata` the `key: value`
   lines after it. Its `repr` is redacted deliberately; see *Handling secrets*.
 - **`BackendSettings`**, subclassed per backend for its own configuration.
-- **`BackendError`** and the more specific `GPGError` and `GitError`.
+- **`BackendError`** and the more specific `GPGError`, `GitError` and
+  `RecipientsChanged`.
+- **`recipient_audit()`**, answered from what the backend read when it was
+  built. Not abstract: a backend with no `.gpg-id` — the keyring, the demo data
+  — returns None, and making it abstract would force every one of them, and
+  every third-party backend, to write a stub saying so.
 
 Backends are discovered through the `gtkpass.backends` entry point group, which
 is what makes them pluggable: a backend shipped by another distribution needs
@@ -87,6 +95,29 @@ no change here. The four in-tree ones are registered in `pyproject.toml`.
 `BackendManager` owns discovery and the live instances, keyed by instance id.
 **Nothing outside `manager.py` imports a backend module directly** — the window
 asks the manager, and the manager holds the only references.
+
+What it hands out is a `SerializedBackend`, not the backend itself. Four workers
+share every instance, and no backend is written for that: the file backends each
+own one `GitStore` over one directory, so a commit landing during a `pull
+--rebase` collides on `.git/index.lock`; the Secret Service backend shares a
+single D-Bus connection; and a decrypt reading a `.gpg` file during a rebase can
+read half of another revision. The proxy holds one lock per backend — per
+backend rather than per manager, so a store on a slow mount does not hold up an
+unrelated one. `sync_capability()`, `recipient_audit()` and `metadata` stay
+outside it: they answer out of state fixed at construction and are read on the
+UI thread.
+
+`backends/recipients.py` reads a store's `.gpg-id` files and compares them with
+the set last approved for that instance. It is the answer to a question sync
+introduced: whoever can write to a remote can add a recipient, and every entry
+saved afterwards is encrypted to them. What they cannot do is re-encrypt the
+entries already there, which would mean decrypting them first — so an entry left
+on the old recipients is evidence about who made the change. A store whose
+recipients differ from the record is not written to until somebody accepts it,
+and accepting records the new set and nothing else. **GTKPass never
+re-encrypts**: that is `pass init <ids...>`, and doing it here on the strength of
+the file under suspicion would hand out copies of every entry the changer could
+not read.
 
 The conformance suite in `tests/test_backend_contract.py` is the definition of
 done for backend work: a new backend is finished when it passes.
@@ -130,7 +161,23 @@ would be lost.
 
 GPG is slow and `pass` is a subprocess, so backend calls do not run on the UI
 thread. `BackendManager` owns a `ThreadPoolExecutor` and returns futures from
-`list_passwords_async()`, `get_password_async()` and `edit_password_async()`.
+`list_passwords_async()`, `get_password_async()`, `edit_password_async()` and
+`sync_async()`, plus a bare `submit()` for work that is not a backend call yet.
+
+*Building* a backend goes through that pool as well. A constructor runs three
+git commands over the store, and the Secret Service one opens a D-Bus
+connection, waits up to five seconds for an answer and may unlock a collection —
+all of which used to happen inside `GTKPassWindow.__init__`, so the window did
+not appear until every configured backend had answered, and for a store on a
+mount that had gone away it never did.
+
+Nothing on that pool can run forever. Every subprocess GTKPass owns is bounded
+by `SUBPROCESS_TIMEOUT_SECONDS`, and `shutdown()` does not wait: it is called
+from the UI thread at quit and on every settings change, so joining the pool
+there meant one worker sitting on an unanswered passphrase prompt froze the
+window. Both halves are needed — the interpreter still joins the pool's threads
+at exit, so a command with no deadline would keep the process alive whatever
+`shutdown()` does.
 
 `utils/async_ui.on_ui_thread()` is the single place a result crosses back.
 `Future.add_done_callback` runs on the worker, and touching a widget from there
@@ -145,9 +192,15 @@ is dropped.
 ## Data flow
 
 **Startup.** `main()` → `GTKPassApp.do_activate()` → `GTKPassWindow`, which
-reads `backend-instances` from GSettings, creates each backend through
-`BackendManager`, and fills the sidebar. With nothing configured, the window
-shows a prompt pointing at Preferences instead of an empty tree.
+reads `backend-instances` from GSettings on the UI thread — dconf lookups, and
+the change handlers live there — and then hands the constructing to the pool.
+When the backends land they are installed, and each is asked for its entries
+separately, so the sidebar fills in per backend rather than all at once. Two
+request counters guard the results: a load superseded by a settings change is
+not installed into a manager that has since been shut down, and a listing from
+the previous configuration cannot append to the tree the new one is building.
+With nothing configured, the window shows a prompt pointing at Preferences
+instead of an empty tree.
 
 **Opening an entry.** Selecting a row calls `get_password_async()`; the pane
 shows a spinner, then the decrypted entry when the future lands, or a toast if
@@ -203,10 +256,26 @@ The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
   generated dataclass repr would have put plaintext into every log line,
   traceback and pytest assertion diff that rendered an entry.
 - `PasswordEntry.clear_password()` drops the plaintext when the pane moves on.
-- `ClipboardCopier` clears the clipboard after a configurable delay. This is
-  damage limitation, not a guarantee: a clipboard manager may already have
-  taken a copy, and a Wayland compositor may refuse a clear from an unfocused
-  application.
+- `ClipboardCopier` offers `x-kde-passwordManagerHint` alongside the text, which
+  is what asks a clipboard manager not to record the copy. There is no
+  specification for that type; the spelling is Klipper's and it is what the
+  other password managers offer, which makes it the convention by use. It
+  matters more than the timeout does: a manager takes its copy the moment the
+  selection changes, so by the time a timer fires the password is already in a
+  history that outlives it. Not everything copied is marked — the sync dialog
+  offers a shell command, which belongs in the history.
+- The copy is also taken back when the detail pane moves to another entry, and
+  when the application quits, since a GLib timeout cannot fire in a process that
+  has exited. The first keeps the read-back check, so it can only remove what
+  GTKPass put there; the one at shutdown cannot, there being no main loop left
+  to deliver the answer to. Clearing is still damage limitation rather than a
+  guarantee: a manager that ignores the hint has its copy, and a Wayland
+  compositor may refuse a clear from an unfocused application.
+- `DirectBackend` builds ciphertext beside the entry and moves it over with
+  `os.replace`. `gpg --output` is opened for writing before gpg knows whether it
+  can encrypt, so writing in place meant an unusable recipient or a full disk
+  left the entry existing and empty — with no undo, and no history in a store
+  that is not a repository.
 
 ## What is deliberately absent
 
