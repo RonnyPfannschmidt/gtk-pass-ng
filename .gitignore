@@ -42,3 +42,7 @@ data/gschemas.compiled
 .flatpak-build/
 .flatpak-builder/
 .flatpak-repo/
+
+# Written by the release workflow in the runner's workspace, and once, by
+# accident, committed from a local test of the step that writes it.
+/notes.md
