@@ -18,9 +18,17 @@ image=${1:-}
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# systemd takes the name from the image file itself: the release file inside
+# has to be extension-release.$IMAGE, where $IMAGE is this basename. Getting
+# that wrong is invisible from the contents -- the image is a perfectly good
+# squashfs -- and shows up only as "No medium found" at merge time.
+image_name=$(basename "$image" .raw)
+release_path="usr/lib/extension-release.d/extension-release.${image_name}"
+
 listing=$(unsquashfs -ll "$image")
-release=$(unsquashfs -cat "$image" \
-    usr/lib/extension-release.d/extension-release.gtkpass)
+grep -q " squashfs-root/${release_path}$" <<<"$listing" \
+    || fail "no ${release_path}; systemd will refuse this image outright"
+release=$(unsquashfs -cat "$image" "$release_path")
 
 echo "==> $(basename "$image") ($(du -h "$image" | cut -f1))"
 echo "$release" | sed 's/^/    /'

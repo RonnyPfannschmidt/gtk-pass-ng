@@ -43,7 +43,13 @@ if [ "$SYSEXT_ID" = "_any" ]; then
     exit 1
 fi
 
-STAGE="dist/sysext/${NAME}-${SYSEXT_ID}-${SYSEXT_VERSION_ID}"
+# systemd looks for usr/lib/extension-release.d/extension-release.$IMAGE inside
+# the image, where $IMAGE is the image's own file name without the .raw suffix.
+# Name them apart and systemd-dissect reports "✗ sysext for system" and the
+# merge fails with "No medium found" -- which names neither the file nor the
+# mismatch. So there is one name here, and both are built from it.
+IMAGE_NAME="${NAME}-${SYSEXT_ID}-${SYSEXT_VERSION_ID}"
+STAGE="dist/sysext/${IMAGE_NAME}"
 IMAGE_OUT="${STAGE}.raw"
 
 # The RPM has to be built for the same target, for the same reason: it is where
@@ -221,7 +227,7 @@ mkdir -p "$STAGE/usr/lib/extension-release.d"
 # ARCHITECTURE is deliberately absent: systemd only checks it when it is set,
 # and everything in here is noarch. Setting it would be a claim the contents do
 # not make.
-cat > "$STAGE/usr/lib/extension-release.d/extension-release.${NAME}" <<EOF
+cat > "$STAGE/usr/lib/extension-release.d/extension-release.${IMAGE_NAME}" <<EOF
 ID=${SYSEXT_ID}
 VERSION_ID=${SYSEXT_VERSION_ID}
 SYSEXT_SCOPE=system
