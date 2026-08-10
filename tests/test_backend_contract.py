@@ -189,6 +189,26 @@ class TestTheInheritedDefaultRefuses:
             backend.sync()
 
 
+class TestTheSerializingProxyCoversTheWholeInterface:
+    """The manager hands out a proxy, and it has to answer for all of this.
+
+    An abstract method announces itself: leave it out and the class cannot be
+    instantiated. The optional ones do not. ``sync()`` inherits a default that
+    refuses outright, so a proxy that failed to override it would report that
+    the backend underneath cannot sync -- and a method added to the interface
+    later would do the same, quietly and only in the packaged application.
+    """
+
+    @pytest.mark.parametrize("method_name", ABSTRACT_METHODS + OPTIONAL_METHODS)
+    def test_it_is_forwarded_rather_than_inherited(self, method_name):
+        from gtkpass.backends.serialized import SerializedBackend
+
+        assert method_name in vars(SerializedBackend), (
+            f"SerializedBackend inherits {method_name} from the interface "
+            f"instead of forwarding it to the backend it wraps"
+        )
+
+
 class TestDemoBackendBehaviour:
     """The demo backend is always available, so it can be exercised directly."""
 

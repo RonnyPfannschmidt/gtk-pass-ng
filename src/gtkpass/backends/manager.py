@@ -9,6 +9,7 @@ from collections.abc import Callable
 from importlib.metadata import entry_points
 
 from . import PasswordBackend, PasswordEntry, PasswordMetadata, SyncCapability
+from .serialized import SerializedBackend
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,8 @@ class BackendManager:
         if backend is None:
             raise RuntimeError(f"Backend '{backend_id}' initialization failed")
 
-        self._backends[backend_id] = backend
+        # Through add_backend, so this one is wrapped like every other.
+        self.add_backend(backend_id, backend)
 
     def submit(self, function: Callable, *args) -> concurrent.futures.Future:
         """Run something on the pool the backends already use.
@@ -91,10 +93,17 @@ class BackendManager:
     def add_backend(self, backend_id: str, backend: PasswordBackend) -> None:
         """Add an already-initialized backend.
 
+        The backend is wrapped so that the four workers cannot be inside it at
+        once; see :mod:`gtkpass.backends.serialized`. This is the only way a
+        backend gets into the manager, so it is the only place that has to
+        remember.
+
         Args:
             backend_id: Unique identifier for this backend instance
             backend: Initialized backend instance
         """
+        if not isinstance(backend, SerializedBackend):
+            backend = SerializedBackend(backend)
         self._backends[backend_id] = backend
 
     def get_backend(self, backend_id: str) -> PasswordBackend | None:
