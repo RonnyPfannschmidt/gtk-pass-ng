@@ -19,7 +19,7 @@ maintainer at the address in the git history. Include what you did, what
 happened, and why you think it matters; a proof of concept is welcome but not
 required, and please never attach a real decrypted entry.
 
-[advisories]: https://github.com/RonnyPfannschmidt/gtkpass/security/advisories
+[advisories]: https://github.com/RonnyPfannschmidt/gtk-pass-ng/security/advisories
 
 This is one person working on this in their own time, so the honest expectation
 is a reply within a week or two rather than within hours. If a report turns out

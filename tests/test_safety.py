@@ -384,7 +384,7 @@ class TestWhichDistributionAnswers:
         self, tmp_path, monkeypatch
     ):
         egg = fake_distribution(
-            tmp_path / "src", metadata_dir=tmp_path / "src" / "gtk_pass.egg-info"
+            tmp_path / "src", metadata_dir=tmp_path / "src" / "gtk_pass_ng.egg-info"
         )
         installed = fake_distribution(tmp_path / "site-packages")
 
@@ -400,7 +400,7 @@ class TestWhichDistributionAnswers:
     ):
         """So require_installed() can refuse it by name rather than silently."""
         egg = fake_distribution(
-            tmp_path / "src", metadata_dir=tmp_path / "src" / "gtk_pass.egg-info"
+            tmp_path / "src", metadata_dir=tmp_path / "src" / "gtk_pass_ng.egg-info"
         )
         monkeypatch.setattr("gtkpass.safety._distributions_named", lambda: [egg])
         safety._own_distribution.cache_clear()

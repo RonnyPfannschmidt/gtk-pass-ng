@@ -8,7 +8,7 @@
 # itself is this file, so there is one description of it rather than two that
 # drift.
 #
-# Expects: dist/gtk_pass-$VERSION.tar.gz, $VERSION, $RELEASE, and dnf.
+# Expects: dist/gtk_pass_ng-$VERSION.tar.gz, $VERSION, $RELEASE, and dnf.
 # Writes:  dist/rpm/
 set -euo pipefail
 
@@ -24,7 +24,7 @@ dnf -y --setopt=install_weak_deps=False install \
     desktop-file-utils libappstream-glib glib2-devel >/dev/null
 
 rpmdev-setuptree
-cp "${SRC}/dist/gtk_pass-${VERSION}.tar.gz" ~/rpmbuild/SOURCES/
+cp "${SRC}/dist/gtk_pass_ng-${VERSION}.tar.gz" ~/rpmbuild/SOURCES/
 
 dnf -y builddep --spec "$spec" >/dev/null
 

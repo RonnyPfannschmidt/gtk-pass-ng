@@ -25,13 +25,18 @@ exists, PyPI creating it on the first successful upload:
 
 | Field | Value |
 | --- | --- |
-| PyPI project name | `gtk-pass` |
+| PyPI project name | `gtk-pass-ng` |
 | Owner | `RonnyPfannschmidt` |
-| Repository | `gtkpass` |
+| Repository | `gtk-pass-ng` |
 | Workflow | `release.yml` |
 | Environment | `pypi` |
 
-**On GitHub**, create an environment named `pypi` (Settings → Environments).
+**On GitHub**, the repository has to be named `gtk-pass-ng`, because that is what
+the reserved publisher records and PyPI matches it against the OIDC claim
+exactly. Publishing fails until the rename happens, and a rename afterwards
+breaks it again unless the publisher is updated to match.
+
+Also create an environment named `pypi` (Settings → Environments).
 It can be empty; it exists so the publishing job is nameable, and so a required
 reviewer can be attached to it later if releases should need a second pair of
 eyes.
@@ -43,21 +48,24 @@ leaving that box empty fails the upload rather than relaxing the check.
 [tp]: https://docs.pypi.org/trusted-publishers/
 [pending]: https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
 
-### Why the distribution is called gtk-pass
+### Why the distribution is called gtk-pass-ng
 
 `gtkpass` on PyPI is an unrelated GTK+3 frontend for `pass`, last released in
-2017. So the distribution is `gtk-pass` while the import package, the `gtkpass`
-command, the entry point group and the RPM all keep the name. Only the string
-PyPI knows differs.
+2017. `gtk-pass` was tried next and refused: PyPI rejects names that are merely
+*similar* to an existing one, and after normalisation those two are. Hence the
+suffix.
 
-Two consequences worth knowing. The sdist is `gtk_pass-<version>.tar.gz`, PEP
-625 having normalised the hyphen, which is why the spec unpacks a differently
-named directory from the one the RPM is called. And `safety.DISTRIBUTION_NAME`
-has to match, because that is the name the guard looks up to decide whether it
-is running from an install — get it wrong and the application refuses to start,
-loudly, which is at least the right direction.
+The import package, the `gtkpass` command, the entry point group and the RPM all
+keep the name; only the string PyPI knows differs.
 
-There is an issue open about claiming the other name.
+Two consequences worth knowing. The sdist is `gtk_pass_ng-<version>.tar.gz`, PEP
+625 having normalised the hyphens, which is why the spec unpacks a directory
+named differently from the RPM. And `safety.DISTRIBUTION_NAME` has to match,
+because that is the name the guard looks up to decide whether it is running from
+an install — get it wrong and the application refuses to start, loudly, which is
+at least the right direction.
+
+There is an issue open about claiming the original name.
 
 ## What a tag sets off
 

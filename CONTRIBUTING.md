@@ -40,7 +40,7 @@ We welcome code contributions! Here's how to get started:
 #### 1. Set Up Development Environment
 
 ```bash
-git clone https://github.com/RonnyPfannschmidt/gtkpass.git
+git clone https://github.com/RonnyPfannschmidt/gtk-pass-ng.git
 cd gtkpass
 
 # Environment, dependencies and the pre-commit hook, in one step

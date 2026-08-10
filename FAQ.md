@@ -102,11 +102,12 @@ The last two are covered in [docs/PACKAGING.md](docs/PACKAGING.md), and
 [docs/RELEASING.md](docs/RELEASING.md) describes what a tag will do. Nothing is
 on Flathub or in a repository, and nothing is signed.
 
-## Why is it `pip install gtk-pass` and not `gtkpass`?
+## Why is it `pip install gtk-pass-ng` and not `gtkpass`?
 
 Because `gtkpass` on PyPI is an unrelated GTK+3 frontend for `pass`, last
-released in 2017. The distribution is `gtk-pass`; the command, the package and
-the RPM are all still `gtkpass`.
+released in 2017 — and `gtk-pass` was refused too, PyPI rejecting names that are
+merely *similar* to an existing one. Hence the suffix. The command, the package
+and the RPM are all still `gtkpass`; only the name PyPI knows differs.
 
 Note that `pip install` is a poor route for this regardless: PyGObject and
 pycairo build from source, which needs the cairo, girepository and GTK
@@ -127,7 +128,7 @@ the rest: development code must never read your real password store. Then
 
 ## Something is broken. Where do I report it?
 
-[GitHub issues](https://github.com/RonnyPfannschmidt/gtkpass/issues), with your
+[GitHub issues](https://github.com/RonnyPfannschmidt/gtk-pass-ng/issues), with your
 distribution, GTK version and Python version, and what you did. Never paste a
 decrypted entry into one. For anything with security impact, read the reporting
 section of [SECURITY.md](SECURITY.md) first.

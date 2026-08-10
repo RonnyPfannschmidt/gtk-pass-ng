@@ -70,8 +70,8 @@ else
         python3 -m build --sdist --outdir dist
 fi
 
-# Named for the distribution, gtk-pass, underscored per PEP 625.
-sdist="dist/gtk_pass-${VERSION}.tar.gz"
+# Named for the distribution, gtk-pass-ng, underscored per PEP 625.
+sdist="dist/gtk_pass_ng-${VERSION}.tar.gz"
 [ -f "$sdist" ] || { echo "error: expected sdist at $sdist" >&2; exit 1; }
 
 # Build here when this already *is* the Fedora being built for -- which is CI,

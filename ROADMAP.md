@@ -101,8 +101,9 @@ Smaller things, worth doing when passing:
 - Neither the RPM nor the sysext image is signed, and there is no repository to
   install either from. A release attaches them to a GitHub page, which is
   transport security and not provenance.
-- The PyPI name `gtkpass` belongs to an unrelated project, so this is
-  distributed as `gtk-pass`. Claiming the other one is a PEP 541 request.
+- The PyPI name `gtkpass` belongs to an unrelated project, and `gtk-pass` was
+  refused as too similar to it, so this is distributed as `gtk-pass-ng`.
+  Claiming the original is a PEP 541 request.
 
 ## Not planned
 

@@ -1,9 +1,9 @@
 [project]
-# The distribution is gtk-pass because PyPI's `gtkpass` belongs to an unrelated
-# GTK+3 frontend for pass, dormant since 2017. The import package, the command,
-# the entry point group and the RPM are all still gtkpass; only the name this
-# is distributed under differs. See the issue about claiming the other one.
-name = "gtk-pass"
+# The distribution is gtk-pass-ng. PyPI's `gtkpass` belongs to an unrelated
+# GTK+3 frontend for pass, dormant since 2017, and `gtk-pass` was refused as too
+# similar to it. The import package, the command, the entry point group and the
+# RPM are all still gtkpass; only the name this is distributed under differs.
+name = "gtk-pass-ng"
 description = "A GTK4/Libadwaita frontend for pluggable password backends"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/RonnyPfannschmidt/gtkpass"
-Issues = "https://github.com/RonnyPfannschmidt/gtkpass/issues"
+Homepage = "https://github.com/RonnyPfannschmidt/gtk-pass-ng"
+Issues = "https://github.com/RonnyPfannschmidt/gtk-pass-ng/issues"
 
 [dependency-groups]
 dev = [

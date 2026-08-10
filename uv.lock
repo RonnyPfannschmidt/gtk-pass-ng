@@ -275,7 +275,7 @@ wheels = [
 ]
 
 [[package]]
-name = "gtk-pass"
+name = "gtk-pass-ng"
 source = { editable = "." }
 dependencies = [
     { name = "pygobject" },

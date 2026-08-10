@@ -40,9 +40,9 @@
 
   <content_rating type="oars-1.1"/>
 
-  <url type="homepage">https://github.com/RonnyPfannschmidt/gtkpass</url>
-  <url type="bugtracker">https://github.com/RonnyPfannschmidt/gtkpass/issues</url>
-  <url type="vcs-browser">https://github.com/RonnyPfannschmidt/gtkpass</url>
+  <url type="homepage">https://github.com/RonnyPfannschmidt/gtk-pass-ng</url>
+  <url type="bugtracker">https://github.com/RonnyPfannschmidt/gtk-pass-ng/issues</url>
+  <url type="vcs-browser">https://github.com/RonnyPfannschmidt/gtk-pass-ng</url>
 
   <supports>
     <control>keyboard</control>

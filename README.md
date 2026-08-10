@@ -78,8 +78,9 @@ make sysext    # a systemd-sysext image for Bluefin, Silverblue and the rest
 the last two. Tagging publishes all of it — see
 [docs/RELEASING.md](docs/RELEASING.md) — but no release has been made yet.
 
-The distribution is called `gtk-pass` on PyPI, `gtkpass` there belonging to an
-unrelated project; the command and the package keep this project's name.
+The distribution is called `gtk-pass-ng` on PyPI: `gtkpass` there belongs to an
+unrelated project, and `gtk-pass` was refused as too similar to it. The command,
+the package and the RPM all keep this project's name.
 
 ## Working on it
 

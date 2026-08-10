@@ -171,5 +171,5 @@ organisation; a bot builds each one. `x-checker-data` is already set on the
 version-bump PRs by itself.
 
 App **verification** — the check mark linking the listing to
-`github.com/RonnyPfannschmidt/gtkpass` — is a separate step, done from the
+`github.com/RonnyPfannschmidt/gtk-pass-ng` — is a separate step, done from the
 Flathub developer portal after the app is published.

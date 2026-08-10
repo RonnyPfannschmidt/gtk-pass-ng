@@ -11,11 +11,11 @@
 # and are for reading the spec on its own rather than for building anything
 # anyone should install.
 
-# The sdist is named after the *distribution*, gtk-pass, with the hyphen
-# normalised to an underscore as PEP 625 requires. The package installed from it
-# is gtkpass, and so is this RPM: only the name on PyPI differs, that one being
-# taken by an unrelated project.
-%global sdist_name gtk_pass
+# The sdist is named after the *distribution*, gtk-pass-ng, with the hyphens
+# normalised to underscores as PEP 625 requires. The package installed from it is
+# gtkpass, and so is this RPM: only the name on PyPI differs, that one being
+# taken by an unrelated project and the near spellings refused as too similar.
+%global sdist_name gtk_pass_ng
 
 Name:           gtkpass
 Version:        %{?version_override}%{!?version_override:0.0.0}
@@ -23,7 +23,7 @@ Release:        %{?release_override}%{!?release_override:1}%{?dist}
 Summary:        GTK4 frontend for password stores
 
 License:        MPL-2.0
-URL:            https://github.com/RonnyPfannschmidt/gtkpass
+URL:            https://github.com/RonnyPfannschmidt/gtk-pass-ng
 Source0:        %{sdist_name}-%{version}.tar.gz
 
 BuildArch:      noarch

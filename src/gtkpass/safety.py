@@ -29,10 +29,11 @@ OPT_IN_VARIABLE = "GTKPASS_ALLOW_REAL_STORE"
 
 #: The distribution this code belongs to, as installed.
 #:
-#: Not "gtkpass": that name on PyPI is an unrelated project, so this is
-#: distributed as gtk-pass while the package it installs stays gtkpass.
-#: ``importlib.metadata`` normalises the two spellings, so either resolves.
-DISTRIBUTION_NAME = "gtk-pass"
+#: Not "gtkpass": that name on PyPI is an unrelated project, and "gtk-pass" was
+#: refused as too similar to it, so this is distributed as gtk-pass-ng while the
+#: package it installs stays gtkpass. ``importlib.metadata`` normalises
+#: separators, so the underscored spelling resolves just as well.
+DISTRIBUTION_NAME = "gtk-pass-ng"
 
 #: Metadata directories that live *in* a source tree rather than in an install.
 #:
@@ -100,7 +101,7 @@ def _distributions_named() -> list[importlib.metadata.Distribution]:
     There can be more than one. ``importlib.metadata`` deduplicates by name, but
     only after normalising it, and a source tree readily offers two spellings at
     once -- a leftover ``src/gtkpass.egg-info`` from before this was renamed
-    alongside the current ``src/gtk_pass.egg-info``, both reachable because an
+    alongside the current ``src/gtk_pass_ng.egg-info``, both reachable because an
     editable install puts ``src/`` on the path.
     """
     wanted = DISTRIBUTION_NAME.replace("_", "-").lower()

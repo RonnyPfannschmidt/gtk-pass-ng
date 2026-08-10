@@ -52,7 +52,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           tag=${GITHUB_REF#refs/tags/v}
-          built=$(ls dist/*.tar.gz | sed -E 's|.*/gtk_pass-(.*)\.tar\.gz|\1|')
+          built=$(ls dist/*.tar.gz | sed -E 's|.*/gtk_pass_ng-(.*)\.tar\.gz|\1|')
           echo "tag=$tag built=$built"
           test "$tag" = "$built" || {
             echo "::error::built $built from tag $tag; the tag is not on this commit"
@@ -76,7 +76,7 @@ jobs:
     # attach to. docs/RELEASING.md has the setup.
     environment:
       name: pypi
-      url: https://pypi.org/p/gtk-pass
+      url: https://pypi.org/p/gtk-pass-ng
     permissions:
       id-token: write
     steps:
@@ -127,7 +127,7 @@ jobs:
           cat > notes.md <<'EOF'
           ## Installing
 
-          **pip** — `pip install gtk-pass`. GTK4, libadwaita and PyGObject have to
+          **pip** — `pip install gtk-pass-ng`. GTK4, libadwaita and PyGObject have to
           come from your distribution; see the README.
 
           **RPM** — `gtkpass-*.fc43.noarch.rpm` and `gtkpass-*.fc44.noarch.rpm`,
