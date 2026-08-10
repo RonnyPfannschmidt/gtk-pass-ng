@@ -92,8 +92,14 @@ present the widget and read back what it rendered.
   dependency at all.
 - An installed build must work with nothing set in its environment. There is no
   launcher script in any package, so anything the application needs arranged, it
-  arranges itself — see `safety.running_from_checkout()` and
-  `config.schema_source()`.
+  arranges itself — see `safety.running_from_checkout()`,
+  `config.schema_source()` and `frozen.configure_environment()`, which is the
+  same rule reaching Windows: a PyInstaller bundle carries its own GTK and its
+  own compiled schema, on paths GLib has no reason to look at.
+- Not everything is Linux. The Windows build is a frozen bundle over a pinned
+  gvsbuild GTK stack (`packaging/windows/`, `docs/WINDOWS.md`), and anything
+  platform-specific added to a backend or to `pyproject.toml` needs a marker or
+  a guard rather than an assumption. `secretstorage` is the worked example.
 
 ## Commands
 
@@ -102,6 +108,9 @@ present the widget and read back what it rendered.
 
 CI packages first and tests the packages: it builds the wheel, sdist and RPMs,
 then runs this suite against each of them installed, over two Fedora releases.
+It also freezes the Windows bundle out of that same wheel and checks it, built
+and again installed; that job is non-blocking on purpose, and `docs/WINDOWS.md`
+says why.
 `make test` here runs against the editable install instead, which is faster and
 what you want while working -- but it is not what CI checks, so a failure that
 only appears once something is packaged will appear there and not here.

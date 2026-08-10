@@ -5,7 +5,9 @@ systemd-sysext image for the ostree desktops — Bluefin, Silverblue, Bazzite �
 where installing a package means rebuilding the deployment and rebooting.
 
 The Flatpak is a third route with a different story; it lives in
-[FLATPAK.md](FLATPAK.md).
+[FLATPAK.md](FLATPAK.md). Windows is a fourth, and the story there is that
+nothing can be taken from a distribution at all — the bundle carries GTK,
+libadwaita and the interpreter with it. See [WINDOWS.md](WINDOWS.md).
 
 ```bash
 make rpm      # dist/rpm/gtkpass-*.noarch.rpm and the matching .src.rpm

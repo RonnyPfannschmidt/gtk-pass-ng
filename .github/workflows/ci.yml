@@ -12,9 +12,11 @@
 # once, the suite runs against each of them installed, and those same files are
 # what a release publishes.
 #
-# Everything runs in Fedora containers rather than on ubuntu-latest, because
+# The Linux jobs run in Fedora containers rather than on ubuntu-latest, because
 # GTK4, libadwaita and PyGObject have to come from a distribution that has them
-# in the versions this targets.
+# in the versions this targets. The Windows job answers the same question a
+# different way -- there is no distribution there, so it carries the whole stack
+# with it; see docs/WINDOWS.md.
 name: CI
 
 on:
@@ -221,6 +223,86 @@ jobs:
       # where the shell looks. None of that is visible from inside a test run.
       - name: the installed package, in place
         run: xvfb-run -a dbus-run-session -- ./packaging/smoke-test-install.sh
+
+  windows:
+    name: windows executable and installer
+    needs: distribution
+    runs-on: windows-latest
+    # Non-blocking, deliberately and for now. Everything this job depends on
+    # comes from off this repository -- a gvsbuild release archive, an Inno
+    # Setup that happens to be on the runner image -- and none of it is under
+    # the control of the person whose release would be held up by it. The
+    # release attaches whatever this produced and says nothing when it produced
+    # nothing. Take this line out once the job has been boring for a while;
+    # docs/WINDOWS.md records the reasoning so removing it is a decision rather
+    # than an oversight.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # The interpreter the gvsbuild wheels were built for. build.ps1 refuses
+      # to continue on any other, so this pin and the one in that script are
+      # the same fact written twice and have to move together.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      # 300 MB of GTK, libadwaita and their dependencies, fetched from a
+      # GitHub release. Cached on the archive rather than the unpacked tree:
+      # restoring one file beats restoring fifteen thousand.
+      - name: cache the GTK stack
+        uses: actions/cache@v4
+        with:
+          path: build/windows/GTK4_Gvsbuild_*.zip
+          key: gvsbuild-2026.8.0-x64
+
+      # The wheel the distribution job built -- the one the Linux jobs install
+      # and the release publishes. Building a second one here would put
+      # something inside the Windows bundle that no other job ever ran.
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist/upstream
+
+      - name: build
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist/upstream/gtk_pass_ng-*.whl | Select-Object -First 1
+          ./packaging/windows/build.ps1 -Wheel $wheel.FullName
+
+      # The counterpart of the smoke test the RPM job runs: resources that did
+      # not travel, a schema that never reached the compiled cache, entry
+      # points resolving to nothing. It runs inside the bundle because that is
+      # the only interpreter there is; see the launcher.
+      - name: the bundle works
+        shell: pwsh
+        run: ./packaging/windows/smoke-test.ps1
+
+      # And again on what the installer put on disk, which is a different
+      # question from what the build produced -- a file left out of the [Files]
+      # section is invisible until something runs from the install directory.
+      - name: install it, then check what was installed
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/windows/*-setup.exe | Select-Object -First 1
+          $target = Join-Path $env:RUNNER_TEMP 'gtkpass-installed'
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList `
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target"
+          if (-not (Test-Path "$target\gtkpass.exe")) {
+            throw "the installer reported success and installed nothing to $target"
+          }
+          ./packaging/windows/smoke-test.ps1 -BundleDir $target
+          Start-Process -Wait -FilePath "$target\unins000.exe" -ArgumentList '/VERYSILENT'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            dist/windows/*.zip
+            dist/windows/*-setup.exe
+          if-no-files-found: error
 
   sysext:
     name: sysext image (fedora ${{ matrix.fedora }})

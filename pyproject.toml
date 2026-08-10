@@ -17,13 +17,20 @@ classifiers = [
     "Environment :: X11 Applications :: GTK",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Topic :: Security",
 ]
 dynamic = ["version"]
 dependencies = [
     "PyGObject>=3.42.0",
-    "secretstorage>=3.3.0",
+    # The Secret Service is a D-Bus interface and secretstorage talks to it over
+    # a session bus, so it exists on Linux and nowhere else. Unconditional, it
+    # made the whole distribution uninstallable on Windows for the sake of one
+    # backend that reports itself unavailable there anyway -- which
+    # SecretServiceBackend.is_available() already does, the import being
+    # guarded.
+    "secretstorage>=3.3.0; sys_platform == 'linux'",
     "python-gnupg>=0.5.0",
 ]
 
