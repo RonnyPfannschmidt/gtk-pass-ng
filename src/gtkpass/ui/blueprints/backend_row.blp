@@ -20,8 +20,10 @@ template $BackendSettingsRow : Adw.ExpanderRow {
     changed => $_on_settings_changed();
   }
 
+  // A demo.json, or the directory holding one; both are accepted, because the
+  // setting has said "file" for long enough that either may be written there.
   Adw.EntryRow demo_path_row {
-    title: _("Custom Data Path");
+    title: _("Custom demo.json");
     visible: false;
     changed => $_on_settings_changed();
   }
