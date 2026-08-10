@@ -175,8 +175,26 @@ Take that line out once the job has been boring for a while.
 ## The icon
 
 Windows takes icons from an executable's resources and from the entries an
-installer writes, and both want a `.ico` — the SVG in `data/icons` is not enough
-under any arrangement. So `data/icons/io.github.RonnyPfannschmidt.GTKPass.ico`
-is committed next to it, rendered from the same vector at seven sizes by
-`packaging/windows/make-icon.sh`. Run that when the SVG changes; a downscaled
-256 loses the strokes at taskbar size, which is why it is not one image.
+installer writes, and both want a `.ico`. There is no vector option anywhere in
+that path — an icon resource holds raster images and nothing else, whatever the
+source artwork was. So `data/icons/io.github.RonnyPfannschmidt.GTKPass.ico` is
+committed next to the SVG, rendered from it at seven sizes by
+`packaging/windows/make-icon.sh`. Run that when the SVG changes.
+
+Two things about that file are deliberate:
+
+- **Every size is rendered from the vector**, not scaled down from one large
+  raster. Windows picks a size by context — 16 in a title bar, 32 in the
+  taskbar, 256 in the large icon view — and a downscaled 256 loses the strokes
+  in a symbolic-style icon at exactly the sizes that are seen most.
+- **The images go in PNG-compressed**, which is what keeps it at 17 KB rather
+  than 370. An `.ico` entry may hold either a raw bitmap or a whole PNG file,
+  and a 256×256 raw entry alone is 270 KB of uncompressed BGRA. ImageMagick
+  writes raw by default, which is what the first version of this did. Windows
+  has read PNG entries since Vista, PyInstaller copies each entry into the
+  executable's resources without looking at it, and Inno Setup takes the file
+  as it finds it.
+
+The script assembles the container itself, with the standard library, because
+it is a header and sixteen bytes per entry — and because writing it in the open
+is what makes the paragraph above checkable. It needs only `rsvg-convert`.
