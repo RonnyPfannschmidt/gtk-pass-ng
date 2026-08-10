@@ -5,16 +5,43 @@ experiments, one-off scripts. Pointed at the developer's own store, those read
 real passwords, and whatever they print ends up in a terminal, a CI log or an
 AI assistant's transcript.
 
-So the developer's own store is refused unless something deliberately opts in.
-``run_app.sh`` does, because that is the application actually being used.
-Nothing else should: use a scratch store instead (``make devstore``).
+So the developer's own store is refused *when the code is running out of a
+checkout*, which is where all of that lives. An installed build is the
+application actually being used and opens the store as any password manager
+would; refusing it there would only mean every packaged build needing a wrapper
+to undo this.
+
+``GTKPASS_ALLOW_REAL_STORE`` overrides the decision in both directions, and
+``run_app.sh`` sets it to 1 because launching a checkout is the one case where
+the checkout really is the application. ``make run-dev`` sets it to 0 and uses a
+scratch store (``make devstore``). Nothing else should set it at all.
 """
 
+import importlib.metadata
+import json
 import os
 from pathlib import Path
 
-#: Set by run_app.sh. Anything else touching the real store is a mistake.
+#: Overrides the default in both directions. Set to 1 by run_app.sh, and to 0 by
+#: `make run-dev`. Anything else reaching for it is a mistake.
 OPT_IN_VARIABLE = "GTKPASS_ALLOW_REAL_STORE"
+
+#: The distribution this code belongs to, as installed.
+DISTRIBUTION_NAME = "gtkpass"
+
+#: Metadata directories that live *in* a source tree rather than in an install.
+#:
+#: setuptools leaves a ``src/gtkpass.egg-info`` behind after a build, and it
+#: stays there. It satisfies ``importlib.metadata`` and carries no
+#: ``direct_url.json``, so without this a ``PYTHONPATH=src`` run out of a
+#: checkout looked exactly like an ordinary packaged install -- and opened the
+#: guard on the developer's own store.
+SOURCE_TREE_METADATA = (".egg-info", ".egg-link")
+
+
+class NotInstalled(RuntimeError):
+    """Raised when GTKPass is being run without having been installed."""
+
 
 DEFAULT_STORE = "~/.password-store"
 
@@ -62,8 +89,116 @@ def is_real_store(path: Path) -> bool:
     return _resolve(path) in real_store_paths()
 
 
+def _own_distribution() -> importlib.metadata.Distribution | None:
+    """The installed distribution this code belongs to, if there is one."""
+    try:
+        return importlib.metadata.distribution(DISTRIBUTION_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _from_source_tree_metadata(dist: importlib.metadata.Distribution) -> bool:
+    """Whether ``dist`` is a build artefact in a source tree, not an install.
+
+    Reads the private ``_path`` that ``PathDistribution`` carries, there being
+    no public way to ask where metadata was found. It is absent on other
+    distribution types, which are not what this is looking for anyway.
+    """
+    path = getattr(dist, "_path", None)
+    if path is None:
+        return False
+    return Path(str(path)).suffix in SOURCE_TREE_METADATA
+
+
+def require_installed() -> None:
+    """Refuse to run from a source tree that was never installed.
+
+    ``PYTHONPATH=src python -m gtkpass`` gives a process nothing can be
+    established about -- not its version, and not whether it is somebody's
+    working copy. Guessing about that is what the guard exists to avoid, so this
+    fails at import and says what to do instead.
+
+    Raises:
+        NotInstalled: If nothing describes this code as installed.
+    """
+    dist = _own_distribution()
+    if dist is not None and not _from_source_tree_metadata(dist):
+        return
+    found = "" if dist is None else " Only a source tree's .egg-info was found."
+    raise NotInstalled(
+        f"GTKPass is not installed, so it will not run.\n"
+        f"Nothing describes this code as an installed {DISTRIBUTION_NAME!r} "
+        f"distribution, which is what happens when it is put on PYTHONPATH "
+        f"instead.{found}\n"
+        f"Run 'make sync' for a development install, or install a package."
+    )
+
+
+def _editable_per_metadata(dist: importlib.metadata.Distribution) -> bool | None:
+    """Whether the distribution records an editable install.
+
+    Returns None when the metadata does not answer, which the caller treats the
+    same way as yes: an unreadable answer is not a licence to open the guard.
+    """
+    recorded = dist.read_text("direct_url.json")
+    if recorded is None:
+        # No direct_url.json: installed from an index or by a package manager,
+        # which is as ordinary an install as there is. PEP 610.
+        return False
+    try:
+        return bool(json.loads(recorded).get("dir_info", {}).get("editable", False))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _describes(dist: importlib.metadata.Distribution, package_dir: Path) -> bool:
+    """Whether ``dist`` is the metadata for the code actually running."""
+    try:
+        base = Path(str(dist.locate_file(""))).resolve()
+    except OSError:
+        return False
+    return package_dir.is_relative_to(base)
+
+
+def running_from_checkout(module_file: Path | str | None = None) -> bool:
+    """Whether this code is being run out of a source tree.
+
+    Asked of the installed distribution, because an editable install says so
+    outright -- ``direct_url.json`` carries ``dir_info.editable``, which pip and
+    uv both write and which is the only signal that means it rather than
+    resembling it.
+
+    The metadata is believed only when it describes the module that is running.
+    A checkout ahead of a released copy on ``sys.path`` would otherwise be
+    called an installed build on the strength of the installed copy's metadata,
+    while the code executing is the working copy -- the one case where being
+    wrong opens the guard rather than closing it.
+    """
+    package_dir = Path(module_file or __file__).resolve().parent
+
+    dist = _own_distribution()
+    if dist is None or _from_source_tree_metadata(dist):
+        # require_installed() normally stops both of these at import; anything
+        # reaching here has established nothing about what is running.
+        return True
+
+    editable = _editable_per_metadata(dist)
+    if editable is None or editable:
+        return True
+
+    return not _describes(dist, package_dir)
+
+
 def opted_in() -> bool:
-    return os.environ.get(OPT_IN_VARIABLE, "").lower() in {"1", "true", "yes"}
+    """Whether reading the user's own store and keyring is allowed.
+
+    The environment variable decides when it says anything; otherwise an
+    installed build is allowed and a checkout is not.
+    """
+    configured = os.environ.get(OPT_IN_VARIABLE, "")
+    if configured:
+        return configured.lower() in {"1", "true", "yes"}
+    return not running_from_checkout()
 
 
 def ensure_store_allowed(path: Path) -> None:

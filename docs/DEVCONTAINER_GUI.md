@@ -167,7 +167,7 @@ make check
 
 For the best GUI experience, you can:
 
-1. Install GTK4 on your host machine (see [DEVELOPMENT.md](DEVELOPMENT.md))
+1. Install GTK4 on your host machine (see [DEVELOPMENT.md](../DEVELOPMENT.md))
 2. Clone the repo locally (not in container)
 3. Run directly on your host
 

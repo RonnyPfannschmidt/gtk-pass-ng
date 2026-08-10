@@ -62,9 +62,10 @@ finish-args:
   # only content mounted into a sandbox whose permissions were already fixed.
 
   # A packaged build is the application actually being used, so it opts in to
-  # the guard in src/gtkpass/safety.py. Without this it would refuse its own
-  # store and every backend would fail to load: the guard defaults to closed,
-  # and only run_app.sh sets this in a checkout.
+  # the guard in src/gtkpass/safety.py. That guard now refuses only when it can
+  # see it is running out of a checkout, so this is no longer load-bearing --
+  # it is kept because a sandbox manifest saying outright which side of that
+  # guard it is on is worth more than one line saved.
   - --env=GTKPASS_ALLOW_REAL_STORE=1
 
   # Deliberately NOT granted:

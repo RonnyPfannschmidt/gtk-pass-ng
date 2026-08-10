@@ -10,6 +10,8 @@ application; none of its dates survived contact with the work.
 - Project structure, `pyproject.toml`, uv-managed environment
 - Ruff, mypy and pre-commit, run by `make check` and by a git hook
 - Test suite, run headless by `make test`
+- CI: lint, format, types and the suite over two Fedora releases, plus building
+  the RPM, installing it, and smoke testing the installed copy
 - One canonical application identity in `config.py`
 - A throwaway development store, so nothing here reads real passwords
 
@@ -42,6 +44,12 @@ application; none of its dates survived contact with the work.
   held to it by a test
 - A Flatpak that builds and installs, bundling pass, tree and git so the
   sandbox needs no host access; see [docs/FLATPAK.md](docs/FLATPAK.md)
+- An RPM for Fedora, and a systemd-sysext image for the ostree desktops, both
+  built in a container so packaging costs the developer no layered packages;
+  see [docs/PACKAGING.md](docs/PACKAGING.md)
+- No launcher script in any of them: an installed build refuses nothing and
+  needs nothing set, because the store guard asks whether it is running from a
+  checkout rather than waiting to be told
 
 ## Next
 
@@ -49,12 +57,22 @@ Roughly in the order that would make the application usable day to day.
 
 - **Search.** The entry box sits in the sidebar and nothing is connected to it,
   so typing does nothing at all. The tree is already in memory, so this is a
-  filter over the model rather than backend work.
+  filter over the model rather than backend work. Preferences already offers a
+  "search as you type" switch, which is a control over a feature that does not
+  exist; it should start working rather than be taken away.
 - **Adding an entry.** The `+` button still opens a "not implemented" dialog.
   The backends implement `add_password`; the dialog is most of what is missing.
 - **Deleting an entry**, with a confirmation, and pruning the emptied folders.
 - **Renaming and moving**, on top of `move_password`.
 - **Password generation** when adding an entry.
+- **`pass-otp`.** Reading an entry's `otpauth://` line and showing a code with
+  its countdown, in the format `pass-otp` already writes, so a store stays
+  usable from both. Generating the code is RFC 6238 over `hmac` — the work is in
+  the entry format and the interface, not the arithmetic. QR code scanning is
+  not part of this and stays out; see below.
+- **`pass-update`.** Rotating an entry's password while keeping the metadata
+  below it, which is the operation people reach for most often after reading
+  one.
 - **Re-encrypting a store to a changed recipient set**, which `pass init
   <ids...>` does and GTKPass cannot. Multi-recipient stores already work, so a
   per-machine key model is adoptable today — but enrolling a machine or retiring
@@ -66,8 +84,10 @@ Roughly in the order that would make the application usable day to day.
   ready: no screenshots, no release tag, a placeholder icon and a manifest that
   builds from the working directory. See
   [docs/FLATHUB.md](docs/FLATHUB.md).
-- **CI.** There is none. `make check` and `make test` are the entire gate, and
-  they only run when someone remembers.
+- **Merging the sysext image in CI.** It is built and inspected there, and
+  `make sysext-test` merges it on a real machine — but `systemd-sysext merge`
+  needs a running systemd and a writable `/run`, which a container has neither
+  of, so nothing does it automatically.
 
 Smaller things, worth doing when passing:
 
@@ -75,12 +95,17 @@ Smaller things, worth doing when passing:
   no longer matches the class.
 - `secretstorage` is not in the Flatpak, so the Secret Service backend reports
   itself unavailable there. It needs `cryptography`, which is a Rust build.
+- The GSettings schema carries an `auto-lock-timeout` key that no code reads.
+  Either auto-lock gets built or the key goes; a setting that does nothing is
+  worse than an absent one, because it reads as a promise.
+- Neither the RPM nor the sysext image is signed, and there is no repository to
+  install either from.
 
 ## Not planned
 
 Ruled out, and listed here so they stop being proposed:
 
-- OTP generation and QR codes
+- QR codes: generating them, and scanning them from a webcam or an image
 - Storing GPG passphrases in a keyring
 - Password health dashboards, age tracking, duplicate detection
 - A git interface of its own: branches, history, diffs, conflict resolution.
@@ -88,17 +113,25 @@ Ruled out, and listed here so they stop being proposed:
   back to git, because the files are ciphertext and there is nothing useful to
   show or merge.
 
-"Git integration beyond what `pass(1)` does by itself" used to be on this list.
-It moved because sync landed, and the line it drew turned out to be in an odd
-place: `pass git push` is something `pass(1)` does by itself, while
-`DirectBackend` — which writes `.gpg` files without `pass` — committed nothing
-at all, so a store it wrote drifted out of step with its own history. Both now
-commit, and both offer the same one-button sync.
+Two entries have left this list, and both for the same reason: the line they
+drew turned out to be in the wrong place.
 
-These came from the original specification, which also prescribed `keyring`,
-`GitPython`, `pyotp`, `qrcode`, `pillow` and `opencv` as dependencies. None
-were ever used. Adding any of it back is a discussion first, not a pull
-request; see [AGENTS.md](AGENTS.md).
+"Git integration beyond what `pass(1)` does by itself" went when sync landed.
+`pass git push` is something `pass(1)` does by itself, while `DirectBackend` —
+which writes `.gpg` files without `pass` — committed nothing at all, so a store
+it wrote drifted out of step with its own history. Both now commit, and both
+offer the same one-button sync.
+
+"OTP generation" went because it was ruled out together with QR codes, which
+are the part that would have cost a webcam, an image decoder and two
+dependencies to match. Reading an `otpauth://` line an entry already contains
+and showing a code costs none of that, and an entry a store holds that the
+application will not display is a gap in the frontend rather than a decision.
+QR codes stay out.
+
+The original specification prescribed `keyring`, `GitPython`, `pyotp`, `qrcode`,
+`pillow` and `opencv` as dependencies. None were ever used, and OTP moving does
+not admit one by itself; see [AGENTS.md](AGENTS.md).
 
 ## Versioning
 

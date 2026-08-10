@@ -14,21 +14,22 @@ speaks it.
 ## Status
 
 **Early, and honest about it.** The application runs, reads and edits, and is
-covered by a test suite. It is not packaged or released, and there is no
-installable build yet.
+covered by a test suite. It builds as a Flatpak, an RPM and a systemd-sysext
+image — but nothing is released, signed, or installable from a repository.
 
 What works today:
 
 - Configuring several backends at once, each with its own settings
 - Browsing entries as a tree, grouped by backend, folders nested by path
-- Opening an entry: decrypted off the UI thread, shown with its username, URL
-  and notes picked out
+- Opening an entry: decrypted off the UI thread, and every field it carries
+  shown, whether or not GTKPass knows what the field means
 - Copying a field, with the clipboard cleared again after a timeout
 - Editing an entry and writing it back through its backend
+- Syncing a git-backed store: pull with rebase, then push, off the UI thread
 
-What does not exist yet: adding and deleting entries from the UI, working
-search (the box is there, nothing is wired to it), and the "show hidden
-passwords" preference. See [ROADMAP.md](ROADMAP.md).
+What does not exist yet: adding and deleting entries from the UI, and search —
+the box is in the sidebar, and nothing is wired to it. See
+[ROADMAP.md](ROADMAP.md).
 
 ## Backends
 
@@ -44,7 +45,7 @@ one can be shipped separately from this repository.
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - GTK4 4.10+ and Libadwaita 1.4+
 - PyGObject and pycairo, from your distribution rather than from PyPI
 - GnuPG 2.x, for the GPG-backed stores
@@ -64,7 +65,16 @@ To try it out without touching your own passwords:
 make run-dev   # a throwaway store of invented entries under .dev/
 ```
 
-`make help` lists the rest.
+Or build something installable, none of it released or signed:
+
+```bash
+make flatpak   # see docs/FLATPAK.md
+make rpm       # an RPM for Fedora
+make sysext    # a systemd-sysext image for Bluefin, Silverblue and the rest
+```
+
+`make help` lists the rest, and [docs/PACKAGING.md](docs/PACKAGING.md) covers
+the last two.
 
 ## Working on it
 
@@ -77,8 +87,9 @@ fit together.
 
 The Direct GPG and Pass backends use the passwordstore format, so a store stays
 readable by `pass`, qtpass, and Android Password Store via git sync. Extensions
-such as `pass-otp` are not supported: GTKPass shows an OTP secret as the text
-it is, and does not generate codes.
+are not supported yet — `pass-otp` and `pass-update` are the two intended, and
+until they land an OTP secret is shown as the text it is rather than turned into
+a code.
 
 ## Security
 
@@ -87,17 +98,22 @@ it is, and does not generate codes.
 - Decrypted content is kept out of logs, reprs and assertion diffs on purpose
 - The clipboard is cleared after a configurable delay, as damage limitation
   rather than a guarantee — see [SECURITY.md](SECURITY.md)
-- Development and test code is blocked from opening the real store
+- Code running out of a checkout is blocked from opening the real store or the
+  keyring, so development and test runs cannot read real passwords
 
 ## Documentation
 
+- [FAQ.md](FAQ.md) — the short answers
 - [AGENTS.md](AGENTS.md) — how to work on this project
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it is put together
 - [ROADMAP.md](ROADMAP.md) — what is done and what is next
-- [docs/FLATPAK.md](docs/FLATPAK.md) — the Flatpak, and its sandbox permissions
-- [docs/FLATHUB.md](docs/FLATHUB.md) — what publishing it would take
 - [SECURITY.md](SECURITY.md) — threat model and reporting
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
+- [docs/PACKAGING.md](docs/PACKAGING.md) — the RPM and the sysext image
+- [docs/FLATPAK.md](docs/FLATPAK.md) — the Flatpak, and its sandbox permissions
+- [docs/FLATHUB.md](docs/FLATHUB.md) — what publishing it would take
+- [docs/TRUST-MODEL.md](docs/TRUST-MODEL.md) — per-machine keys, and what
+  decryption costs
 
 ## License
 

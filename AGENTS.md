@@ -11,18 +11,34 @@ scripts must never open `~/.password-store` or the user's keyring. Whatever they
 print lands in a terminal, a CI log, or an AI assistant's transcript, and a
 decrypted password cannot be un-disclosed.
 
+- The backends refuse the real store, and the keyring, **whenever the code is
+  running out of a checkout** — which is everything you will ever run here.
+  `safety.running_from_checkout()` asks the installed distribution: an editable
+  install records `dir_info.editable` in its `direct_url.json`, and that is the
+  only signal that *means* editable rather than resembling it. The metadata is
+  believed only when it describes the module actually running, so a checkout
+  ahead of an installed release on `sys.path` is still a checkout.
+  An installed build is allowed, because refusing there would only mean every
+  package shipping a wrapper to undo it.
+- **GTKPass has to be installed to run at all.** `safety.require_installed()`
+  runs on import of `gtkpass` and refuses a bare `PYTHONPATH=src` process,
+  which has no metadata and so settles nothing about what is executing. A
+  leftover `src/gtkpass.egg-info` does not count as an install either: it is a
+  build artefact inside a source tree, it carries no `direct_url.json`, and
+  before it was excluded it made a `PYTHONPATH` run look like a packaged one
+  and opened the guard. Use `make sync`.
+- `GTKPASS_ALLOW_REAL_STORE` overrides that in both directions. `run_app.sh`
+  sets it to 1, launching a checkout being the one case where the checkout
+  really is the application. If you are reaching for that variable anywhere
+  else, stop.
 - `make devstore` creates a throwaway store under `.dev/` with invented
   passwords and its own GPG key. Use it for manual testing and screenshots. It
   drops a `.gtkpass-scratch-store` marker, which is what lets the guard open
   that store while still refusing everything else.
 - `make run-dev` launches against it **with the guard still armed**. It passes
   `GTKPASS_ALLOW_REAL_STORE=0` on purpose: it goes through `run_app.sh`, which
-  opts in by default, and without turning that back off the development run
-  would be the one thing running unguarded.
-- The backends refuse the real store, and the keyring, unless
-  `GTKPASS_ALLOW_REAL_STORE=1`. `run_app.sh` defaults it to 1 because that is
-  the application actually being used. If you are reaching for that variable in
-  anything else, stop.
+  opts in, and without turning that back off the development run would be the
+  one thing running unguarded.
 - The test suite clears the variable in `conftest.py`, so an exported value in
   your shell cannot re-enable it for a run.
 
@@ -69,18 +85,26 @@ present the widget and read back what it rendered.
 - `Gio.Settings.new()` on a missing schema calls `g_error()` and aborts the
   process without a traceback, so go through `config.get_settings()`.
 - Do not add dependencies without discussion. In particular not `keyring`,
-  `GitPython`, `pyotp`, `qrcode`, `pillow` or `opencv`: an earlier version of
-  this file prescribed all of them and none were ever used.
+  `GitPython`, `qrcode`, `pillow` or `opencv`: an earlier version of this file
+  prescribed all of them and none were ever used. `pyotp` is the one that has
+  since become arguable, OTP being planned — argue it rather than assume it,
+  because RFC 6238 over `hmac` and `hashlib` is a short function with no
+  dependency at all.
+- An installed build must work with nothing set in its environment. There is no
+  launcher script in any package, so anything the application needs arranged, it
+  arranges itself — see `safety.running_from_checkout()` and
+  `config.schema_source()`.
 
 ## Commands
 
 `make help` lists them. `make check` runs lint, format and types via pre-commit;
 `make test` runs the suite headless under xvfb.
 
-There is no CI. `make sync` installs the pre-commit hook (`make hooks` on its
-own if the environment already exists), and that hook is the only thing that
-runs the checks without being asked. An unformatted commit has landed before
-because the hook was never installed.
+CI runs `make check` and `make test` on push and on pull requests, over two
+Fedora releases, and builds and installs the RPM. It is not a substitute for
+running them here: `make sync` installs the pre-commit hook (`make hooks` on its
+own if the environment already exists), and that hook is what catches an
+unformatted commit before it is made rather than after.
 
 `uv run` outside the Makefile re-resolves the environment and tries to build
 PyGObject and pycairo, which fails. Set `UV_NO_SYNC=1`, as the Makefile does.

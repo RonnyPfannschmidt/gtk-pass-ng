@@ -1,5 +1,6 @@
 # Development entry points, and the one definition of what "check the project"
-# means. There is no CI; the pre-commit hook and these targets are the gate.
+# means. CI runs these same targets, so there is one definition rather than two
+# that drift; the pre-commit hook runs `check` on the way in.
 
 BLUEPRINTS := src/gtkpass/ui/blueprints
 
@@ -29,7 +30,8 @@ FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
 
 .PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev \
-	devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo clean
+	devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo rpm sysext \
+	sysext-test clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -46,6 +48,9 @@ help:
 	@echo "flatpak-run   run the installed Flatpak"
 	@echo "flatpak-lint  check the manifest against Flathub's rules"
 	@echo "flatpak-lint-repo  build to a repo and run Flathub's repo checks"
+	@echo "rpm      build the RPM in a Fedora container"
+	@echo "sysext   build a systemd-sysext image for Bluefin/Silverblue"
+	@echo "sysext-test  merge that image onto this machine, test it, unmerge"
 	@echo "clean    remove build and cache artefacts"
 
 venv:
@@ -141,6 +146,20 @@ flatpak-lint-repo:
 	flatpak run --no-documents-portal \
 		--command=flatpak-builder-lint org.flatpak.Builder repo \
 		.flatpak-repo
+
+# Both build in a Fedora container: this is developed on an ostree desktop,
+# where layering rpm-build in order to package something is a reboot and a
+# permanent addition to the image. See docs/PACKAGING.md.
+rpm:
+	./packaging/build-rpm.sh
+
+sysext:
+	./packaging/build-sysext.sh
+
+# Needs root, and says what it changes before it changes it. This is the step CI
+# cannot do: merging needs a running systemd, which a container has not got.
+sysext-test:
+	./packaging/test-sysext.sh
 
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/

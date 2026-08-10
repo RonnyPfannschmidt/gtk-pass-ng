@@ -6,6 +6,7 @@ assertion diff; and a development probe pointed at the developer's own store
 reads real passwords for no good reason.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -13,11 +14,14 @@ import pytest
 from gtkpass.backends import PasswordEntry
 from gtkpass.safety import (
     SCRATCH_MARKER,
+    NotInstalled,
     RealStoreBlocked,
     ensure_keyring_allowed,
     ensure_store_allowed,
     is_real_store,
     opted_in,
+    require_installed,
+    running_from_checkout,
 )
 
 
@@ -26,6 +30,36 @@ def scratch_store(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     (path / SCRATCH_MARKER).write_text("")
     return path
+
+
+def fake_distribution(
+    base: Path, editable: bool | None = None, direct_url=None, metadata_dir=None
+):
+    """Stands in for what importlib.metadata hands back.
+
+    ``base`` is where the distribution says its files live, which is the
+    site-packages directory for a real one. ``editable`` writes the direct_url
+    metadata pip and uv record; leaving it unset means no direct_url.json at
+    all, which is what an RPM or a wheel from an index looks like.
+    ``metadata_dir`` is the directory the metadata itself lives in, which is how
+    an installed .dist-info is told from a source tree's .egg-info.
+    """
+    if direct_url is None and editable is not None:
+        direct_url = json.dumps(
+            {"url": base.as_uri(), "dir_info": {"editable": editable}}
+        )
+    path = metadata_dir if metadata_dir is not None else base / "gtkpass-0.1.dist-info"
+
+    class Fake:
+        _path = path
+
+        def read_text(self, filename):
+            return direct_url if filename == "direct_url.json" else None
+
+        def locate_file(self, relative):
+            return base / relative
+
+    return Fake()
 
 
 SECRET = "correct-horse-battery-staple"
@@ -200,6 +234,120 @@ class TestBackendsHonourTheGuard:
             DirectBackend.create(DirectBackendSettings(password_store_dir=real))
 
 
+class TestWhereTheCodeIsRunningFrom:
+    """What decides the guard's default, now that nothing sets it for us.
+
+    An installed build is the application being used, and refusing its owner's
+    store would make it useless. A checkout is where the probes, experiments and
+    one-off scripts live, and that is what has to stay shut by default. So the
+    default follows which of the two is running, and anything it cannot tell
+    apart counts as a checkout.
+    """
+
+    def test_an_editable_install_is_a_checkout(self, tmp_path, monkeypatch):
+        """What `make sync` produces, and what the flag exists to say."""
+        dist = fake_distribution(tmp_path / "site-packages", editable=True)
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+        assert running_from_checkout(tmp_path / "src" / "gtkpass" / "safety.py")
+
+    def test_an_ordinary_install_is_not(self, tmp_path, monkeypatch):
+        """An RPM, or a wheel from an index: no direct_url.json at all."""
+        site = tmp_path / "site-packages"
+        dist = fake_distribution(site)
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+        assert not running_from_checkout(site / "gtkpass" / "safety.py")
+
+    def test_installing_a_local_directory_is_not(self, tmp_path, monkeypatch):
+        """`pip install .` records where it came from, but is not editable."""
+        site = tmp_path / "site-packages"
+        dist = fake_distribution(site, editable=False)
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+        assert not running_from_checkout(site / "gtkpass" / "safety.py")
+
+    def test_no_metadata_at_all_is_a_checkout(self, tmp_path, monkeypatch):
+        """`PYTHONPATH=src python -m gtkpass` installs nothing to describe it.
+
+        Nothing can be established about such a run, and the case that cannot be
+        established is the one that has to stay shut.
+        """
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: None)
+        assert running_from_checkout(tmp_path / "src" / "gtkpass" / "safety.py")
+
+    def test_unreadable_metadata_is_a_checkout(self, tmp_path, monkeypatch):
+        """A direct_url.json that will not parse decides nothing either."""
+        site = tmp_path / "site-packages"
+        dist = fake_distribution(site, direct_url="{ this is not json")
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+        assert running_from_checkout(site / "gtkpass" / "safety.py")
+
+    def test_a_checkout_shadowing_an_installed_copy_is_a_checkout(
+        self, tmp_path, monkeypatch
+    ):
+        """The case the metadata alone gets wrong, and the dangerous direction.
+
+        With a release installed system-wide and a checkout ahead of it on the
+        path, ``importlib.metadata`` finds the installed distribution and calls
+        the run an installed build -- while the code actually executing is the
+        working copy. So the metadata is believed only when it describes the
+        module that is running.
+        """
+        dist = fake_distribution(tmp_path / "site-packages")
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+        assert running_from_checkout(tmp_path / "src" / "gtkpass" / "safety.py")
+
+    def test_a_stale_egg_info_does_not_count_as_installed(self, tmp_path, monkeypatch):
+        """The hole a bare metadata lookup leaves open.
+
+        A `setup.py` or `pip install` run at any point in the past leaves a
+        `src/gtkpass.egg-info` behind, and it stays there. It satisfies
+        importlib.metadata, carries no direct_url.json, and sits beside the
+        package -- so a PYTHONPATH run out of the checkout looked like an
+        ordinary install and opened the guard. An .egg-info is a build artefact
+        inside a source tree, which is the opposite of an installation.
+        """
+        src = tmp_path / "src"
+        dist = fake_distribution(src, metadata_dir=src / "gtkpass.egg-info")
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+
+        assert running_from_checkout(src / "gtkpass" / "safety.py")
+
+    def test_this_very_test_run_is_a_checkout(self):
+        """The tripwire. If this ever fails, the suite is running unguarded."""
+        assert running_from_checkout()
+
+
+class TestTheDefaultFollowsWhereTheCodeIsFrom:
+    """The environment variable still decides when it is set, both ways."""
+
+    def test_a_checkout_defaults_to_refusing(self, monkeypatch):
+        monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
+        assert not opted_in()
+
+    def test_an_installed_build_defaults_to_allowing(self, monkeypatch):
+        monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: False)
+        assert opted_in()
+
+    def test_an_installed_build_can_still_be_turned_off(self, monkeypatch):
+        """Someone auditing an installed build gets to shut it, same as anyone."""
+        monkeypatch.setenv("GTKPASS_ALLOW_REAL_STORE", "0")
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: False)
+        assert not opted_in()
+
+    def test_a_checkout_can_still_opt_in(self, monkeypatch):
+        """run_app.sh does exactly this."""
+        monkeypatch.setenv("GTKPASS_ALLOW_REAL_STORE", "1")
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
+        assert opted_in()
+
+    def test_an_empty_value_does_not_count_as_a_decision(self, monkeypatch):
+        """`FOO= gtkpass` sets it to nothing; that is not an opt-out."""
+        monkeypatch.setenv("GTKPASS_ALLOW_REAL_STORE", "")
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: False)
+        assert opted_in()
+
+
 class TestTheGuardIsActiveDuringTests:
     """conftest clears the opt-in; this is the tripwire that says so."""
 
@@ -213,3 +361,33 @@ class TestTheGuardIsActiveDuringTests:
         from gtkpass.safety import opted_in
 
         assert not opted_in()
+
+
+class TestAnInstallIsRequired:
+    """Running from a bare source tree is refused outright.
+
+    `PYTHONPATH=src python -m gtkpass` produces a process with no distribution
+    metadata, which means nothing can be established about what is running --
+    not its version, and not whether it is somebody's working copy. Rather than
+    guess, the import fails and says what to do. It also removes the one case
+    the guard could not answer honestly.
+    """
+
+    def test_an_installed_copy_is_accepted(self):
+        """This suite runs against the editable install `make sync` creates."""
+        require_installed()
+
+    def test_a_bare_source_tree_is_refused(self, monkeypatch):
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: None)
+
+        with pytest.raises(NotInstalled, match="make sync"):
+            require_installed()
+
+    def test_a_stale_egg_info_is_not_an_install(self, tmp_path, monkeypatch):
+        """It is what a source tree accumulates, not what installing produces."""
+        src = tmp_path / "src"
+        dist = fake_distribution(src, metadata_dir=src / "gtkpass.egg-info")
+        monkeypatch.setattr("gtkpass.safety._own_distribution", lambda: dist)
+
+        with pytest.raises(NotInstalled, match=r"egg-info"):
+            require_installed()
