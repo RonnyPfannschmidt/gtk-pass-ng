@@ -1,0 +1,80 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Shown when a store's .gpg-id no longer matches the recipient set that was
+// last approved for it.
+//
+// The decision being asked for is whether the people named there are the people
+// who should be able to read what gets written next, so the dialog shows the
+// evidence rather than a yes/no question: who was added or removed, and which
+// entries were left encrypted to the old set. That last part is what separates
+// a machine being enrolled -- entries re-encrypted to match -- from a change
+// made by somebody who could not read them.
+//
+// Accepting records the new set and nothing else. GTKPass never re-encrypts:
+// that is `pass init <ids...>`, and doing it here on the strength of the file
+// under suspicion would hand out copies of every entry.
+Adw.AlertDialog recipients_changed_dialog {
+  heading: _("Recipients Have Changed");
+
+  extra-child: Box {
+    orientation: vertical;
+    spacing: 12;
+
+    Label summary_label {
+      wrap: true;
+      wrap-mode: word_char;
+      xalign: 0;
+    }
+
+    Label changed_label {
+      selectable: true;
+      wrap: true;
+      wrap-mode: word_char;
+      xalign: 0;
+
+      styles ["monospace", "card"]
+    }
+
+    Label stale_heading {
+      label: _("Entries still encrypted to the previous recipients:");
+      wrap: true;
+      xalign: 0;
+      visible: false;
+
+      styles ["heading"]
+    }
+
+    ScrolledWindow stale_scroller {
+      max-content-height: 180;
+      propagate-natural-height: true;
+      visible: false;
+
+      child: Label stale_label {
+        selectable: true;
+        wrap: true;
+        wrap-mode: word_char;
+        xalign: 0;
+        yalign: 0;
+
+        styles ["monospace"]
+      };
+    }
+
+    Label {
+      label: _("Accepting records this recipient set and allows writing again. It does not re-encrypt anything: use 'pass init' for that, once you are satisfied the change belongs.");
+      wrap: true;
+      xalign: 0;
+
+      styles ["dim-label", "caption"]
+    }
+  };
+
+  responses [
+    cancel: _("Keep Writing Blocked"),
+    accept: _("Accept Recipients") destructive,
+  ]
+
+  default-response: "cancel";
+  close-response: "cancel";
+}

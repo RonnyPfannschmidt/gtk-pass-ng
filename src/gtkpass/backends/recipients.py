@@ -34,7 +34,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import SUBPROCESS_TIMEOUT_SECONDS, GPGError
+from . import SUBPROCESS_TIMEOUT_SECONDS, GPGError, RecipientsChanged
 
 logger = logging.getLogger(__name__)
 
@@ -303,3 +303,52 @@ def _gpg(arguments: list[str], gpg_home: Path | None) -> str:
     if result.returncode != 0:
         raise GPGError(f"gpg failed: {result.stderr.strip()}")
     return result.stdout
+
+
+def describe(audit: RecipientAudit) -> str:
+    """One sentence saying what changed, for a banner or an error.
+
+    The distinction the sentence carries is the one that matters: entries left
+    on the old recipients mean the change was made by somebody who could not
+    read them, while entries that moved with it are what enrolling a machine
+    looks like.
+    """
+    parts = []
+    if audit.added:
+        parts.append(f"added {', '.join(audit.added)}")
+    if audit.removed:
+        parts.append(f"removed {', '.join(audit.removed)}")
+    change = " and ".join(parts) or "changed"
+
+    if audit.unknown_recipients:
+        return (
+            f"This store now names a recipient with no key here "
+            f"({', '.join(audit.unknown_recipients)}). Nothing can be written "
+            f"to it until that is resolved."
+        )
+    if audit.stale_entries:
+        return (
+            f"Who this store is encrypted to has {change}, but "
+            f"{len(audit.stale_entries)} entries were not re-encrypted to "
+            f"match -- so whoever changed it could not read them."
+        )
+    return (
+        f"Who this store is encrypted to has {change}, and its entries were "
+        f"re-encrypted to match."
+    )
+
+
+def ensure_approved(audit: RecipientAudit | None) -> None:
+    """Refuse to write into a store whose recipients are not the approved ones.
+
+    Every change waits for a person, not only the ones that look like an
+    attack: a write encrypts to whoever the file names today, and whether that
+    is who it should name is exactly the question. Reading is left alone --
+    nothing newly named can decrypt what is already there.
+
+    Raises:
+        RecipientsChanged: If the store's recipients differ from the record.
+    """
+    if audit is None or not audit.changed:
+        return
+    raise RecipientsChanged(describe(audit), audit)

@@ -35,7 +35,7 @@ ABSTRACT_METHODS = sorted(PasswordBackend.__abstractmethods__)
 #: Methods the ABC supplies a working default for, so they are absent from
 #: __abstractmethods__ and the signature check above would never see them.
 #: A backend may override these; if it does, it has to keep the signature.
-OPTIONAL_METHODS = ["sync", "sync_capability"]
+OPTIONAL_METHODS = ["sync", "sync_capability", "recipient_audit"]
 
 
 #: ``is_available()`` runs on the UI thread during window construction, so a

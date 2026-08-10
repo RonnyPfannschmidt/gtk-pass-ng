@@ -550,6 +550,107 @@ class TestACopiedSecretIsTakenBack:
         assert run_in_application(check) == ["emptied"]
 
 
+class TestRecipientsThatChanged:
+    """A store whose readership changed says so until somebody has looked.
+
+    The backend refuses to write to it; the banner is what makes that visible
+    before anyone runs into the refusal, and carries the only way to lift it.
+    """
+
+    def audit(self, changed=True, stale=("email/work",)):
+        from gtkpass.backends.recipients import RecipientAudit
+
+        return RecipientAudit(
+            record=". someone@example.invalid",
+            changed=changed,
+            added=("someone@example.invalid",),
+            stale_entries=stale,
+        )
+
+    def window_reporting(self, app, audit):
+        window = loaded_window(app)
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        assert backend is not None
+        backend.recipient_audit = lambda: audit  # type: ignore[method-assign]
+        window._refresh_recipient_banner()
+        return window
+
+    def test_the_banner_is_shown(self, demo_backend_configured):
+        revealed = run_in_application(
+            lambda app: self.window_reporting(app, self.audit()).recipient_banner
+        ).get_revealed()
+
+        assert revealed
+
+    def test_it_is_not_shown_for_a_store_nobody_touched(self, demo_backend_configured):
+        revealed = run_in_application(
+            lambda app: self.window_reporting(
+                app, self.audit(changed=False)
+            ).recipient_banner
+        ).get_revealed()
+
+        assert not revealed
+
+    def test_the_banner_names_the_backend(self, demo_backend_configured):
+        title = run_in_application(
+            lambda app: self.window_reporting(app, self.audit()).recipient_banner
+        ).get_title()
+
+        assert "Demo" in title
+
+    def test_the_review_dialog_can_be_built_and_accepted(self, demo_backend_configured):
+        """Drives the real .ui, so a mistyped object id fails here.
+
+        The instance is called a pass backend for the write: the record is kept
+        in the per-instance schema, and only the two backends with a store have
+        that key. What is under test is the dialog, not which backend it came
+        from.
+        """
+        from gtkpass.config import get_backend_settings
+
+        def check(app):
+            window = loaded_window(app, backend_id=DEMO_BACKEND_ID)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            assert backend is not None
+            audit = self.audit()
+            backend.recipient_audit = lambda: audit  # type: ignore[method-assign]
+            window.backend_types[DEMO_BACKEND_ID] = "pass"
+            window._refresh_recipient_banner()
+
+            dialog = window._open_recipients_dialog()
+            assert dialog is not None, "the review dialog did not open"
+            dialog.emit("response", "accept")
+
+            return get_backend_settings("pass", DEMO_BACKEND_ID).get_string(
+                "approved-recipients"
+            )
+
+        assert run_in_application(check) == ". someone@example.invalid"
+
+    def test_accepting_records_the_set_and_lifts_the_refusal(self):
+        """Recorded outside the store, where a remote cannot reach it.
+
+        Written against the pass schema because that is one of the two that has
+        the key; the demo backend has no store and so no recipients.
+        """
+        from gtkpass.config import get_backend_settings
+        from gtkpass.window import GTKPassWindow
+
+        backend_id = "pass_1766234611"
+
+        def check(app):
+            window = GTKPassWindow(application=app)
+            window.backend_types[backend_id] = "pass"
+
+            window._approve_recipients(backend_id, ". someone@example.invalid")
+
+            return get_backend_settings("pass", backend_id).get_string(
+                "approved-recipients"
+            )
+
+        assert run_in_application(check) == ". someone@example.invalid"
+
+
 class TestSyncing:
     """The sync action, from the button through to a toast.
 

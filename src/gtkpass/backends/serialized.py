@@ -98,6 +98,12 @@ class SerializedBackend(PasswordBackend):
         with self._lock:
             self._backend.copy_password(source, dest, commit)
 
+    # -- recipients ----------------------------------------------------------
+
+    def recipient_audit(self):
+        """Not serialized: read when the backend was built, like the capability."""
+        return self._backend.recipient_audit()
+
     # -- syncing -------------------------------------------------------------
 
     def sync_capability(self) -> SyncCapability:

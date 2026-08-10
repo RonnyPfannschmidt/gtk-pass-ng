@@ -27,6 +27,7 @@ from . import (
     SyncUnavailable,
 )
 from .git_store import GitStore
+from .recipients import audit, ensure_approved
 
 
 @dataclass
@@ -41,6 +42,9 @@ class PassBackendSettings(BackendSettings):
 
     password_store_dir: Path | None = None
     use_git: bool = True
+    #: The recipient set last approved for this store, as recorded by
+    #: gtkpass.backends.recipients. Empty means it has not been seen before.
+    approved_recipients: str = ""
 
 
 class PassBackend(PasswordBackend):
@@ -69,6 +73,7 @@ class PassBackend(PasswordBackend):
         env: dict,
         password_store_dir: Path,
         use_git: bool = True,
+        approved_recipients: str = "",
     ):
         """Initialize Pass backend.
 
@@ -81,6 +86,9 @@ class PassBackend(PasswordBackend):
         self._pass_cmd = pass_cmd
         self._env = env
         self.password_store_dir = password_store_dir
+        # pass encrypts to whatever .gpg-id names, exactly as DirectBackend
+        # does, so the same question has to be asked before writing here.
+        self._recipient_audit = audit(password_store_dir, approved=approved_recipients)
         # commit_on_write=False, and this is the whole difference from
         # DirectBackend: pass commits by itself on every insert, rm, mv and cp
         # whenever the store is a repository, so a commit from here would add a
@@ -152,7 +160,13 @@ class PassBackend(PasswordBackend):
             env=env,
             password_store_dir=store_dir,
             use_git=settings.use_git,
+            approved_recipients=settings.approved_recipients,
         )
+
+    # -- recipients ----------------------------------------------------------
+
+    def recipient_audit(self):
+        return self._recipient_audit
 
     # -- syncing -------------------------------------------------------------
 
@@ -290,6 +304,7 @@ class PassBackend(PasswordBackend):
             FileExistsError: If password already exists
             BackendError: If creation fails
         """
+        ensure_approved(self._recipient_audit)
         if self._path_for(name).exists():
             raise FileExistsError(f"Password '{name}' already exists")
 
@@ -310,6 +325,7 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If update fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(name)
 
         # pass has no edit-in-place command, so this is insert with force.
@@ -327,6 +343,7 @@ class PassBackend(PasswordBackend):
             FileNotFoundError: If password doesn't exist
             BackendError: If deletion fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(name)
         self._run_pass(["rm", "-f", "--", name])
 
@@ -343,6 +360,7 @@ class PassBackend(PasswordBackend):
             FileExistsError: If new name already exists
             BackendError: If move fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(old_name)
         self._path_for(new_name)
 
@@ -363,6 +381,7 @@ class PassBackend(PasswordBackend):
             FileExistsError: If destination already exists
             BackendError: If copy fails
         """
+        ensure_approved(self._recipient_audit)
         self._existing(source)
         self._path_for(dest)
         self._run_pass(["cp", "-f", "--", source, dest])

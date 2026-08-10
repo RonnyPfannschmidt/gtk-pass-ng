@@ -65,6 +65,13 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
             </child>
           </object>
         </child>
+        <child type="top">
+          <object class="AdwBanner" id="recipient_banner">
+            <property name="revealed">false</property>
+            <property name="button-label" translatable="yes">Review</property>
+            <signal name="button-clicked" handler="_on_review_recipients"/>
+          </object>
+        </child>
         <property name="content">
           <object class="AdwToastOverlay" id="toast_overlay">
             <property name="child">

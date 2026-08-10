@@ -15,6 +15,7 @@ from gtkpass.backends.demo import DemoBackend, DemoBackendSettings
 from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 from gtkpass.backends.manager import BackendManager
 from gtkpass.backends.pass_cli import PassBackend, PassBackendSettings
+from gtkpass.backends.recipients import describe
 from gtkpass.backends.secretservice import (
     SecretServiceBackend,
     SecretServiceBackendSettings,
@@ -64,6 +65,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     password_detail = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
     sync_stack = Gtk.Template.Child()
+    recipient_banner = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -98,6 +100,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # The empty-store placeholder can only be decided once they are all in.
         self._pending_listings = 0
         self._listed_anything = False
+        # Backends whose store no longer matches the recipient set approved for
+        # it. Writing to those is refused until somebody has looked.
+        self._changed_recipients: list[str] = []
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -227,6 +232,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 logger.info(f"Successfully loaded backend: {backend_id}")
 
         self._refresh_sync_action()
+        self._refresh_recipient_banner()
         self._show_backend_errors()
         self._load_passwords()
 
@@ -302,6 +308,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 return PassBackendSettings(
                     password_store_dir=Path(store_dir) if store_dir else None,
                     use_git=use_git,
+                    approved_recipients=backend_gsettings.get_string(
+                        "approved-recipients"
+                    ),
                 )
             elif backend_type == "direct":
                 store_dir = backend_gsettings.get_string("password-store-dir")
@@ -309,6 +318,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 return DirectBackendSettings(
                     password_store_dir=Path(store_dir) if store_dir else None,
                     gpg_home=Path(gpg_home) if gpg_home else None,
+                    approved_recipients=backend_gsettings.get_string(
+                        "approved-recipients"
+                    ),
                 )
         except Exception as e:
             logger.error(
@@ -482,6 +494,112 @@ class GTKPassWindow(Adw.ApplicationWindow):
         logger.warning(f"Failed backends: {message}")
         for backend_id, backend_type, error in self.failed_backends:
             logger.warning(f"  - {backend_id} ({backend_type}): {error}")
+
+    # -- recipients ----------------------------------------------------------
+
+    def _refresh_recipient_banner(self) -> None:
+        """Say so, and keep saying so, while a store's recipients are unapproved.
+
+        Writing to such a store is refused by the backend; this is what makes
+        that visible before somebody runs into it, and what offers the only way
+        to lift it.
+        """
+
+        def unapproved(backend) -> bool:
+            audit = backend.recipient_audit()
+            return audit is not None and audit.changed
+
+        self._changed_recipients = [
+            backend_id
+            for backend_id, backend in self.backend_manager.get_all_backends().items()
+            if unapproved(backend)
+        ]
+
+        self.recipient_banner.set_revealed(bool(self._changed_recipients))
+        if not self._changed_recipients:
+            return
+
+        first = self._changed_recipients[0]
+        name = self._get_backend_display_name(first)
+        if len(self._changed_recipients) > 1:
+            title = f"{len(self._changed_recipients)} stores have new recipients"
+        else:
+            title = f"{name}: who this store is encrypted to has changed"
+        self.recipient_banner.set_title(title)
+
+    @Gtk.Template.Callback()
+    def _on_review_recipients(self, _banner) -> None:
+        self._open_recipients_dialog()
+
+    def _open_recipients_dialog(self):
+        """Show what changed, and offer to record it as approved.
+
+        Returns the dialog, as _open_edit_dialog does, so a test can drive it to
+        a response rather than only proving it was built.
+        """
+        if not self._changed_recipients:
+            return None
+        backend_id = self._changed_recipients[0]
+        backend = self.backend_manager.get_backend(backend_id)
+        if backend is None:
+            return None
+        audit = backend.recipient_audit()
+        if audit is None:
+            return None
+
+        builder = Gtk.Builder.new_from_file(
+            str(
+                importlib.resources.files("gtkpass.ui.blueprints")
+                / "recipients_changed.ui"
+            )
+        )
+        dialog = builder.get_object("recipients_changed_dialog")
+        builder.get_object("summary_label").set_label(
+            f"{self._get_backend_display_name(backend_id)}: {describe(audit)}"
+        )
+        builder.get_object("changed_label").set_label(_recipient_lines(audit))
+
+        stale = audit.stale_entries
+        builder.get_object("stale_heading").set_visible(bool(stale))
+        builder.get_object("stale_scroller").set_visible(bool(stale))
+        builder.get_object("stale_label").set_label("\n".join(stale))
+
+        def responded(_dialog, response):
+            if response == "accept":
+                self._approve_recipients(backend_id, audit.record)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+        return dialog
+
+    def _approve_recipients(self, backend_id: str, record: str) -> None:
+        """Record a recipient set as the one this store is expected to have.
+
+        Written to the instance's own settings rather than into the store: the
+        record is what a later change gets compared against, so it has to live
+        where whoever can write to the remote cannot reach it.
+
+        The backends read it when they are built, so this reloads them -- which
+        is also what lifts the refusal on writing.
+        """
+        backend_type = self.backend_types.get(backend_id, "")
+        try:
+            get_backend_settings(backend_type, backend_id).set_string(
+                "approved-recipients", record
+            )
+        except Exception as e:
+            logger.error(f"Could not record the recipients for {backend_id}: {e}")
+            self._toast(f"Could not record the recipients: {e}")
+            return
+
+        self._toast(
+            f"Recipients accepted for {self._get_backend_display_name(backend_id)}"
+        )
+        self.backend_manager.shutdown()
+        self.backend_manager = BackendManager()
+        self._listing_request += 1
+        self.password_list.clear_all()
+        self._load_backends()
 
     # -- syncing -------------------------------------------------------------
 
@@ -739,3 +857,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast.new(message))
+
+
+def _recipient_lines(audit) -> str:
+    """The change itself, spelled out for the review dialog."""
+    lines = []
+    for name in audit.added:
+        lines.append(f"+ {name}")
+    for name in audit.removed:
+        lines.append(f"- {name}")
+    for name in audit.unknown_recipients:
+        lines.append(f"? {name}  (no key for this recipient here)")
+    return "\n".join(lines) or "(the file changed without changing who it names)"

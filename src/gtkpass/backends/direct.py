@@ -32,6 +32,7 @@ from gtkpass.backends import (
     SyncResult,
 )
 from gtkpass.backends.git_store import GitStore
+from gtkpass.backends.recipients import audit, ensure_approved
 from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,9 @@ class DirectBackendSettings(BackendSettings):
 
     password_store_dir: Path | None = None
     gpg_home: Path | None = None
+    #: The recipient set last approved for this store, as recorded by
+    #: gtkpass.backends.recipients. Empty means it has not been seen before.
+    approved_recipients: str = ""
 
 
 class DirectBackend(PasswordBackend):
@@ -61,9 +65,14 @@ class DirectBackend(PasswordBackend):
         description="Direct access to GPG-encrypted password files",
     )
 
-    def __init__(self, password_store_dir: Path, gpg):
+    def __init__(self, password_store_dir: Path, gpg, gpg_home=None, approved=""):
         self.password_store_dir = password_store_dir
         self.gpg = gpg
+        # Read once, here, for the same reason the git probe is: it runs gpg,
+        # and only when the recipients differ from what was approved.
+        self._recipient_audit = audit(
+            password_store_dir, approved=approved, gpg_home=gpg_home
+        )
         # Probed once, here, rather than per call: it runs three git commands,
         # and sync_capability() is read on the UI thread to decide whether the
         # sync button is sensitive.
@@ -114,7 +123,12 @@ class DirectBackend(PasswordBackend):
         except Exception as e:
             raise GPGError(f"Could not initialise GPG: {e}") from e
 
-        return cls(password_store_dir=store, gpg=gpg)
+        return cls(
+            password_store_dir=store,
+            gpg=gpg,
+            gpg_home=settings.gpg_home,
+            approved=settings.approved_recipients,
+        )
 
     # -- paths and recipients ------------------------------------------------
 
@@ -151,6 +165,9 @@ class DirectBackend(PasswordBackend):
         raise BackendError(
             f"No .gpg-id found for '{path.name}'. Run 'pass init <gpg-id>' first."
         )
+
+    def recipient_audit(self):
+        return self._recipient_audit
 
     def _encrypt_to_file(self, path: Path, content: str) -> None:
         """Write the encrypted content, or leave the entry exactly as it was.
@@ -248,6 +265,7 @@ class DirectBackend(PasswordBackend):
     # -- writing -------------------------------------------------------------
 
     def add_password(self, name: str, content: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         path = self._path_for(name)
         if path.exists():
             raise FileExistsError(f"'{name}' already exists")
@@ -255,6 +273,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [path], f"Add password for {name} using gtkpass.")
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         path = self._path_for(name)
         if not path.is_file():
             raise FileNotFoundError(f"No password named '{name}'")
@@ -262,6 +281,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [path], f"Edit password for {name} using gtkpass.")
 
     def delete_password(self, name: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         path = self._path_for(name)
         if not path.is_file():
             raise FileNotFoundError(f"No password named '{name}'")
@@ -272,6 +292,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [path], f"Remove {name} from store.")
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         source = self._path_for(old_name)
         destination = self._path_for(new_name)
         if not source.is_file():
@@ -283,6 +304,7 @@ class DirectBackend(PasswordBackend):
         self._record(commit, [source, destination], f"Rename {old_name} to {new_name}.")
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
+        ensure_approved(self._recipient_audit)
         source_path = self._path_for(source)
         dest_path = self._path_for(dest)
         if not source_path.is_file():

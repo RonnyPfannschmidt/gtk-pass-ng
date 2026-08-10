@@ -131,6 +131,19 @@
         than git, so it never did anything at all.
       </description>
     </key>
+
+    <key name="approved-recipients" type="s">
+      <default>''</default>
+      <summary>Recipient set last approved for this store</summary>
+      <description>
+        A record of every .gpg-id in the store, as it was when the user last
+        accepted it. Written by GTKPass rather than edited: it is what a later
+        change in who the store is encrypted to gets compared against, so it
+        deliberately lives outside the store, where whoever can write to the
+        remote cannot reach it. Empty means the store has not been seen before,
+        which is taken as it stands.
+      </description>
+    </key>
   </schema>
 
   <!-- Direct GPG backend schema (relocatable) -->
@@ -157,6 +170,19 @@
       <summary>GPG home directory</summary>
       <description>
         Custom GPG home directory. If empty, uses default GPG home.
+      </description>
+    </key>
+
+    <key name="approved-recipients" type="s">
+      <default>''</default>
+      <summary>Recipient set last approved for this store</summary>
+      <description>
+        A record of every .gpg-id in the store, as it was when the user last
+        accepted it. Written by GTKPass rather than edited: it is what a later
+        change in who the store is encrypted to gets compared against, so it
+        deliberately lives outside the store, where whoever can write to the
+        remote cannot reach it. Empty means the store has not been seen before,
+        which is taken as it stands.
       </description>
     </key>
   </schema>

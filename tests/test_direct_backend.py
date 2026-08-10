@@ -18,6 +18,7 @@ from gtkpass.backends import (
     GPGError,
     PasswordEntry,
     PasswordMetadata,
+    RecipientsChanged,
 )
 from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 
@@ -351,6 +352,72 @@ class TestAStoreWithoutGitStillWorks:
 
         assert not capability.supported
         assert capability.reason is SyncUnavailable.NOT_A_REPO
+
+
+class TestWritingWaitsForTheRecipientsToBeApproved:
+    """A store whose .gpg-id changed is not written to until somebody looks.
+
+    Encrypting now would encrypt to whoever that file names today, and whether
+    that is who it should name is the entire question. Reading is left alone:
+    nothing newly named can decrypt what is already there.
+    """
+
+    def with_approved(self, store, gpg_home, approved):
+        return DirectBackend.create(
+            DirectBackendSettings(
+                password_store_dir=store,
+                gpg_home=gpg_home,
+                approved_recipients=approved,
+            )
+        )
+
+    #: A record naming somebody who is not in this store's .gpg-id.
+    STALE = ". someone-else@example.invalid"
+
+    def test_a_store_seen_for_the_first_time_is_written_to(self, backend):
+        """Nothing to have changed from, so nothing is refused."""
+        backend.add_password("email/work", "hunter2\n")
+
+        assert backend.get_password("email/work").password == "hunter2"
+
+    def test_a_changed_recipient_set_refuses_a_write(self, store, gpg_home):
+        blocked = self.with_approved(store, gpg_home, self.STALE)
+
+        with pytest.raises(RecipientsChanged):
+            blocked.add_password("email/work", "hunter2\n")
+
+    def test_an_edit_is_refused_too(self, backend, store, gpg_home):
+        backend.add_password("email/work", "hunter2\n")
+        blocked = self.with_approved(store, gpg_home, self.STALE)
+
+        with pytest.raises(RecipientsChanged):
+            blocked.edit_password("email/work", "hunter3\n")
+
+    def test_reading_is_not_refused(self, backend, store, gpg_home):
+        backend.add_password("email/work", "hunter2\n")
+        blocked = self.with_approved(store, gpg_home, self.STALE)
+
+        assert blocked.get_password("email/work").password == "hunter2"
+        assert [entry.name for entry in blocked.list_passwords()] == ["email/work"]
+
+    def test_the_refusal_carries_what_changed(self, store, gpg_home):
+        blocked = self.with_approved(store, gpg_home, self.STALE)
+
+        with pytest.raises(RecipientsChanged) as raised:
+            blocked.add_password("email/work", "hunter2\n")
+
+        assert raised.value.audit.changed
+        assert KEY_ID in raised.value.audit.added
+
+    def test_approving_what_the_store_says_lifts_it(self, store, gpg_home):
+        from gtkpass.backends import recipients
+
+        approved = recipients.record(recipients.configuration(store))
+        allowed = self.with_approved(store, gpg_home, approved)
+
+        allowed.add_password("email/work", "hunter2\n")
+
+        assert allowed.get_password("email/work").password == "hunter2"
 
 
 class TruncatingGPG:
