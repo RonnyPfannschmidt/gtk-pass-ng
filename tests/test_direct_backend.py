@@ -236,6 +236,19 @@ class TestRecipientResolution:
 
         assert backend.get_password("team/shared").password == "s3cret"
 
+    def test_an_indented_comment_is_not_a_recipient(self, backend, store):
+        """The comment test has to be applied to the stripped line.
+
+        Reading `  # not a key` as a recipient makes the write fail with gpg
+        complaining about an unusable key, which says nothing about the file
+        that caused it.
+        """
+        (store / ".gpg-id").write_text(f"  # who can read this\n{KEY_ID}\n")
+
+        backend.add_password("entry", "hunter2\n")
+
+        assert backend.get_password("entry").password == "hunter2"
+
     def test_missing_gpg_id_is_reported(self, tmp_path, gpg_home):
         root = tmp_path / "unsigned"
         root.mkdir()

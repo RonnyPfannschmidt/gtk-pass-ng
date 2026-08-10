@@ -32,7 +32,7 @@ from gtkpass.backends import (
     SyncResult,
 )
 from gtkpass.backends.git_store import GitStore
-from gtkpass.backends.recipients import audit, ensure_approved
+from gtkpass.backends.recipients import GPG_ID, audit, ensure_approved, read_gpg_id
 from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 logger = logging.getLogger(__name__)
@@ -150,13 +150,13 @@ class DirectBackend(PasswordBackend):
         root = self.password_store_dir.resolve()
         directory = path.resolve().parent
         while True:
-            gpg_id = directory / ".gpg-id"
+            gpg_id = directory / GPG_ID
             if gpg_id.is_file():
-                recipients = [
-                    line.strip()
-                    for line in gpg_id.read_text().splitlines()
-                    if line.strip() and not line.startswith("#")
-                ]
+                # Through the recipients module, which is where the audit reads
+                # the same files. Two readings of .gpg-id could disagree about
+                # what a store says, and then a store could pass the audit and
+                # be encrypted to something else.
+                recipients = list(read_gpg_id(gpg_id))
                 if recipients:
                     return recipients
             if directory == root or root not in directory.parents:
