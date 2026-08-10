@@ -311,6 +311,46 @@ class TestCommitting:
         assert "hunter2" not in message
 
 
+class TestCommittingNeverAsksForASignature:
+    """A store that signs its commits must not make saving a password prompt.
+
+    The commit happens on a worker thread after an entry is written, so a
+    pinentry raised there is a dialog nobody asked for in the middle of a save
+    -- and where one cannot appear, inside a sandbox without the agent socket
+    or on a headless session, it is a worker sitting on a deadline instead.
+
+    GTKPass's commits are bookkeeping: they record that a file changed. They
+    are not a claim about who wrote the entry, which is what a signature would
+    be asserting.
+    """
+
+    @pytest.fixture
+    def signing_store(self, store_repo, tmp_path, monkeypatch):
+        """A store configured to sign, with no key that could."""
+        # Away from the developer's own keyring: nothing here has any business
+        # asking gpg-agent about their keys.
+        monkeypatch.setenv("GNUPGHOME", str(tmp_path / "gnupg-empty"))
+        git("config", "commit.gpgsign", "true", cwd=store_repo)
+        git("config", "user.signingkey", "0000000000000000", cwd=store_repo)
+        return store_repo
+
+    def test_a_write_is_committed_anyway(self, signing_store):
+        store = open_store(signing_store)
+        before = git("rev-list", "--count", "HEAD", cwd=signing_store)
+
+        store.commit([entry(signing_store, "email/work")], "Add work")
+
+        assert git("rev-list", "--count", "HEAD", cwd=signing_store) != before
+
+    def test_the_commit_it_made_is_not_signed(self, signing_store):
+        store = open_store(signing_store)
+
+        store.commit([entry(signing_store, "email/work")], "Add work")
+
+        # %G? is 'N' for a commit carrying no signature at all.
+        assert git("log", "-1", "--pretty=%G?", cwd=signing_store) == "N"
+
+
 class TestSyncing:
     def test_a_commit_made_elsewhere_is_pulled(
         self, store_repo, bare_remote, other_clone

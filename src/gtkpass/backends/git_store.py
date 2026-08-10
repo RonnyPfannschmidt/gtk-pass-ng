@@ -41,6 +41,21 @@ logger = logging.getLogger(__name__)
 #: those errors are shown to the user and written to the log.
 _CREDENTIALS = re.compile(r"://[^/@\s]+@")
 
+#: Configuration every git command here runs with.
+#:
+#: Signing is off because GTKPass's commits are bookkeeping -- they record that
+#: a file changed -- rather than a claim about who wrote the entry, which is
+#: what a signature would assert. The commit runs on a worker thread straight
+#: after a save, so a store with commit.gpgsign set would raise a pinentry
+#: nobody asked for in the middle of writing a password, and where one cannot
+#: appear (a sandbox without the agent socket, a headless session) leave the
+#: worker sitting on its deadline instead.
+#:
+#: The store owner's setting still governs the commits they make themselves;
+#: this only covers the ones made from here, which is why their history can end
+#: up mixed. That is the cost, and it is smaller than a save that prompts.
+_CONFIG = ("-c", "commit.gpgsign=false")
+
 #: What ssh says when the remote's host key is not in known_hosts, or no longer
 #: matches it. Matched on rather than parsed: it is the one failure with a
 #: remedy the user has to carry out somewhere else.
@@ -107,7 +122,7 @@ class GitStore:
         """
         try:
             result = subprocess.run(
-                [self.git_binary, "-C", str(self.store_dir), *args],
+                [self.git_binary, "-C", str(self.store_dir), *_CONFIG, *args],
                 capture_output=True,
                 text=True,
                 check=False,

@@ -201,7 +201,12 @@ Do not rely on any of these — they do not exist:
   differ — which is a different guarantee, and a weaker one: it detects a change
   rather than proving who made it
 - Signed commits, and signed packages: neither the RPM nor the sysext image is
-  signed, and there is no repository to install either from
+  signed, and there is no repository to install either from. GTKPass's own
+  commits to a store are made with signing turned off, whatever the store is
+  configured for: they are bookkeeping rather than a claim about who wrote the
+  entry, and a signature would mean a passphrase prompt raised from a worker
+  thread in the middle of a save. Commits made in a terminal are unaffected, so
+  a store that signs will have a mixed history
 
 ## What it cannot protect against
 
