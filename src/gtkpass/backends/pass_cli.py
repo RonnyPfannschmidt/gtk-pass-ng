@@ -190,7 +190,11 @@ class PassBackend(PasswordBackend):
         """Run pass command with arguments.
 
         Args:
-            args: Arguments to pass command
+            args: Arguments to pass command. Every entry name goes after a
+                ``--``: names are filenames out of the store, a store can come
+                from a remote, and `-c.gpg` is a legal file. Without the
+                terminator getopt reads such a name as a flag -- `pass show -c`
+                copies to the system clipboard and prints nothing.
             input_data: Optional input data to pass via stdin
 
         Returns:
@@ -266,7 +270,7 @@ class PassBackend(PasswordBackend):
             BackendError: If retrieval fails
         """
         path = self._existing(name)
-        result = self._run_pass(["show", name])
+        result = self._run_pass(["show", "--", name])
 
         return PasswordEntry(
             name=name,
@@ -292,7 +296,7 @@ class PassBackend(PasswordBackend):
         # Through _run_pass, which is the only thing that carries the store
         # location. Calling subprocess.run here directly meant a configured
         # PASSWORD_STORE_DIR was read from but written to ~/.password-store.
-        self._run_pass(["insert", "-m", name], input_data=content)
+        self._run_pass(["insert", "-m", "--", name], input_data=content)
 
     def edit_password(self, name: str, content: str, commit: bool = True) -> None:
         """Edit an existing password entry.
@@ -310,7 +314,7 @@ class PassBackend(PasswordBackend):
 
         # pass has no edit-in-place command, so this is insert with force.
         # Through _run_pass for the same reason as add_password.
-        self._run_pass(["insert", "-m", "-f", name], input_data=content)
+        self._run_pass(["insert", "-m", "-f", "--", name], input_data=content)
 
     def delete_password(self, name: str, commit: bool = True) -> None:
         """Delete a password entry.
@@ -324,7 +328,7 @@ class PassBackend(PasswordBackend):
             BackendError: If deletion fails
         """
         self._existing(name)
-        self._run_pass(["rm", "-f", name])
+        self._run_pass(["rm", "-f", "--", name])
 
     def move_password(self, old_name: str, new_name: str, commit: bool = True) -> None:
         """Move/rename a password entry.
@@ -344,7 +348,7 @@ class PassBackend(PasswordBackend):
 
         # pass, not a filesystem move: crossing into a subtree with its own
         # .gpg-id has to re-encrypt to that subtree's recipients.
-        self._run_pass(["mv", "-f", old_name, new_name])
+        self._run_pass(["mv", "-f", "--", old_name, new_name])
 
     def copy_password(self, source: str, dest: str, commit: bool = True) -> None:
         """Copy a password entry.
@@ -361,7 +365,7 @@ class PassBackend(PasswordBackend):
         """
         self._existing(source)
         self._path_for(dest)
-        self._run_pass(["cp", "-f", source, dest])
+        self._run_pass(["cp", "-f", "--", source, dest])
 
     def search(self, query: str) -> list[PasswordMetadata]:
         """Match names only, as DirectBackend does.

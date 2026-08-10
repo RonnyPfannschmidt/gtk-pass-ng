@@ -328,6 +328,76 @@ class TestNamesCannotEscapeTheStore:
         assert recorded_runs == []
 
 
+class TestAnEntryNameIsNeverReadAsAnOption:
+    """An entry name reaches pass in argument position, where getopt reads it.
+
+    Names come out of the store as filenames, and a store can come from a
+    remote: `-c.gpg` is a legal file for anyone who can write to one. `pass show
+    -c` then copies the entry to the system clipboard -- with none of the
+    timeout or the toast GTKPass puts around a copy -- and prints nothing, so
+    the entry silently reads as empty. `pass rm -f -r` is a question about
+    recursion. Terminating the options is the whole fix, and it has to be at
+    every call site rather than the one that motivated it.
+
+    pass consumes `--` in show, insert, delete and copy_move, which is all four
+    of the subcommands used here.
+    """
+
+    def create(self, store):
+        return PassBackend.create(PassBackendSettings(password_store_dir=store))
+
+    @pytest.fixture
+    def populated(self, store):
+        (store / "-c.gpg").write_bytes(b"\x01ciphertext")
+        return store
+
+    def names_in(self, cmd):
+        """Everything pass will read as a path rather than as a flag."""
+        assert "--" in cmd, f"{cmd} leaves the name where getopt can reach it"
+        return cmd[cmd.index("--") + 1 :]
+
+    def test_reading(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).get_password("-c")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_adding(self, pass_on_path, store, recorded_runs):
+        self.create(store).add_password("-c", "secret")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_editing(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).edit_password("-c", "secret")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_deleting(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).delete_password("-c")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c"]
+
+    def test_moving(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).move_password("-c", "-r")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c", "-r"]
+
+    def test_copying(self, pass_on_path, populated, recorded_runs):
+        self.create(populated).copy_password("-c", "-r")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["-c", "-r"]
+
+    def test_an_ordinary_name_is_terminated_too(
+        self, pass_on_path, populated, recorded_runs
+    ):
+        """No conditional escaping: it either always happens or it is forgotten."""
+        (populated / "email").mkdir()
+        (populated / "email" / "work.gpg").write_bytes(b"\x01ciphertext")
+
+        self.create(populated).get_password("email/work")
+
+        assert self.names_in(recorded_runs[-1][0]) == ["email/work"]
+
+
 class TestSearchMatchesNames:
     """Search must not decrypt.
 
