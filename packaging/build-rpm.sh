@@ -30,7 +30,9 @@ CHANGELOG_DATE=$(LC_ALL=C git log -1 --format=%cd --date=format:"%a %b %d %Y")
 SNAPSHOT="${commit_date}git${commit_hash}"
 
 # A tree with uncommitted changes does not describe the commit it names.
+DIRTY=0
 if ! git diff --quiet HEAD; then
+    DIRTY=1
     SNAPSHOT="${SNAPSHOT}.dirty"
     echo "note: working tree is dirty, building ${SNAPSHOT}" >&2
 fi
@@ -39,9 +41,17 @@ fi
 # The point of the Release forms is that upgrades work in the right direction:
 # rpm sorts 0.1.<snap> before 1, and 2.<snap> after it.
 if tag=$(git describe --exact-match --tags HEAD 2>/dev/null); then
-    # On a tag: this is that release.
     VERSION="${tag#v}"
-    RELEASE=1
+    if [ "$DIRTY" = 1 ]; then
+        # Standing on a tag is not the same as being it. A dirty tree here
+        # would otherwise produce a package indistinguishable from the release
+        # while containing something else entirely -- so it sorts *after* the
+        # release, which is what it is: that release plus uncommitted changes.
+        RELEASE="1.${SNAPSHOT}"
+    else
+        # On a tag, and nothing on top: this is that release.
+        RELEASE=1
+    fi
 elif previous=$(git describe --abbrev=0 --tags HEAD 2>/dev/null); then
     # After a tag: a snapshot of work since it, so it must sort *after* the
     # release it is named for, or an upgrade would go backwards onto it.

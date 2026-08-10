@@ -44,10 +44,15 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("GSK_RENDERER", "cairo")
     os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
 
-    # No test has any business reading the developer's own passwords. Clearing
-    # this rather than merely not setting it means an exported value in the
-    # surrounding shell cannot quietly re-enable it for the whole run.
-    os.environ.pop("GTKPASS_ALLOW_REAL_STORE", None)
+    # No test has any business reading the developer's own passwords.
+    #
+    # Set to 0 rather than merely cleared. Clearing leaves the default, and the
+    # default depends on how gtkpass got onto the path: a checkout is refused,
+    # an installed build is not. Since CI now runs this suite against an
+    # installed wheel and an installed RPM, clearing would have opened the guard
+    # for exactly those runs. Saying 0 outright is the same answer everywhere,
+    # and an exported value in the surrounding shell cannot survive it either.
+    os.environ["GTKPASS_ALLOW_REAL_STORE"] = "0"
 
     compiler = shutil.which("glib-compile-schemas")
     if compiler is None:

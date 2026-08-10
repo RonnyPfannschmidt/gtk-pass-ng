@@ -246,6 +246,16 @@ sandbox that was denied the socket and therefore lies.
 
 `make check` and `make test` run locally, the pre-commit hook installed by
 `make hooks` runs the former on the way in, and `.github/workflows/ci.yml` runs
-both on push and pull request across two Fedora releases -- along with building
-the RPM, installing it, and smoke testing the installed copy, which is the only
-way the packaging is exercised as a user would meet it.
+on push and pull request across two Fedora releases.
+
+CI packages before it tests. It builds the wheel, the sdist and the RPMs, then
+runs the suite against each of them *installed* -- the wheel in a virtualenv,
+the RPM through `dnf install` -- rather than against the working copy, which is
+a thing nobody runs. The faults that ordering catches are the ones a source-tree
+run cannot see: a wheel missing its `.ui` files, a schema that never reached the
+compiled cache, an entry point resolving to nothing.
+
+The `src/` layout is what makes it honest, `import gtkpass` from the repository
+root finding nothing. One consequence: the guard defaults *open* for an installed
+build, so `conftest.py` sets `GTKPASS_ALLOW_REAL_STORE=0` outright rather than
+clearing it, or those runs would be unguarded with every test still passing.

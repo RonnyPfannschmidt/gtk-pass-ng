@@ -1,16 +1,24 @@
 # Making a release
 
 ```bash
-git tag -a v0.1.0 -m "0.1.0"
-git push origin v0.1.0
+git tag -a v0.3.0 -m "0.3.0"
+git push origin v0.3.0
 ```
 
-That is the whole of it. `.github/workflows/release.yml` does the rest: runs all
-of CI, publishes the wheel and sdist to PyPI, and attaches the RPMs and sysext
-images to a GitHub release.
+That is the whole of it, and it is the only step. `.github/workflows/release.yml`
+does the rest: runs all of CI, publishes the wheel and sdist to PyPI, and
+attaches the RPMs and sysext images to a GitHub release it creates.
 
-No release has been made yet. Everything below describes a pipeline that has
-been built and reviewed but not yet run against a real tag.
+**Do not create the release on GitHub first.** Pushing the tag is what starts
+the workflow, and the workflow makes the release. Creating one by hand
+beforehand is what happened with v0.2.0: everything built and PyPI published,
+but the release already existed, so the packages had nowhere to go and the job
+failed at the last step. That case is handled now -- the workflow attaches to an
+existing release rather than failing -- but the tag alone is still the whole
+procedure, and doing less is doing it right.
+
+To attach packages to a release that already went out without them, re-run the
+Release workflow on that tag from the Actions tab.
 
 ## Before the first one: PyPI
 
@@ -69,20 +77,39 @@ There is an issue open about claiming the original name.
 
 ## What a tag sets off
 
-1. **verify** — the whole of `ci.yml`, called as a reusable workflow: lint,
-   types, the suite on two Fedora releases, and the RPM and sysext jobs, which
-   install and inspect what they build. Everything else waits for this.
-2. **distribution** — builds the sdist and wheel, and checks the version
-   setuptools-scm derived is exactly the tag. A tag that is not on the commit
-   being built yields `0.1.0.dev3+g1234567`, which would otherwise be published
-   as a perfectly valid and completely wrong release.
-3. **pypi** — uploads to PyPI.
-4. **github-release** — creates the release and attaches the packages *that
-   verify already built*, rather than a second build nobody checked.
+1. **verify** — the whole of `ci.yml`, called as a reusable workflow. It builds
+   the wheel, the sdist and the RPMs, then runs the test suite against each of
+   them *installed*, builds and inspects the sysext images, and runs lint and
+   types. Everything else waits for this.
+2. **pypi** — uploads the wheel and sdist that verify already built and tested,
+   after checking the version setuptools-scm derived is exactly the tag. A tag
+   that is not on the built commit yields `0.2.0.dev3+g1234567`, which would
+   otherwise be published as a perfectly valid and completely wrong release, and
+   PyPI does not allow taking a version back.
+3. **github-release** — writes the notes, creates the release, and attaches the
+   packages. Not a second build: the same files the suite was run against.
 
-Running the workflow by hand instead does 1 and 2 and stops: every publishing
-step is guarded on the ref being a tag, so a manual run is a dry run and cannot
-release by accident.
+Running the workflow by hand instead does 1 and stops. Every publishing step is
+guarded on the ref being a tag, so a manual run is a dry run and cannot release
+by accident — which is the cheap way to check the pipeline after changing it.
+
+### Why the packages are built before they are tested
+
+Because a suite run against the working copy answers a question nobody asks:
+nobody runs the working copy. It also misses precisely the faults packaging
+introduces — a wheel that installed without its `.ui` files, a schema that never
+reached the compiled cache, an entry point resolving to nothing — each of which
+is invisible from the source tree and fatal on a user's machine.
+
+So the artefacts are built first and the suite runs against each installed: the
+wheel in a virtualenv, the RPM through `dnf install`. The `src/` layout is what
+makes that honest — `import gtkpass` from the repository root finds nothing, so
+what the suite exercises can only be the installed copy.
+
+One consequence to know about. The guard in `safety.py` defaults *open* for an
+installed build, so `conftest.py` sets `GTKPASS_ALLOW_REAL_STORE=0` outright
+rather than merely clearing it. Clearing would have left these runs unguarded,
+silently, with every test still passing.
 
 ## Versions
 
@@ -94,7 +121,12 @@ release from git too, in the three states a checkout can be in:
 | --- | --- | --- | --- |
 | Before any tag | `0.1.0` | `0.1.<date>git<hash>` | before `0.1.0-1` |
 | On a tag | the tag, without `v` | `1` | — |
+| On a tag, dirty tree | the tag | `1.<date>git<hash>.dirty` | after that release |
 | After a tag | the last tag | `2.<date>git<hash>` | after that release |
+
+Standing on a tag is not the same as being it: a dirty tree there would
+otherwise produce a package indistinguishable from the release while containing
+something else entirely.
 
 The point of the release forms is that upgrades only ever move forwards. A
 snapshot taken before the first release upgrades to it; a snapshot taken after
@@ -108,6 +140,16 @@ describe the commit it names.
 Pre-release tags are not handled: `v0.2.0rc1` gives an RPM version that sorts
 *after* `0.2.0`, RPM having no notion of a release candidate short of a `~`
 that PEP 440 does not permit. Tag those only if you are prepared to work it out.
+
+## Release notes
+
+Generated: the commit subjects since the previous tag, a compare link, and links
+to the documentation for installing.
+
+Deliberately not an installation guide. Notes are frozen the moment they are
+written, so anything copied into them is wrong from the next change onwards --
+and wrong on a page nobody thinks to correct. The documentation is where install
+instructions belong, and the notes link to it at the tag they were cut from.
 
 ## What is released, and what is not
 

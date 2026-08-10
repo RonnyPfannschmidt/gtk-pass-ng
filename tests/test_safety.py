@@ -117,6 +117,11 @@ class TestRealStoreGuard:
     def _no_override(self, monkeypatch):
         monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
         monkeypatch.delenv("PASSWORD_STORE_DIR", raising=False)
+        # With the override gone the default decides, and the default asks where
+        # the code is running from. These are about what a development run does,
+        # so they say so: CI runs this same suite against an installed wheel and
+        # an installed RPM, where the default is the other way round.
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
 
     def test_the_default_store_is_recognised(self):
         assert is_real_store(Path("~/.password-store").expanduser())
@@ -165,6 +170,11 @@ class TestTheDevelopmentStore:
     def _no_override(self, monkeypatch):
         monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
         monkeypatch.delenv("PASSWORD_STORE_DIR", raising=False)
+        # With the override gone the default decides, and the default asks where
+        # the code is running from. These are about what a development run does,
+        # so they say so: CI runs this same suite against an installed wheel and
+        # an installed RPM, where the default is the other way round.
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
 
     def test_a_marked_store_is_not_real(self, tmp_path):
         assert not is_real_store(scratch_store(tmp_path / "dev"))
@@ -209,6 +219,7 @@ class TestTheKeyringIsGuardedToo:
     @pytest.fixture(autouse=True)
     def _no_override(self, monkeypatch):
         monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
 
     def test_the_keyring_is_refused(self):
         with pytest.raises(RealStoreBlocked, match="GTKPASS_ALLOW_REAL_STORE"):
@@ -237,6 +248,7 @@ class TestBackendsHonourTheGuard:
         from gtkpass.backends.direct import DirectBackend, DirectBackendSettings
 
         monkeypatch.delenv("GTKPASS_ALLOW_REAL_STORE", raising=False)
+        monkeypatch.setattr("gtkpass.safety.running_from_checkout", lambda *a: True)
         real = Path("~/.password-store").expanduser()
         if not real.is_dir():
             pytest.skip("no real store on this machine")
@@ -322,10 +334,6 @@ class TestWhereTheCodeIsRunningFrom:
 
         assert running_from_checkout(src / "gtkpass" / "safety.py")
 
-    def test_this_very_test_run_is_a_checkout(self):
-        """The tripwire. If this ever fails, the suite is running unguarded."""
-        assert running_from_checkout()
-
 
 class TestTheDefaultFollowsWhereTheCodeIsFrom:
     """The environment variable still decides when it is set, both ways."""
@@ -360,15 +368,21 @@ class TestTheDefaultFollowsWhereTheCodeIsFrom:
 
 
 class TestTheGuardIsActiveDuringTests:
-    """conftest clears the opt-in; this is the tripwire that says so."""
+    """conftest turns the opt-in off; this is the tripwire that says so."""
 
-    def test_the_opt_in_is_not_set(self):
+    def test_the_opt_in_is_refused_outright(self):
         import os
 
-        assert "GTKPASS_ALLOW_REAL_STORE" not in os.environ
+        assert os.environ["GTKPASS_ALLOW_REAL_STORE"] == "0"
 
-    def test_an_exported_opt_in_would_be_cleared(self):
-        """Even if the surrounding shell exports it, the run must not inherit it."""
+    def test_the_guard_is_shut_however_gtkpass_was_installed(self):
+        """The reason it is set rather than cleared.
+
+        Cleared, the answer would come from the default -- which is open for an
+        installed build. This suite runs against an installed wheel and an
+        installed RPM in CI, so a cleared variable would have unguarded exactly
+        those runs, quietly, while every test still passed.
+        """
         from gtkpass.safety import opted_in
 
         assert not opted_in()
