@@ -7,8 +7,10 @@ arbitrary command execution outside the sandbox, which is not a trade a
 password manager should make.
 """
 
+import os
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -362,6 +364,64 @@ class TestSearchMatchesNames:
         self.create(populated).search("work")
 
         assert recorded_runs == []
+
+
+class TestPassCannotRunForever:
+    """Every pass invocation is bounded, as every git invocation already is.
+
+    A decrypt raises a pinentry prompt, and gpg waits for it indefinitely -- so
+    a prompt nobody answers, or one that never appears because there is no
+    pinentry to run, leaves pass running and the worker that called it wedged.
+    The manager's pool has four of those, and the window joins them at quit.
+    """
+
+    def backend(self, store, command):
+        """A backend pointed at ``command`` instead of at pass.
+
+        Constructed directly: create() insists on a real pass on PATH, and what
+        is being tested is what happens once one is running.
+        """
+        return PassBackend(
+            pass_cmd=command,
+            env=dict(os.environ),
+            password_store_dir=store,
+            use_git=False,
+        )
+
+    @pytest.fixture
+    def impatient(self, monkeypatch):
+        """Shorten the deadline, so the test does not have to wait it out."""
+        monkeypatch.setattr("gtkpass.backends.pass_cli.SUBPROCESS_TIMEOUT_SECONDS", 0.2)
+
+    def test_a_pass_that_never_returns_is_given_up_on(self, store, impatient):
+        backend = self.backend(store, ["sh", "-c", "sleep 30"])
+
+        with pytest.raises(BackendError, match="timed out"):
+            backend._run_pass(["show", "anything"])
+
+    def test_it_gives_up_rather_than_waiting_for_the_process(self, store, impatient):
+        backend = self.backend(store, ["sh", "-c", "sleep 30"])
+        started = time.monotonic()
+
+        with pytest.raises(BackendError):
+            backend._run_pass(["show", "anything"])
+
+        assert time.monotonic() - started < 10
+
+    def test_what_it_printed_before_hanging_stays_out_of_the_error(
+        self, store, impatient
+    ):
+        """TimeoutExpired carries the output captured so far.
+
+        For `pass show` that output is the decrypted entry, and this error is
+        shown to the user in a toast and written to the log.
+        """
+        backend = self.backend(store, ["sh", "-c", "echo SUPERSECRET; sleep 30"])
+
+        with pytest.raises(BackendError) as raised:
+            backend._run_pass(["show", "anything"])
+
+        assert "SUPERSECRET" not in str(raised.value)
 
 
 class TestGitIsNotAnEnvironmentSetting:

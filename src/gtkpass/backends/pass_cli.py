@@ -15,6 +15,7 @@ from pathlib import Path
 from gtkpass.safety import default_store_dir, ensure_store_allowed
 
 from . import (
+    SUBPROCESS_TIMEOUT_SECONDS,
     BackendError,
     BackendMetadata,
     BackendSettings,
@@ -196,7 +197,7 @@ class PassBackend(PasswordBackend):
             Completed process
 
         Raises:
-            BackendError: If command fails
+            BackendError: If command fails, including when it does not finish.
         """
         cmd = self._pass_cmd + args
 
@@ -208,8 +209,15 @@ class PassBackend(PasswordBackend):
                 text=True,
                 check=True,
                 env=self._env,
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
             return result
+        except subprocess.TimeoutExpired:
+            # Before the blanket handler below, and phrased without e: a decrypt
+            # that is killed mid-flight carries whatever it had already printed
+            # on the exception, and for `pass show` that is the entry itself.
+            # This message reaches a toast and the log.
+            raise BackendError(f"pass {args[0]} timed out") from None
         except subprocess.CalledProcessError as e:
             raise BackendError(f"pass command failed: {e.stderr}") from e
         except Exception as e:

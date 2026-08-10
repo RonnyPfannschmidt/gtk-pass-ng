@@ -312,6 +312,20 @@ class BackendManager:
             dest.add_password(dest_name, entry.content)
 
     def shutdown(self):
-        """Shutdown backend manager and cleanup resources."""
-        self._executor.shutdown(wait=True)
+        """Stop accepting work and let go of the backends, without waiting.
+
+        Called from the UI thread: at quit, and on every settings change, which
+        replaces the manager wholesale. Waiting for the pool there meant a
+        worker sitting on an unanswered passphrase prompt froze the window
+        instead -- the settings dialog first, and then the quit that would have
+        got out of it.
+
+        ``cancel_futures`` drops what has not started. Work already running
+        cannot be cancelled, so it finishes on its own; the deadline on every
+        subprocess (``SUBPROCESS_TIMEOUT_SECONDS``) is what bounds that, and it
+        is why this alone is not the whole fix. The interpreter still joins the
+        pool's threads at exit, so a command with no deadline would keep the
+        process alive whatever this method does.
+        """
+        self._executor.shutdown(wait=False, cancel_futures=True)
         self._backends.clear()

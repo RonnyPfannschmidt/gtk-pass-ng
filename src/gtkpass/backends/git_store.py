@@ -27,6 +27,7 @@ from pathlib import Path
 from gtkpass import sandbox
 
 from . import (
+    SUBPROCESS_TIMEOUT_SECONDS,
     GitError,
     SyncCapability,
     SyncNotPermitted,
@@ -35,11 +36,6 @@ from . import (
 )
 
 logger = logging.getLogger(__name__)
-
-#: No git operation here is interactive, so anything that has not finished by
-#: now is stuck. The manager's pool has four workers and shutdown() waits on
-#: them from the UI thread, so a stuck one freezes the window.
-TIMEOUT_SECONDS = 120
 
 #: `user:password@host` in a remote URL. git echoes the URL in its errors, and
 #: those errors are shown to the user and written to the log.
@@ -99,7 +95,7 @@ class GitStore:
                 text=True,
                 check=False,
                 env=self._env,
-                timeout=TIMEOUT_SECONDS,
+                timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as error:
             raise GitError(f"git {args[0]} timed out") from error

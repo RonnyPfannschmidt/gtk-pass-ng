@@ -5,6 +5,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+#: How long a backend may leave a subprocess running before it is treated as
+#: stuck, in seconds.
+#:
+#: Shared by every subprocess GTKPass owns -- git in ``git_store``, pass in
+#: ``pass_cli`` -- because the reason is the same in both places and one number
+#: is easier to reason about than two. None of these commands is interactive
+#: from GTKPass's side: git is run in an environment where it cannot ask a
+#: question, and pass reads its input from stdin.
+#:
+#: What pass *can* do is raise a pinentry prompt, which is a person typing a
+#: passphrase rather than a hung process, so this has to be patient enough for
+#: that. Two minutes is: a prompt left unanswered that long has been abandoned,
+#: and abandoning it back costs a retry rather than an entry.
+#:
+#: The deadline matters because the manager's pool has four workers and the
+#: window quits by shutting that pool down. A command with no deadline is a
+#: worker that never returns.
+SUBPROCESS_TIMEOUT_SECONDS = 120
+
 
 @dataclass
 class BackendMetadata:
