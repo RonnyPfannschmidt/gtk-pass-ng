@@ -10,8 +10,8 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     <property name="application-name">GTKPass</property>
     <property name="application-icon">io.github.RonnyPfannschmidt.GTKPass</property>
     <property name="developer-name" translatable="yes">GTKPass Contributors</property>
-    <property name="website">https://github.com/RonnyPfannschmidt/gtkpass</property>
-    <property name="issue-url">https://github.com/RonnyPfannschmidt/gtkpass/issues</property>
+    <property name="website">https://github.com/RonnyPfannschmidt/gtk-pass-ng</property>
+    <property name="issue-url">https://github.com/RonnyPfannschmidt/gtk-pass-ng/issues</property>
     <property name="license-type">17</property>
     <property name="copyright">© 2025 GTKPass Contributors</property>
   </object>
