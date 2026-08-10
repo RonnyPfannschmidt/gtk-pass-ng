@@ -10,8 +10,9 @@ nothing can be taken from a distribution at all — the bundle carries GTK,
 libadwaita and the interpreter with it. See [WINDOWS.md](WINDOWS.md).
 
 ```bash
-make rpm      # dist/rpm/gtkpass-*.noarch.rpm and the matching .src.rpm
-make sysext   # dist/sysext/gtkpass-<id>-<version>.raw
+make rpm              # dist/rpm/gtkpass-*.noarch.rpm and the matching .src.rpm
+make sysext           # dist/sysext/gtkpass-<id>-<version>.raw
+make sysext-install   # ... and put that image on this machine
 ```
 
 Neither is released anywhere. Both are built locally, from a working tree.
@@ -194,6 +195,36 @@ did travel. `build-sysext.sh` also warns when it is resolving on a machine with
 CI images are targeted at `fedora <release>`. An image for a derivative is built
 on that derivative — `make sysext` on the machine it is for, which is also the
 only place it can be merged and actually tried.
+
+## Installing the image on a real machine
+
+```bash
+make sysext-install                 # install, merge, keep it
+make sysext-install ARGS=--yes      # without the confirmation
+```
+
+It inspects the image, says what it is about to change and which build it is
+about to install, and then does it: unmerge if one is already merged, copy into
+`/var/lib/extensions/`, merge, and check that `systemd-sysext.service` is
+enabled so the merge comes back after a reboot.
+
+The unmerge comes first even when replacing an image with an identical name.
+A merged extension is loop-mounted, so writing over the file underneath it is
+not an update: it is a running system reading from a file that has gone. An
+image built for an earlier release — the name carries `$ID-$VERSION_ID`, so an
+upgraded machine builds a differently named one — is removed at the same time,
+since systemd would refuse it here and it would otherwise sit there for good.
+
+The build date is printed because this installs whatever was built last rather
+than building afresh. An image from a week ago looks exactly like one from a
+minute ago once it is merged.
+
+Taking it away again:
+
+```bash
+sudo systemd-sysext unmerge
+sudo rm /var/lib/extensions/gtkpass-*.raw
+```
 
 ## Trying the image on a real machine
 

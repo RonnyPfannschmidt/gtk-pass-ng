@@ -39,7 +39,7 @@ FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
 
 .PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev \
 	devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo rpm sysext \
-	sysext-test clean
+	sysext-test sysext-install clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -59,6 +59,7 @@ help:
 	@echo "rpm      build the RPM in a Fedora container"
 	@echo "sysext   build a systemd-sysext image for Bluefin/Silverblue"
 	@echo "sysext-test  merge that image onto this machine, test it, unmerge"
+	@echo "sysext-install  install that image on this machine and merge it, for keeps"
 	@echo "clean    remove build and cache artefacts"
 
 # --allow-existing so this is idempotent. Without it `uv venv` refuses outright
@@ -171,6 +172,13 @@ sysext:
 # cannot do: merging needs a running systemd, which a container has not got.
 sysext-test:
 	./packaging/test-sysext.sh
+
+# The one that keeps the image installed. Replaces an earlier one, which means
+# unmerging first: a merged image is loop-mounted, so writing over the file
+# underneath it is not an update but a running system reading from a file that
+# has gone. ARGS="--yes" to skip the confirmation.
+sysext-install:
+	./packaging/install-sysext.sh $(ARGS)
 
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
