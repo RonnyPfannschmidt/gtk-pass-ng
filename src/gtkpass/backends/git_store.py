@@ -298,7 +298,14 @@ class GitStore:
                 sandbox.override_command(),
             )
 
-        if self._run("status", "--porcelain"):
+        # --untracked-files=no: a rebase over modified *tracked* files is what
+        # this refuses, and that is what git itself refuses too. A file git
+        # never tracked -- an editor backup, a .gpg-id nobody committed -- is
+        # not the store's business, and counting it disabled syncing for good
+        # while telling the user to discard something they may want kept.
+        # An incoming commit that would overwrite one still fails, in git's own
+        # words, which name the file.
+        if self._run("status", "--porcelain", "--untracked-files=no"):
             raise GitError(
                 "The store has uncommitted changes. Commit or discard them "
                 "before syncing."

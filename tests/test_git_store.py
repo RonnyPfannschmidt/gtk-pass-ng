@@ -406,16 +406,40 @@ class TestSyncingRefusesToLeaveAMess:
 
         assert "email/work" in str(raised.value)
 
-    def test_an_uncommitted_change_is_reported_before_anything_moves(
+    def test_a_modified_entry_is_reported_before_anything_moves(
         self, store_repo, bare_remote
     ):
+        """A rebase over a dirty worktree is what this exists to prevent."""
         store = open_store(store_repo)
-        entry(store_repo, "email/work")
+        store.commit([entry(store_repo, "email/work")], "Add work")
+        entry(store_repo, "email/work", content=b"\x01changed")
 
         with pytest.raises(GitError) as raised:
             store.sync()
 
         assert "uncommitted" in str(raised.value).lower()
+
+    def test_an_untracked_file_does_not_stop_a_sync(
+        self, store_repo, bare_remote, other_clone
+    ):
+        """git never tracked it, so it is not this store's business.
+
+        A stray editor backup or a .gpg-id nobody committed used to disable the
+        sync button permanently, with a message telling the user to commit or
+        discard something they may well have wanted left alone.
+        """
+        from conftest import git
+
+        entry(other_clone, "theirs")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Theirs", cwd=other_clone)
+        git("push", cwd=other_clone)
+        (store_repo / "notes.txt~").write_text("an editor left this here")
+
+        result = open_store(store_repo).sync()
+
+        assert result.pulled == 1
+        assert (store_repo / "notes.txt~").exists(), "the sync took it away"
 
     def test_an_unreachable_remote_is_reported(self, store_repo, tmp_path):
         git("remote", "add", "origin", str(tmp_path / "nowhere.git"), cwd=store_repo)
