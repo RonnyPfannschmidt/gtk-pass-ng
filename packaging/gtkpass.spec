@@ -116,5 +116,10 @@ glib-compile-schemas --strict --dry-run \
 
 
 %changelog
-* Sun Aug 09 2026 Ronny Pfannschmidt <opensource@ronnypfannschmidt.de> - 0.1.0-1
-- Initial packaging.
+# Generated, not maintained. The version this has to agree with comes from git,
+# so a hand-written entry is wrong from the next tag onwards; the date is the
+# commit's, so building a commit twice still gives the same package. What
+# actually changed is in the git history and in the release notes, neither of
+# which is improved by being transcribed here.
+* %{?changelog_date}%{!?changelog_date:Sun Aug 09 2026} Ronny Pfannschmidt <opensource@ronnypfannschmidt.de> - %{version}-%{release}
+- Built from git; see the release notes.

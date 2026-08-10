@@ -20,6 +20,13 @@ cd "$(dirname "$0")/.."
 # the same package.
 commit_date=$(git log -1 --format=%cd --date=format:%Y%m%d)
 commit_hash=$(git rev-parse --short HEAD)
+
+# The %changelog entry is generated rather than maintained by hand, because the
+# version it has to agree with comes from git and a hand-written one drifts the
+# moment a tag is made -- rpmlint calls that incoherent-version-in-changelog,
+# and it is right to. LC_ALL=C because rpm wants English day and month names
+# whatever locale the person building happens to run in.
+CHANGELOG_DATE=$(LC_ALL=C git log -1 --format=%cd --date=format:"%a %b %d %Y")
 SNAPSHOT="${commit_date}git${commit_hash}"
 
 # A tree with uncommitted changes does not describe the commit it names.
@@ -89,7 +96,8 @@ fi
 
 if [ "$USE_CONTAINER" = "0" ]; then
     echo "==> rpmbuild here (fedora ${FEDORA_RELEASE})"
-    VERSION="$VERSION" RELEASE="$RELEASE" SRC="$PWD" packaging/rpmbuild-here.sh
+    VERSION="$VERSION" RELEASE="$RELEASE" CHANGELOG_DATE="$CHANGELOG_DATE" \
+        SRC="$PWD" packaging/rpmbuild-here.sh
 else
     # shellcheck source=packaging/container-runtime.sh
     . "$(dirname "$0")/container-runtime.sh"
@@ -98,6 +106,7 @@ else
         -v "$PWD:/src:z" \
         -e "VERSION=${VERSION}" \
         -e "RELEASE=${RELEASE}" \
+        -e "CHANGELOG_DATE=${CHANGELOG_DATE}" \
         -e "SRC=/src" \
         "$IMAGE" \
         /src/packaging/rpmbuild-here.sh

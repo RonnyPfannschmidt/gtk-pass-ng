@@ -6,14 +6,17 @@ assertion diff; and a development probe pointed at the developer's own store
 reads real passwords for no good reason.
 """
 
+import importlib.metadata
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from gtkpass import safety
 from gtkpass.backends import PasswordEntry
 from gtkpass.safety import (
+    DISTRIBUTION_NAME,
     SCRATCH_MARKER,
     NotInstalled,
     RealStoreBlocked,
@@ -34,7 +37,11 @@ def scratch_store(path: Path) -> Path:
 
 
 def fake_distribution(
-    base: Path, editable: bool | None = None, direct_url=None, metadata_dir=None
+    base: Path,
+    editable: bool | None = None,
+    direct_url=None,
+    metadata_dir=None,
+    name: str = DISTRIBUTION_NAME,
 ):
     """Stands in for what importlib.metadata hands back.
 
@@ -43,7 +50,9 @@ def fake_distribution(
     metadata pip and uv record; leaving it unset means no direct_url.json at
     all, which is what an RPM or a wheel from an index looks like.
     ``metadata_dir`` is the directory the metadata itself lives in, which is how
-    an installed .dist-info is told from a source tree's .egg-info.
+    an installed .dist-info is told from a source tree's .egg-info. ``name`` is
+    what the metadata calls the distribution, which packaging tools spell in
+    more than one way.
     """
     if direct_url is None and editable is not None:
         direct_url = json.dumps(
@@ -53,6 +62,7 @@ def fake_distribution(
 
     class Fake:
         _path = path
+        metadata: ClassVar[dict[str, str]] = {"Name": name}
 
         def read_text(self, filename):
             return direct_url if filename == "direct_url.json" else None
@@ -362,6 +372,66 @@ class TestTheGuardIsActiveDuringTests:
         from gtkpass.safety import opted_in
 
         assert not opted_in()
+
+
+class TestHowTheDistributionIsRecognised:
+    """The name in the metadata is not always the name that was declared.
+
+    Packaging tools spell it several ways -- underscored where a filename
+    demanded it, cased however it was typed -- so matching is done on a
+    normalised form. Getting this wrong does not misbehave subtly: the
+    distribution is simply not found, and the application refuses to start.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _forget_the_cached_answer(self):
+        safety._own_distribution.cache_clear()
+        yield
+        safety._own_distribution.cache_clear()
+
+    def _found(self, monkeypatch, *names):
+        dists = [fake_distribution(Path("/nowhere"), name=n) for n in names]
+        monkeypatch.setattr(importlib.metadata, "distributions", lambda: list(dists))
+        return safety._distributions_named()
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "gtk-pass-ng",
+            # PEP 625 underscores the sdist filename, and metadata written from
+            # one has been known to follow.
+            "gtk_pass_ng",
+            "GTK-Pass-NG",
+            "Gtk_Pass_Ng",
+            # Metadata read from a file readily arrives with its line ending
+            # still attached.
+            " gtk-pass-ng ",
+        ],
+    )
+    def test_it_is_found_however_the_metadata_spells_it(self, monkeypatch, spelling):
+        assert len(self._found(monkeypatch, spelling)) == 1
+
+    @pytest.mark.parametrize(
+        "other",
+        [
+            # The unrelated project that owns this name on PyPI. Matching it
+            # would be worse than finding nothing: the guard would read
+            # somebody else's package as evidence about this one.
+            "gtkpass",
+            # The name PyPI refused as too similar. Similar is not the same.
+            "gtk-pass",
+            "gtk-pass-ng-extra",
+            "not-gtk-pass-ng",
+        ],
+    )
+    def test_another_distribution_is_not_mistaken_for_it(self, monkeypatch, other):
+        assert self._found(monkeypatch, other) == []
+
+    def test_only_the_matching_ones_come_back(self, monkeypatch):
+        found = self._found(monkeypatch, "gtkpass", "gtk_pass_ng", "gtk-pass")
+
+        assert len(found) == 1
+        assert found[0].metadata["Name"] == "gtk_pass_ng"
 
 
 class TestWhichDistributionAnswers:

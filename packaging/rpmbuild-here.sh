@@ -14,10 +14,15 @@ set -euo pipefail
 
 : "${VERSION:?set by build-rpm.sh}"
 : "${RELEASE:?set by build-rpm.sh}"
+: "${CHANGELOG_DATE:?set by build-rpm.sh}"
 
 SRC="${SRC:-$(cd "$(dirname "$0")/.." && pwd)}"
 spec="${SRC}/packaging/gtkpass.spec"
-define=("--define=version_override ${VERSION}" "--define=release_override ${RELEASE}")
+define=(
+    "--define=version_override ${VERSION}"
+    "--define=release_override ${RELEASE}"
+    "--define=changelog_date ${CHANGELOG_DATE}"
+)
 
 dnf -y --setopt=install_weak_deps=False install \
     rpm-build rpmdevtools python3-devel pyproject-rpm-macros \
