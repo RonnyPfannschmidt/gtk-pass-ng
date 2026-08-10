@@ -90,9 +90,14 @@ sudo systemd-sysext merge      # and `unmerge` to take it away again
 
 ### One image per target
 
-An extension names the operating system it was built for, in
-`/usr/lib/extension-release.d/extension-release.gtkpass`, and systemd refuses to
-merge it anywhere else:
+An extension names the operating system it was built for, in a release file
+whose own name systemd takes from the image: for `gtkpass-bluefin-44.raw` it
+must be `/usr/lib/extension-release.d/extension-release.gtkpass-bluefin-44`.
+Name them apart and `systemd-dissect` reports `✗ sysext for system` and the
+merge fails with `No medium found`, which mentions neither the file nor the
+mismatch — so `inspect-sysext.sh` derives the expected path from the image
+filename and fails when it is missing. systemd refuses to merge it on anything
+but the named target:
 
 ```
 ID=bluefin
@@ -217,12 +222,21 @@ from a scratch store.
 The RPM has been installed on a clean Fedora 44 and smoke tested there, which is
 what the CI job does on every push.
 
+The sysext image has been merged on a live Bluefin with `make sysext-test`: the
+application arrives on `PATH` through the overlay, the guard reads it as an
+installed build, its schema resolves from the private directory, all four
+backends are discoverable — so the vendored `python3-gnupg` arrived — and the
+packaged `.ui` files load. GNOME's own 156 schemas stayed visible throughout,
+which is what shipping no `gschemas.compiled` was for. Unmerging left `/usr`
+clean.
+
 Not done:
 
 - Neither artefact is signed, and there is no repository to install from. This is
   `make rpm` on a checkout, not a distribution channel.
 - No COPR build, and no Fedora review request.
 - No release tag, so every build is a snapshot.
-- The image has been built and inspected but never merged with `systemd-sysext
-  merge` on a live session. `make sysext-test` is what does that, and it has not
-  been run here.
+- Merging has been done by hand on one machine, not automatically: CI cannot
+  merge, needing a running systemd and a writable `/run`.
+- Only Bluefin 44 has been merged. An image for Silverblue or Bazzite is built
+  the same way but has not been tried.

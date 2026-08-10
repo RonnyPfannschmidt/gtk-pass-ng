@@ -84,10 +84,10 @@ Roughly in the order that would make the application usable day to day.
   ready: no screenshots, no release tag, a placeholder icon and a manifest that
   builds from the working directory. See
   [docs/FLATHUB.md](docs/FLATHUB.md).
-- **Merging the sysext image in CI.** It is built and inspected there, but
-  `systemd-sysext merge` needs a running systemd and a writable `/run`, which a
-  container has neither of. `packaging/test-sysext.sh` does it on a real
-  machine; nothing does it automatically.
+- **Merging the sysext image in CI.** It is built and inspected there, and
+  `make sysext-test` merges it on a real machine — but `systemd-sysext merge`
+  needs a running systemd and a writable `/run`, which a container has neither
+  of, so nothing does it automatically.
 
 Smaller things, worth doing when passing:
 
