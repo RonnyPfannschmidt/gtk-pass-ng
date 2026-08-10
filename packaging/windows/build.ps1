@@ -161,10 +161,22 @@ if (Test-Path $gtkMarker) {
     }
 }
 
+$gtkBin = Join-Path $GtkRoot 'bin'
+$typelibDir = Join-Path $GtkRoot 'lib\girepository-1.0'
+
 # PyInstaller resolves the shared library behind each typelib by looking it up
-# the way the loader would, so the GTK bin directory has to be on PATH for the
-# build and not only for the run.
-$env:PATH = "$(Join-Path $GtkRoot 'bin');$env:PATH"
+# the way the loader would, and glib-compile-schemas has to be findable too, so
+# the GTK bin directory is on PATH for the build and not only for the run.
+$env:PATH = "$gtkBin;$env:PATH"
+
+# Where the typelibs are. Without this, gi.require_version('Gtk', '4.0') fails
+# with "Namespace Gtk not available" during the build, PyInstaller's gi hook
+# concludes the module is unavailable and collects *nothing* -- and the failure
+# does not surface until the finished bundle is started.
+if (-not (Test-Path $typelibDir)) {
+    throw "no typelibs in $typelibDir; this gvsbuild release has a different layout"
+}
+$env:GI_TYPELIB_PATH = $typelibDir
 
 # -- the environment the bundle is frozen out of ---------------------------
 
@@ -174,6 +186,23 @@ if (-not (Test-Path (Join-Path $VenvDir 'Scripts\python.exe'))) {
     Invoke-Checked python @('-m', 'venv', $VenvDir)
 }
 $venvPython = Join-Path $VenvDir 'Scripts\python.exe'
+
+# Python 3.8 stopped searching PATH for the DLLs an extension module depends on,
+# so having the GTK bin directory on PATH does not let `import gi` find
+# libgobject: os.add_dll_directory is the only thing that does, and PyGObject
+# does not call it itself -- there is no Windows DLL handling in gi/__init__.py
+# at all, which is why "DLL load failed while importing _gi" is the first thing
+# anyone hits here.
+#
+# A .pth file rather than a call in a script, because it has to reach *every*
+# interpreter started from this environment. PyInstaller asks what a typelib
+# needs from isolated subprocesses of its own, and those inherit the environment
+# but nothing the parent process did to itself.
+$dllPath = Join-Path $VenvDir 'Lib\site-packages\_gtkpass_gvsbuild_dlls.pth'
+# WriteAllText rather than Set-Content: it is UTF-8 without a BOM on every
+# PowerShell, and a BOM at the head of a .pth file is a line Python cannot read.
+[System.IO.File]::WriteAllText(
+    $dllPath, 'import os; os.add_dll_directory(r"' + $gtkBin + '")' + "`n")
 
 Invoke-Checked $venvPython @('-m', 'pip', 'install', '--upgrade', '--quiet', 'pip', 'build', 'pyinstaller')
 
@@ -201,7 +230,31 @@ if ($Wheel) {
     $wheelPath = (Get-ChildItem -Path (Join-Path $BuildDir 'wheel') -Filter 'gtk_pass_ng-*.whl' |
         Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 }
-Invoke-Checked $venvPython @('-m', 'pip', 'install', '--force-reinstall', $wheelPath)
+# Two steps, and not for the sake of it. `pip install --force-reinstall <wheel>`
+# reinstalls the *dependencies* as well, and PyGObject and pycairo are
+# dependencies: pip went to PyPI, found the source distributions, built them
+# against the GTK stack that happened to be on PATH, and replaced the wheels
+# gvsbuild had built with the results. So the application is reinstalled on its
+# own, and the dependency resolution runs separately, where PyGObject and
+# pycairo are already satisfied and are left alone.
+Invoke-Checked $venvPython @('-m', 'pip', 'install', '--force-reinstall', '--no-deps', $wheelPath)
+Invoke-Checked $venvPython @('-m', 'pip', 'install', $wheelPath)
+
+Write-Step "Checking that GTK is reachable from Python"
+
+# Before PyInstaller rather than after. Its gi hook treats an unimportable
+# module as an absent one: it collects nothing, says so in a line nobody reads,
+# and the build succeeds -- producing a bundle that fails on the first
+# gi.require_version, which is the last place anyone looks for a packaging
+# fault.
+Invoke-Checked $venvPython @('-c', @'
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk
+print(f"    GTK {Gtk.MAJOR_VERSION}.{Gtk.MINOR_VERSION}.{Gtk.MICRO_VERSION}, "
+      f"libadwaita {Adw.MAJOR_VERSION}.{Adw.MINOR_VERSION}.{Adw.MICRO_VERSION}")
+'@)
 
 $version = (& $venvPython -c "from importlib.metadata import version; print(version('gtk-pass-ng'))")
 if ($LASTEXITCODE -ne 0) { throw "the wheel installed but its metadata could not be read" }

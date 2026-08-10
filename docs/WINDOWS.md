@@ -79,6 +79,31 @@ The release is pinned rather than tracked. An unpinned "latest" would change
 the GTK version, and the Python version required alongside it, under a build
 that worked yesterday.
 
+Getting `import gi` to work against that stack takes two things that are not
+obvious and that fail in ways pointing somewhere else:
+
+- **`os.add_dll_directory`, not `PATH`.** Python 3.8 stopped searching `PATH`
+  for the DLLs an extension module depends on, and PyGObject does not call
+  `add_dll_directory` itself — there is no Windows DLL handling in
+  `gi/__init__.py` at all. `build.ps1` drops a `.pth` file into the build
+  environment that does it, a `.pth` because PyInstaller asks what a typelib
+  needs from isolated subprocesses of its own, which inherit the environment
+  but nothing the parent did to itself. Without it: `DLL load failed while
+  importing _gi`.
+- **`GI_TYPELIB_PATH`.** Otherwise `gi.require_version('Gtk', '4.0')` fails
+  during the build, PyInstaller's gi hook concludes the module is unavailable
+  and collects *nothing*, and the build succeeds. The failure surfaces when the
+  finished bundle is started, which is the last place anyone looks for it.
+
+`build.ps1` imports Gtk and Adw itself, before PyInstaller runs, for exactly
+that reason: a hook that quietly collects nothing is worth failing early over.
+
+One more, of the same family: `pip install --force-reinstall <wheel>`
+reinstalls the *dependencies* too, and PyGObject and pycairo are dependencies.
+pip goes to PyPI, finds the source distributions, builds them, and replaces
+what gvsbuild built. The application is therefore installed on its own, with
+the dependency resolution run separately where those two are already satisfied.
+
 ### What the bundle has to carry
 
 PyInstaller freezes the application; the rest of this is what a GTK application
