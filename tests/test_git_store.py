@@ -184,6 +184,85 @@ class TestTheRemoteHasToBeKnownAlready:
         assert store.explain("some other failure") == "some other failure"
 
 
+class TestARewrittenRemoteIsRefused:
+    """`pull --rebase` accepts whatever history the remote offers.
+
+    A remote that was force-pushed can drop entries, or restore the ciphertext
+    of a password that was rotated -- which still decrypts. Rebasing onto it
+    adopts that history without a word, and for a store of ciphertext there is
+    nothing on screen afterwards that would look wrong.
+    """
+
+    def rewritten(self, store_repo, other_clone, bare_remote):
+        """Sync once, then have the remote drop the commit that brought."""
+        from conftest import git
+
+        entry(other_clone, "shared")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Add shared", cwd=other_clone)
+        git("push", cwd=other_clone)
+        open_store(store_repo).sync()
+
+        # The remote loses that commit and gains a different one in its place.
+        git("reset", "--hard", "HEAD~1", cwd=other_clone)
+        entry(other_clone, "replacement")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Something else entirely", cwd=other_clone)
+        git("push", "--force", cwd=other_clone)
+
+    def test_it_is_reported_rather_than_rebased_onto(
+        self, store_repo, bare_remote, other_clone
+    ):
+        self.rewritten(store_repo, other_clone, bare_remote)
+
+        with pytest.raises(GitError, match="no longer contains"):
+            open_store(store_repo).sync()
+
+    def test_the_store_is_left_where_it_was(self, store_repo, bare_remote, other_clone):
+        from conftest import git
+
+        self.rewritten(store_repo, other_clone, bare_remote)
+        before = git("rev-parse", "HEAD", cwd=store_repo)
+
+        with pytest.raises(GitError):
+            open_store(store_repo).sync()
+
+        assert git("rev-parse", "HEAD", cwd=store_repo) == before
+
+    def test_an_ordinary_pull_is_not_mistaken_for_one(
+        self, store_repo, bare_remote, other_clone
+    ):
+        """The remote growing is the common case and must stay silent."""
+        from conftest import git
+
+        entry(other_clone, "added-elsewhere")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Add one", cwd=other_clone)
+        git("push", cwd=other_clone)
+
+        result = open_store(store_repo).sync()
+
+        assert result.pulled == 1
+
+    def test_a_local_commit_alongside_a_remote_one_is_not_one_either(
+        self, store_repo, bare_remote, other_clone
+    ):
+        """Diverged histories rebase, as they did before; nothing was dropped."""
+        from conftest import git
+
+        entry(other_clone, "theirs")
+        git("add", "-A", cwd=other_clone)
+        git("commit", "-m", "Theirs", cwd=other_clone)
+        git("push", cwd=other_clone)
+
+        store = open_store(store_repo)
+        store.commit([entry(store_repo, "mine")], "Mine")
+
+        result = store.sync()
+
+        assert result.pushed == 1
+
+
 class TestCommitting:
     def test_a_new_entry_is_committed(self, store_repo):
         store = GitStore(store_repo, "git", commit_on_write=True)

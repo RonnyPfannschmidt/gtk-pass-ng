@@ -306,6 +306,15 @@ class GitStore:
 
         before = self._revision_count()
 
+        # Fetch before pulling, so what the remote now says can be compared with
+        # what it said last time. `pull --rebase` would do the fetch itself and
+        # rebase onto the result in the same breath, leaving no moment at which
+        # to look. The extra round trip is nearly free: the pull that follows
+        # has nothing left to fetch.
+        previous = self._try("rev-parse", "@{upstream}")
+        self._run("fetch")
+        self._refuse_rewritten_history(previous)
+
         try:
             self._run("pull", "--rebase", "--no-autostash")
         except GitError as error:
@@ -329,6 +338,41 @@ class GitStore:
             self._run("push")
 
         return SyncResult(pulled=pulled, pushed=pushed)
+
+    def _refuse_rewritten_history(self, previous: str | None) -> None:
+        """Stop if the remote no longer contains the commit this store was on.
+
+        A force-push can drop entries, or restore the ciphertext of a password
+        that was rotated -- which still decrypts. Rebasing onto that history
+        adopts it silently, and a store of ciphertext offers nothing afterwards
+        that would look wrong.
+
+        Only history that *disappeared* is refused. A remote that has grown, and
+        one that has grown while this store committed as well, are the ordinary
+        cases and go through as before.
+        """
+        if previous is None:
+            # Nothing fetched from this remote before, so there is no claim to
+            # compare against. The host key is what covers a first connection.
+            return
+
+        current = self._try("rev-parse", "@{upstream}")
+        if current is None or current == previous:
+            return
+
+        # `--is-ancestor` answers by exit status and prints nothing, so the
+        # empty string it returns on success is the yes. `is not None` rather
+        # than a truth test, which would read every yes as a no.
+        if self._try("merge-base", "--is-ancestor", previous, current) is not None:
+            return
+
+        raise GitError(
+            "Sync stopped: the remote's history no longer contains the commit "
+            "this store was last synced with. A rewritten remote can drop "
+            "entries, or bring back an old copy of one. Nothing has been "
+            "changed here; compare the two with git, and reset this store to "
+            "the remote yourself if the rewrite was meant."
+        )
 
     def _commits_ahead(self) -> int:
         """Local commits the remote does not have yet.

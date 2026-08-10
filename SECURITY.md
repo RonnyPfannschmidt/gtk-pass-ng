@@ -92,6 +92,15 @@ are not, and an old copy of the store served back restores a password you
 rotated. So the first sync from a new machine fails, and says which host to
 check the fingerprint of and what to run.
 
+A pull that would discard local history is refused. GTKPass fetches before it
+rebases and checks that the remote still contains the commit this store was last
+synced with; if it does not, the sync stops and nothing here is changed. That
+covers a force-pushed remote dropping entries or restoring an old copy of one,
+which for a store of ciphertext leaves nothing on screen that would look wrong.
+It does not cover a rollback committed forward as an ordinary change, and it is
+not authentication: the remote is not asked to prove who it is beyond its host
+key, and commits are neither signed nor verified.
+
 ### Handling decrypted data
 
 - Entries are decrypted only when opened, one at a time.
