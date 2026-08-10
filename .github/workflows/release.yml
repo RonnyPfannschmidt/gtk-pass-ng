@@ -62,7 +62,14 @@ jobs:
             exit 1
           }
 
+      # skip-existing so re-running a release does what re-running should: the
+      # packages that failed to attach get attached, and the version already on
+      # PyPI is left alone rather than failing the run. A version cannot be
+      # re-uploaded there in any case, so this only changes whether the job is
+      # red about it.
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
   github-release:
     name: attach packages to the release
