@@ -4,10 +4,17 @@
 # remembered, and the record of that is in the tree: a syntax error and a
 # backend that could not be instantiated both survived seven months.
 #
+# The order is package first, then test what was packaged. A suite run against
+# the working copy answers a question nobody asks -- nobody runs the working
+# copy -- and it misses exactly the faults packaging introduces: a wheel that
+# installed without its .ui files, a schema that never reached the compiled
+# cache, an entry point that resolves to nothing. So the artefacts are built
+# once, the suite runs against each of them installed, and those same files are
+# what a release publishes.
+#
 # Everything runs in Fedora containers rather than on ubuntu-latest, because
 # GTK4, libadwaita and PyGObject have to come from a distribution that has them
-# in the versions this targets -- and because the packaging jobs are only
-# meaningful on the distribution being packaged for.
+# in the versions this targets.
 name: CI
 
 on:
@@ -17,7 +24,7 @@ on:
   workflow_dispatch:
   # release.yml calls this, so a release is gated on the same jobs rather than
   # on a copy of them that drifts. The packages it uploads as artifacts are the
-  # ones the release publishes -- built once, checked, then shipped.
+  # ones the release publishes -- built once, tested installed, then shipped.
   workflow_call:
 
 permissions:
@@ -27,6 +34,11 @@ env:
   # Every target reuses the environment as-is; without this uv re-resolves it
   # and tries to build PyGObject and pycairo from source, which fails.
   UV_NO_SYNC: '1'
+  # The runtime a GTK4 test needs on a machine with no GPU. libepoxy aborts
+  # inside gdk_gl_context_make_current the moment a test presents a widget, and
+  # takes the process down with it; conftest.py sets the same thing, and this is
+  # here for anything run outside pytest.
+  GSK_RENDERER: cairo
 
 jobs:
   check:
@@ -45,15 +57,40 @@ jobs:
           fetch-depth: 0
 
       # The checkout is owned by a different uid than the one running here, and
-      # git refuses to read a repository it considers someone else's. setuptools
-      # -scm shells out to git during the sync, so this has to come first.
+      # git refuses to read a repository it considers someone else's.
+      # setuptools-scm shells out to git during the sync, so this comes first.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - run: make sync
       - run: make check
 
-  test:
-    name: tests (fedora ${{ matrix.fedora }})
+  distribution:
+    name: build the wheel and sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # setuptools-scm reads the version out of git, and reads it wrong
+          # without the tags and the history between them.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: build
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: dist/*
+          if-no-files-found: error
+
+  rpm:
+    name: build the rpm (fedora ${{ matrix.fedora }})
     runs-on: ubuntu-latest
     container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
     strategy:
@@ -62,42 +99,6 @@ jobs:
         # The oldest Fedora still supported, and the current one. A break
         # between them is almost always a GTK or PyGObject version difference,
         # which is exactly what a single-version run would hide.
-        fedora: ['43', '44']
-    steps:
-      - name: install dependencies
-        run: |
-          dnf -y --setopt=install_weak_deps=False install \
-            make git-core uv python3-devel python3-gobject gtk4 libadwaita \
-            gobject-introspection glib2-devel cairo-gobject-devel \
-            gnupg2 pass xorg-x11-server-Xvfb dbus-daemon desktop-file-utils
-
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - run: make sync
-
-      # GTK4 has no usable headless backend, so this is xvfb; the private D-Bus
-      # session is what keeps the run away from any real secret service.
-      - run: make test
-
-      # The guard has to be shut for the whole run, and a test asserting so from
-      # inside the run is only as good as its own collection. This asks the
-      # question from outside it.
-      - name: the store guard was armed
-        run: |
-          test -z "${GTKPASS_ALLOW_REAL_STORE:-}" \
-            || { echo "GTKPASS_ALLOW_REAL_STORE leaked into CI"; exit 1; }
-
-  rpm:
-    name: rpm install (fedora ${{ matrix.fedora }})
-    runs-on: ubuntu-latest
-    container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
-    strategy:
-      fail-fast: false
-      matrix:
         fedora: ['43', '44']
     steps:
       - name: install build dependencies
@@ -121,26 +122,105 @@ jobs:
           USE_CONTAINER: '0'
           FEDORA_RELEASE: ${{ matrix.fedora }}
 
-      # The point of the job. A package that builds and cannot be installed is a
-      # package whose dependency metadata is wrong, which is not visible from
-      # the build.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fedora${{ matrix.fedora }}
+          path: dist/rpm/*.rpm
+          if-no-files-found: error
+
+  test-wheel:
+    name: tests, installed wheel (fedora ${{ matrix.fedora }})
+    needs: distribution
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: ['43', '44']
+    steps:
+      # No uv and no dev environment: the point is to exercise the wheel a user
+      # would install, not the working copy it was built from.
+      - name: install dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \
+            git-core python3-devel python3-gobject gtk4 libadwaita \
+            gobject-introspection cairo-gobject glib2 \
+            gnupg2 pass git-core desktop-file-utils \
+            xorg-x11-server-Xvfb dbus-daemon
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist
+
+      # --system-site-packages for PyGObject, which comes from the distribution
+      # and cannot be built from PyPI here any more than anywhere else.
+      - name: install the wheel
+        run: |
+          python3 -m venv --system-site-packages /tmp/venv
+          /tmp/venv/bin/pip install --quiet dist/*.whl pytest
+
+      # The src/ layout is what makes this honest: `import gtkpass` from the
+      # repository root finds nothing, so what the suite exercises can only be
+      # the installed copy.
+      - name: it is the installed copy under test
+        run: |
+          /tmp/venv/bin/python -c "
+          import gtkpass, sys
+          print(gtkpass.__file__)
+          sys.exit(0 if 'site-packages' in gtkpass.__file__ else 1)"
+
+      - name: the suite, against the installed wheel
+        run: |
+          glib-compile-schemas data/
+          xvfb-run -a dbus-run-session -- /tmp/venv/bin/python -m pytest
+
+  test-rpm:
+    name: tests, installed rpm (fedora ${{ matrix.fedora }})
+    needs: rpm
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: ['43', '44']
+    steps:
+      - name: install dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \
+            git-core python3-pytest gtk4 libadwaita python3-gobject \
+            gobject-introspection cairo-gobject glib2 \
+            gnupg2 pass desktop-file-utils libappstream-glib \
+            xorg-x11-server-Xvfb dbus-daemon
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rpm-fedora${{ matrix.fedora }}
+          path: dist/rpm
+
+      # dnf rather than rpm -i, so the dependency metadata is resolved rather
+      # than assumed. A package that builds and cannot be installed is a package
+      # whose Requires are wrong, and the build cannot see that.
       - name: install it
         run: dnf -y install ./dist/rpm/gtkpass-*.noarch.rpm
 
       - name: what it dragged in
         run: rpm -q --requires gtkpass
 
-      - name: smoke test the installed package
+      - name: the suite, against the installed rpm
         run: |
-          dnf -y --setopt=install_weak_deps=False install \
-            xorg-x11-server-Xvfb dbus-daemon gnupg2
-          xvfb-run -a dbus-run-session -- ./packaging/smoke-test-install.sh
+          glib-compile-schemas data/
+          xvfb-run -a dbus-run-session -- python3 -m pytest
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rpm-fedora${{ matrix.fedora }}
-          path: dist/rpm/*.rpm
-          if-no-files-found: error
+      # The suite covers the code; this covers where the package put it --
+      # the launcher on PATH, the schema in the system cache, the desktop files
+      # where the shell looks. None of that is visible from inside a test run.
+      - name: the installed package, in place
+        run: xvfb-run -a dbus-run-session -- ./packaging/smoke-test-install.sh
 
   sysext:
     name: sysext image (fedora ${{ matrix.fedora }})
@@ -193,6 +273,13 @@ jobs:
         env:
           USE_CONTAINER: '0'
 
+      # Merging it is not possible here -- systemd-sysext needs a running
+      # systemd and a writable /run, and a container has neither. What can be
+      # checked is that the image says what it should and carries what it
+      # should; the merge is what packaging/test-sysext.sh is for.
+      - name: inspect the image
+        run: ./packaging/inspect-sysext.sh dist/sysext/*.raw
+
       # The canary for the contamination described above. python3-gnupg is the
       # one runtime dependency a Fedora desktop does not ship, so it has to
       # travel inside the image; an empty manifest means the resolver was asked
@@ -203,13 +290,6 @@ jobs:
           unsquashfs -cat dist/sysext/*.raw \
             usr/share/gtkpass/sysext-manifest.txt | grep -q python3-gnupg \
             || { echo "python3-gnupg was not vendored; see the job comment"; exit 1; }
-
-      # Merging it is not possible here -- systemd-sysext needs a running
-      # systemd and a writable /run, and a container has neither. What can be
-      # checked is that the image says what it should and carries what it
-      # should; the merge is what packaging/test-sysext.sh is for.
-      - name: inspect the image
-        run: ./packaging/inspect-sysext.sh dist/sysext/*.raw
 
       # Targeted at `fedora <release>`, this being what built it. An image for a
       # derivative names that derivative and is built on it -- `make sysext` on

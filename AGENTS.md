@@ -100,11 +100,15 @@ present the widget and read back what it rendered.
 `make help` lists them. `make check` runs lint, format and types via pre-commit;
 `make test` runs the suite headless under xvfb.
 
-CI runs `make check` and `make test` on push and on pull requests, over two
-Fedora releases, and builds and installs the RPM. It is not a substitute for
-running them here: `make sync` installs the pre-commit hook (`make hooks` on its
-own if the environment already exists), and that hook is what catches an
-unformatted commit before it is made rather than after.
+CI packages first and tests the packages: it builds the wheel, sdist and RPMs,
+then runs this suite against each of them installed, over two Fedora releases.
+`make test` here runs against the editable install instead, which is faster and
+what you want while working -- but it is not what CI checks, so a failure that
+only appears once something is packaged will appear there and not here.
+
+`make sync` installs the pre-commit hook (`make hooks` on its own if the
+environment already exists), and that hook is what catches an unformatted commit
+before it is made rather than after.
 
 `uv run` outside the Makefile re-resolves the environment and tries to build
 PyGObject and pycairo, which fails. Set `UV_NO_SYNC=1`, as the Makefile does.

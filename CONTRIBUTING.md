@@ -115,8 +115,9 @@ make check   # lint, format and types, via pre-commit
 ```
 
 The pre-commit hook `make sync` installed runs `make check`'s hooks on the way
-in, and CI runs both on the pull request. Running them here first is faster than
-finding out from a red run.
+in, and CI runs both on the pull request -- there against the built wheel and
+RPM rather than the working copy. Running them here first is faster than finding
+out from a red run.
 
 #### 6. Submit Pull Request
 
