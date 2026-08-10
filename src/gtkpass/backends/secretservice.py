@@ -178,24 +178,27 @@ class SecretServiceBackend(PasswordBackend):
 
         return cls(connection=connection, collection=collection)
 
-    def _get_items(self, name: str | None = None) -> list:
-        """Get items from collection.
+    @staticmethod
+    def _name_of(item) -> str:
+        """What an item is called in the sidebar.
 
-        Args:
-            name: Optional name filter
-
-        Returns:
-            List of secret items
+        Its `name` attribute when it has one, which is what GTKPass writes, and
+        otherwise its label, which is all another application will have set.
         """
-        # Get all items from the collection instead of filtering by application.
-        # This shows every keyring password, not only gtkpass-created ones.
-        if name:
-            # If a specific name is requested, search for it
-            attributes = {"application": self.APPLICATION_NAME, "name": name}
-            return list(self._collection.search_items(attributes))
-        else:
-            # Get all items in the collection
-            return list(self._collection.get_all_items())
+        return item.get_attributes().get("name") or item.get_label() or ""
+
+    def _get_items(self, name: str | None = None) -> list:
+        """Items in the collection, all of them or the ones by that name.
+
+        Looking a name up used to search for `application=gtkpass`, while the
+        listing showed the whole keyring. Every row the sidebar offered from
+        another application therefore answered "not found" when it was selected.
+        The name is resolved the same way it was displayed instead.
+        """
+        items = list(self._collection.get_all_items())
+        if name is None:
+            return items
+        return [item for item in items if self._name_of(item) == name]
 
     def list_passwords(self, prefix: str = "") -> list[PasswordMetadata]:
         """List all passwords, optionally filtered by prefix.
@@ -212,10 +215,7 @@ class SecretServiceBackend(PasswordBackend):
             items = self._get_items()
 
             for item in items:
-                attrs = item.get_attributes()
-                # Use the label as the name if no "name" attribute exists
-                # This allows us to show all keyring items with their labels
-                name = attrs.get("name", item.get_label())
+                name = self._name_of(item)
 
                 # Skip items with empty names/labels
                 if not name or not name.strip():
@@ -355,11 +355,15 @@ class SecretServiceBackend(PasswordBackend):
             lines = content.split("\n")
             password = lines[0] if lines else ""
 
-            # Build attributes
-            attributes = {
-                "application": self.APPLICATION_NAME,
-                "name": name,
-            }
+            # Start from what the item already carries rather than replacing it.
+            # Attributes are how an application finds its own item again, so
+            # writing GTKPass's parsed set over a Chromium or NetworkManager
+            # entry would leave it in the keyring and unreachable by its owner
+            # -- silently, and long after the edit. setdefault, so an item
+            # GTKPass did not create keeps saying so.
+            attributes = item.get_attributes()
+            attributes.setdefault("application", self.APPLICATION_NAME)
+            attributes.setdefault("name", name)
 
             # Parse metadata
             for line in lines[1:]:

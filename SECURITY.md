@@ -46,7 +46,16 @@ recipient set, so enrolling or retiring a key is still `pass init` in a
 terminal.
 
 The Secret Service backend stores nothing itself: it hands entries to the
-session keyring over D-Bus.
+session keyring over D-Bus. It shows the whole collection rather than only its
+own items, so it can open a password another application stored — and an edit
+keeps that item's own attributes, which are how its owner looks it up again.
+
+One thing to know about it: the metadata lines of an entry it writes become
+keyring *attributes*, which are lookup keys rather than part of the secret, and
+are searchable over D-Bus without unlocking the item. A `pin:` or `recovery:`
+line therefore ends up outside the protected part. Nothing in the interface
+creates keyring entries yet, so this affects only what somebody writes there
+deliberately; it should be the whole content in the secret instead.
 
 ### Who a store is encrypted to
 
