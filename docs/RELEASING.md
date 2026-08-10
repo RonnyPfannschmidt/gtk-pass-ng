@@ -18,8 +18,10 @@ Publishing uses [trusted publishing][tp], so there is no API token to store,
 leak or rotate — PyPI verifies the workflow's identity over OIDC instead. It
 needs two things set up once.
 
-**On PyPI**, add a pending publisher (Your projects → Publishing) for a project
-that does not exist yet:
+**On PyPI**, add a [pending publisher][pending] — the form is under
+[Your account → Publishing](https://pypi.org/manage/account/publishing/), and
+"pending" is the case where the publisher is configured before the project
+exists, PyPI creating it on the first successful upload:
 
 | Field | Value |
 | --- | --- |
@@ -34,7 +36,12 @@ It can be empty; it exists so the publishing job is nameable, and so a required
 reviewer can be attached to it later if releases should need a second pair of
 eyes.
 
+Every field has to match the workflow exactly or the upload is rejected, and
+the environment is not optional: `release.yml` declares `environment: pypi`, so
+leaving that box empty fails the upload rather than relaxing the check.
+
 [tp]: https://docs.pypi.org/trusted-publishers/
+[pending]: https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
 
 ### Why the distribution is called gtk-pass
 
