@@ -1,6 +1,10 @@
 """Tests for the application object."""
 
+import logging
+
 import pytest
+
+from gtkpass._gi import GLib
 
 pytestmark = pytest.mark.gui
 
@@ -45,3 +49,31 @@ class TestQuittingTakesTheClipboardWithIt:
         app.run([])
 
         assert discarded == ["discarded"]
+
+
+class TestTheLogLevelOption:
+    """`--log-level` looked its argument up on the logging module.
+
+    Any attribute name was accepted, so --log-level=basicConfig passed a
+    function where a level was expected and the application died on startup --
+    from the option that exists to find out why something is not working.
+    """
+
+    def options(self, level):
+        options = GLib.VariantDict.new()
+        options.insert_value("log-level", GLib.Variant("s", level))
+        return options
+
+    def test_a_known_level_is_accepted(self):
+        from gtkpass.app import GTKPassApp
+
+        assert GTKPassApp().do_handle_local_options(self.options("warning")) == -1
+
+    def test_an_unknown_level_does_not_stop_the_application(self, caplog):
+        from gtkpass.app import GTKPassApp
+
+        with caplog.at_level(logging.WARNING):
+            result = GTKPassApp().do_handle_local_options(self.options("basicConfig"))
+
+        assert result == -1
+        assert "Unknown log level" in caplog.text

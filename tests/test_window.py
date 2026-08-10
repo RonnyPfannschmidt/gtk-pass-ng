@@ -5,6 +5,7 @@ its passwords.  That path was silently broken for months because nothing
 exercised it.
 """
 
+import logging
 import threading
 import time
 
@@ -588,6 +589,38 @@ class TestACopiedSecretIsTakenBack:
             return emptied
 
         assert run_in_application(check) == ["emptied"]
+
+
+class TestEntryNamesStayOutOfTheLog:
+    """An entry name says which accounts somebody holds.
+
+    Logging goes to stderr, which the journal collects when the application is
+    launched from its desktop file -- and --debug is exactly the flag somebody
+    turns on when something is wrong, which is the worst moment to start writing
+    the names down. The toast carries the name, on screen, where it belongs.
+    """
+
+    def test_opening_an_entry_does_not_write_its_name_down(
+        self, demo_backend_configured, caplog
+    ):
+        def check(app):
+            window = loaded_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            assert backend is not None
+            name = backend.list_passwords()[0].name
+
+            with caplog.at_level(logging.DEBUG):
+                window._on_password_selected(DEMO_BACKEND_ID, name)
+                pump_until(
+                    lambda: window.password_detail.stack.get_visible_child_name()
+                    == "content"
+                )
+            return name, caplog.text
+
+        name, logged = run_in_application(check)
+
+        assert name not in logged
+        assert DEMO_BACKEND_ID in logged, "the backend is still identified"
 
 
 class TestRecipientsThatChanged:

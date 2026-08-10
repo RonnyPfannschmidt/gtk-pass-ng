@@ -746,7 +746,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             backend_id: ID of the backend containing the password
             password_name: Name of the selected password
         """
-        logger.debug(f"Selected password: {password_name} from backend: {backend_id}")
+        # The name deliberately does not appear in the log. An entry name says
+        # which account somebody holds, the log goes to the journal when the
+        # application is launched from the desktop, and -d is exactly the flag
+        # somebody turns on when something is wrong. The toasts below carry the
+        # name, on screen, where it belongs.
+        logger.debug(f"Opening an entry from backend: {backend_id}")
 
         self._detail_request += 1
         request = self._detail_request
@@ -766,7 +771,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         def report(error):
             if request != self._detail_request:
                 return
-            logger.error(f"Could not open {password_name}: {error}")
+            logger.error(f"Could not open an entry from {backend_id}: {error}")
             self.password_detail.clear()
             self.content_stack.set_visible_child_name("placeholder")
             self._set_shown(None)
@@ -838,7 +843,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._on_password_selected(backend_id, password_name)
 
         def report(error):
-            logger.error(f"Could not save {password_name}: {error}")
+            logger.error(f"Could not save an entry to {backend_id}: {error}")
             self._toast(f"Could not save {password_name}: {error}")
 
         try:

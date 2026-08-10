@@ -40,22 +40,38 @@ class GTKPassApp(Adw.Application):
             "LEVEL",
         )
 
+    #: What --log-level accepts. getattr on the logging module accepted any
+    #: attribute name, so --log-level=basicConfig passed a function as the level
+    #: and the application died on startup rather than saying what was wrong.
+    LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
     def do_handle_local_options(self, options):
         """Handle command-line options."""
         # Configure logging based on options
         log_level = logging.INFO
+        unknown = ""
 
         if options.contains("debug"):
             log_level = logging.DEBUG
         elif options.contains("log-level"):
             level_str = options.lookup_value("log-level").get_string().upper()
-            log_level = getattr(logging, level_str, logging.INFO)
+            if level_str in self.LOG_LEVELS:
+                log_level = getattr(logging, level_str)
+            else:
+                unknown = level_str
 
         logging.basicConfig(
             level=log_level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             datefmt="%H:%M:%S",
         )
+
+        if unknown:
+            logger.warning(
+                "Unknown log level %r; using INFO. Known levels: %s",
+                unknown,
+                ", ".join(self.LOG_LEVELS),
+            )
 
         logger.info("Starting GTKPass application")
         logger.debug(f"Log level: {logging.getLevelName(log_level)}")
