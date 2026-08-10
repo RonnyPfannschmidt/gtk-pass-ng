@@ -16,10 +16,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The version the spec declares. There is no tag to derive one from, so the
-# sdist is pinned to it and the commit goes into Release instead.
-VERSION=0.1.0
-
 # The commit's own date, not today's, so building the same commit twice gives
 # the same package.
 commit_date=$(git log -1 --format=%cd --date=format:%Y%m%d)
@@ -32,6 +28,25 @@ if ! git diff --quiet HEAD; then
     echo "note: working tree is dirty, building ${SNAPSHOT}" >&2
 fi
 
+# Version and release come from git, in the three states a checkout can be in.
+# The point of the Release forms is that upgrades work in the right direction:
+# rpm sorts 0.1.<snap> before 1, and 2.<snap> after it.
+if tag=$(git describe --exact-match --tags HEAD 2>/dev/null); then
+    # On a tag: this is that release.
+    VERSION="${tag#v}"
+    RELEASE=1
+elif previous=$(git describe --abbrev=0 --tags HEAD 2>/dev/null); then
+    # After a tag: a snapshot of work since it, so it must sort *after* the
+    # release it is named for, or an upgrade would go backwards onto it.
+    VERSION="${previous#v}"
+    RELEASE="2.${SNAPSHOT}"
+else
+    # Before any tag has ever been made: a snapshot of the release to come, so
+    # it must sort before it, and the eventual 0.1.0-1 upgrades over this.
+    VERSION=0.1.0
+    RELEASE="0.1.${SNAPSHOT}"
+fi
+
 # VERSION_ID rather than ID, because the derivatives this is aimed at --
 # Bluefin, Silverblue, Bazzite -- report their own ID and Fedora's release.
 if [ -z "${FEDORA_RELEASE:-}" ]; then
@@ -40,7 +55,7 @@ fi
 
 IMAGE="registry.fedoraproject.org/fedora:${FEDORA_RELEASE}"
 
-echo "==> sdist ${VERSION} (snapshot ${SNAPSHOT})"
+echo "==> ${VERSION}-${RELEASE}"
 rm -rf dist/rpm
 mkdir -p dist/rpm
 # Without this setuptools-scm derives a version from git describe, which with no
@@ -55,7 +70,8 @@ else
         python3 -m build --sdist --outdir dist
 fi
 
-sdist="dist/gtkpass-${VERSION}.tar.gz"
+# Named for the distribution, gtk-pass, underscored per PEP 625.
+sdist="dist/gtk_pass-${VERSION}.tar.gz"
 [ -f "$sdist" ] || { echo "error: expected sdist at $sdist" >&2; exit 1; }
 
 # Build here when this already *is* the Fedora being built for -- which is CI,
@@ -73,15 +89,15 @@ fi
 
 if [ "$USE_CONTAINER" = "0" ]; then
     echo "==> rpmbuild here (fedora ${FEDORA_RELEASE})"
-    VERSION="$VERSION" SNAPSHOT="$SNAPSHOT" SRC="$PWD" packaging/rpmbuild-here.sh
+    VERSION="$VERSION" RELEASE="$RELEASE" SRC="$PWD" packaging/rpmbuild-here.sh
 else
     # shellcheck source=packaging/container-runtime.sh
     . "$(dirname "$0")/container-runtime.sh"
     echo "==> rpmbuild in ${IMAGE} (${CONTAINER_RUNTIME})"
     "$CONTAINER_RUNTIME" run --rm \
         -v "$PWD:/src:z" \
-        -e "SNAPSHOT=${SNAPSHOT}" \
         -e "VERSION=${VERSION}" \
+        -e "RELEASE=${RELEASE}" \
         -e "SRC=/src" \
         "$IMAGE" \
         /src/packaging/rpmbuild-here.sh

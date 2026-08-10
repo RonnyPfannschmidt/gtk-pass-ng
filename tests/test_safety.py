@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from gtkpass import safety
 from gtkpass.backends import PasswordEntry
 from gtkpass.safety import (
     SCRATCH_MARKER,
@@ -361,6 +362,50 @@ class TestTheGuardIsActiveDuringTests:
         from gtkpass.safety import opted_in
 
         assert not opted_in()
+
+
+class TestWhichDistributionAnswers:
+    """A source tree can offer two, and the answer must not depend on luck.
+
+    Building an sdist leaves a `src/*.egg-info` behind, and an editable install
+    puts `src/` on the path -- so both that and the real `.dist-info` describe
+    the same distribution. Whichever `importlib.metadata` happened to return
+    first then decided whether the application would start at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _forget_the_cached_answer(self):
+        """It is resolved once per process; these tests change what it sees."""
+        safety._own_distribution.cache_clear()
+        yield
+        safety._own_distribution.cache_clear()
+
+    def test_a_real_install_wins_over_a_source_tree_artefact(
+        self, tmp_path, monkeypatch
+    ):
+        egg = fake_distribution(
+            tmp_path / "src", metadata_dir=tmp_path / "src" / "gtk_pass.egg-info"
+        )
+        installed = fake_distribution(tmp_path / "site-packages")
+
+        for order in ([egg, installed], [installed, egg]):
+            monkeypatch.setattr(
+                "gtkpass.safety._distributions_named", lambda _o=order: list(_o)
+            )
+            safety._own_distribution.cache_clear()
+            assert safety._own_distribution() is installed
+
+    def test_a_source_tree_artefact_is_returned_when_it_is_all_there_is(
+        self, tmp_path, monkeypatch
+    ):
+        """So require_installed() can refuse it by name rather than silently."""
+        egg = fake_distribution(
+            tmp_path / "src", metadata_dir=tmp_path / "src" / "gtk_pass.egg-info"
+        )
+        monkeypatch.setattr("gtkpass.safety._distributions_named", lambda: [egg])
+        safety._own_distribution.cache_clear()
+
+        assert safety._own_distribution() is egg
 
 
 class TestAnInstallIsRequired:

@@ -8,23 +8,23 @@
 # itself is this file, so there is one description of it rather than two that
 # drift.
 #
-# Expects: dist/gtkpass-$VERSION.tar.gz, $VERSION, $SNAPSHOT, and dnf.
+# Expects: dist/gtk_pass-$VERSION.tar.gz, $VERSION, $RELEASE, and dnf.
 # Writes:  dist/rpm/
 set -euo pipefail
 
 : "${VERSION:?set by build-rpm.sh}"
-: "${SNAPSHOT:?set by build-rpm.sh}"
+: "${RELEASE:?set by build-rpm.sh}"
 
 SRC="${SRC:-$(cd "$(dirname "$0")/.." && pwd)}"
 spec="${SRC}/packaging/gtkpass.spec"
-define="--define=snapshot ${SNAPSHOT}"
+define=("--define=version_override ${VERSION}" "--define=release_override ${RELEASE}")
 
 dnf -y --setopt=install_weak_deps=False install \
     rpm-build rpmdevtools python3-devel pyproject-rpm-macros \
     desktop-file-utils libappstream-glib glib2-devel >/dev/null
 
 rpmdev-setuptree
-cp "${SRC}/dist/gtkpass-${VERSION}.tar.gz" ~/rpmbuild/SOURCES/
+cp "${SRC}/dist/gtk_pass-${VERSION}.tar.gz" ~/rpmbuild/SOURCES/
 
 dnf -y builddep --spec "$spec" >/dev/null
 
@@ -33,11 +33,11 @@ dnf -y builddep --spec "$spec" >/dev/null
 # Install those and go round again. One extra pass is enough in practice; three
 # attempts is the bound that stops this looping if it ever is not.
 for _ in 1 2 3; do
-    if rpmbuild -br --nodeps "$define" "$spec"; then break; fi
+    if rpmbuild -br --nodeps "${define[@]}" "$spec"; then break; fi
     dnf -y builddep ~/rpmbuild/SRPMS/gtkpass-*.buildreqs.nosrc.rpm >/dev/null
 done
 
-rpmbuild -ba "$define" "$spec"
+rpmbuild -ba "${define[@]}" "$spec"
 
 mkdir -p "${SRC}/dist/rpm"
 cp ~/rpmbuild/RPMS/noarch/*.rpm "${SRC}/dist/rpm/"

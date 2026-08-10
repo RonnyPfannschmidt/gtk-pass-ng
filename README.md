@@ -15,7 +15,8 @@ speaks it.
 
 **Early, and honest about it.** The application runs, reads and edits, and is
 covered by a test suite. It builds as a Flatpak, an RPM and a systemd-sysext
-image — but nothing is released, signed, or installable from a repository.
+image, and tagging would publish them — but no release has been made, nothing is
+signed, and there is no repository to install from.
 
 What works today:
 
@@ -74,7 +75,11 @@ make sysext    # a systemd-sysext image for Bluefin, Silverblue and the rest
 ```
 
 `make help` lists the rest, and [docs/PACKAGING.md](docs/PACKAGING.md) covers
-the last two.
+the last two. Tagging publishes all of it — see
+[docs/RELEASING.md](docs/RELEASING.md) — but no release has been made yet.
+
+The distribution is called `gtk-pass` on PyPI, `gtkpass` there belonging to an
+unrelated project; the command and the package keep this project's name.
 
 ## Working on it
 
@@ -110,6 +115,7 @@ a code.
 - [SECURITY.md](SECURITY.md) — threat model and reporting
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
 - [docs/PACKAGING.md](docs/PACKAGING.md) — the RPM and the sysext image
+- [docs/RELEASING.md](docs/RELEASING.md) — what tagging does, and PyPI setup
 - [docs/FLATPAK.md](docs/FLATPAK.md) — the Flatpak, and its sandbox permissions
 - [docs/FLATHUB.md](docs/FLATHUB.md) — what publishing it would take
 - [docs/TRUST-MODEL.md](docs/TRUST-MODEL.md) — per-machine keys, and what

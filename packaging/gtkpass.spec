@@ -1,23 +1,30 @@
 # RPM spec for GTKPass.
 #
-# Build it with packaging/build-rpm.sh, which produces the sdist this expects
-# and runs rpmbuild in a Fedora container -- the machine this was written on is
-# ostree-based and has no rpm-build.
+# Build it with packaging/build-rpm.sh, which produces the sdist this expects,
+# works out the version and release from git, and runs rpmbuild in a Fedora
+# container -- the machine this was written on is ostree-based and has no
+# rpm-build.
 #
-# GTKPass has never been tagged, so there is no upstream release to build from.
-# The version below is the one build-rpm.sh pins the sdist to, and the actual
-# commit is encoded in Release using Fedora's pre-release form: 0.1.0-0.1.<snap>
-# sorts before an eventual 0.1.0-1, so a real release will upgrade over any
-# snapshot ever installed.
+# Both are passed in rather than written here, because git already knows them
+# and a version maintained by hand in a second place is a version that goes
+# wrong. The defaults below are what an unparameterised `rpmbuild` produces,
+# and are for reading the spec on its own rather than for building anything
+# anyone should install.
+
+# The sdist is named after the *distribution*, gtk-pass, with the hyphen
+# normalised to an underscore as PEP 625 requires. The package installed from it
+# is gtkpass, and so is this RPM: only the name on PyPI differs, that one being
+# taken by an unrelated project.
+%global sdist_name gtk_pass
 
 Name:           gtkpass
-Version:        0.1.0
-Release:        %{?snapshot:0.1.%{snapshot}}%{!?snapshot:1}%{?dist}
+Version:        %{?version_override}%{!?version_override:0.0.0}
+Release:        %{?release_override}%{!?release_override:1}%{?dist}
 Summary:        GTK4 frontend for password stores
 
 License:        MPL-2.0
 URL:            https://github.com/RonnyPfannschmidt/gtkpass
-Source0:        %{name}-%{version}.tar.gz
+Source0:        %{sdist_name}-%{version}.tar.gz
 
 BuildArch:      noarch
 
@@ -51,7 +58,7 @@ from pass(1) and every other tool that speaks it.
 
 
 %prep
-%autosetup -n %{name}-%{version}
+%autosetup -n %{sdist_name}-%{version}
 
 
 %generate_buildrequires

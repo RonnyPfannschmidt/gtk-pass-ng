@@ -53,8 +53,11 @@ help:
 	@echo "sysext-test  merge that image onto this machine, test it, unmerge"
 	@echo "clean    remove build and cache artefacts"
 
+# --allow-existing so this is idempotent. Without it `uv venv` refuses outright
+# once .venv is there, which made `make sync` -- the documented way to pick up a
+# dependency change -- fail for everyone who had already run it once.
 venv:
-	uv venv --system-site-packages --python $(SYSTEM_PYTHON)
+	uv venv --system-site-packages --python $(SYSTEM_PYTHON) --allow-existing
 
 sync: venv
 	UV_NO_SYNC=0 uv sync --all-extras $(NO_INSTALL)
@@ -163,6 +166,10 @@ sysext-test:
 
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
+	# Building an sdist leaves these in the source tree, and an editable install
+	# puts src/ on the path -- so a stale one from an earlier name shows up as a
+	# second distribution and duplicates every entry point it declares.
+	rm -rf src/*.egg-info
 	rm -rf .flatpak-build/ .flatpak-builder/ .flatpak-repo/
 	rm -f data/gschemas.compiled
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

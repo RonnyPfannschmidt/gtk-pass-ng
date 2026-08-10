@@ -99,7 +99,10 @@ Smaller things, worth doing when passing:
   Either auto-lock gets built or the key goes; a setting that does nothing is
   worse than an absent one, because it reads as a promise.
 - Neither the RPM nor the sysext image is signed, and there is no repository to
-  install either from.
+  install either from. A release attaches them to a GitHub page, which is
+  transport security and not provenance.
+- The PyPI name `gtkpass` belongs to an unrelated project, so this is
+  distributed as `gtk-pass`. Claiming the other one is a PEP 541 request.
 
 ## Not planned
 
@@ -136,4 +139,6 @@ not admit one by itself; see [AGENTS.md](AGENTS.md).
 ## Versioning
 
 No release has been made. Version numbers come from the git tags via
-`setuptools-scm`, so there is nothing to keep in step by hand.
+`setuptools-scm`, and `packaging/build-rpm.sh` derives the RPM's version and
+release from the same tags, so there is nothing to keep in step by hand.
+Tagging is what publishes; see [docs/RELEASING.md](docs/RELEASING.md).
