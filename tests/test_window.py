@@ -5,6 +5,7 @@ its passwords.  That path was silently broken for months because nothing
 exercised it.
 """
 
+import threading
 import time
 
 import pytest
@@ -50,6 +51,37 @@ def pump_until(condition, timeout_seconds: float = 10.0):
         context.iteration(may_block=False)
         time.sleep(0.005)
     return condition()
+
+
+def loaded_window(app, backend_id=None):
+    """A window whose backends have finished loading.
+
+    Constructing one only starts the load: building a backend runs git over the
+    store and opens a D-Bus connection, which is why it happens on the manager's
+    pool rather than in __init__. So every test that wants a backend has to turn
+    the main loop until it arrives, and this is the one place that waits.
+    """
+    from gtkpass.window import GTKPassWindow
+
+    window = GTKPassWindow(application=app)
+    wanted = backend_id or DEMO_BACKEND_ID
+    assert pump_until(lambda: window.backend_manager.get_backend(wanted) is not None), (
+        f"the {wanted} backend never finished loading"
+    )
+    return window
+
+
+def listed_window(app, backend_id=None):
+    """A loaded window whose sidebar has its entries in it as well.
+
+    Listing is a second round trip after the backend is built, so a test that
+    reads the tree has to wait for that too.
+    """
+    window = loaded_window(app, backend_id)
+    assert pump_until(lambda: window._pending_listings == 0), (
+        "the sidebar never finished filling in"
+    )
+    return window
 
 
 def sidebar_names(window):
@@ -108,10 +140,8 @@ class TestWindowWithoutBackends:
 class TestWindowWithDemoBackend:
     @pytest.fixture
     def rows(self, demo_backend_configured):
-        from gtkpass.window import GTKPassWindow
-
         def collect(app):
-            return sidebar_names(GTKPassWindow(application=app))
+            return sidebar_names(listed_window(app))
 
         return run_in_application(collect)
 
@@ -124,6 +154,101 @@ class TestWindowWithDemoBackend:
 
     def test_no_backend_is_marked_unavailable(self, rows):
         assert not [row for row in rows if "unavailable" in row]
+
+
+class TestLoadingStaysOffTheUiThread:
+    """Nothing slow may happen between construction and a window on screen.
+
+    Building a backend runs three git commands over its store, and the Secret
+    Service one opens a D-Bus connection, waits up to five seconds for an answer
+    and may unlock a collection. Listing walks the store's whole directory tree.
+    All of it ran inside __init__, so the window did not appear until every
+    configured backend had answered -- and a store on a mount that had gone away
+    meant it never did.
+    """
+
+    #: Long enough that a window built while it runs cannot have waited for it.
+    SLOW_SECONDS = 1.0
+
+    def test_backends_are_not_built_on_the_ui_thread(
+        self, demo_backend_configured, monkeypatch
+    ):
+        from gtkpass.window import GTKPassWindow
+
+        threads: list[threading.Thread] = []
+        original = GTKPassWindow._create_backend
+
+        def record(self, backend_type, settings):
+            threads.append(threading.current_thread())
+            return original(self, backend_type, settings)
+
+        monkeypatch.setattr(GTKPassWindow, "_create_backend", record)
+
+        def check(app):
+            loaded_window(app)
+            return [thread is threading.main_thread() for thread in threads]
+
+        on_main = run_in_application(check)
+
+        assert on_main, "no backend was built at all, so this proves nothing"
+        assert not any(on_main)
+
+    def test_the_window_is_built_before_a_slow_backend_finishes(
+        self, demo_backend_configured, monkeypatch
+    ):
+        from gtkpass.window import GTKPassWindow
+
+        original = GTKPassWindow._create_backend
+
+        # `self` here is the window, not the test, so the delay is named through
+        # the class rather than through it.
+        delay = self.SLOW_SECONDS
+
+        def slow(self, backend_type, settings):
+            time.sleep(delay)
+            return original(self, backend_type, settings)
+
+        monkeypatch.setattr(GTKPassWindow, "_create_backend", slow)
+
+        def check(app):
+            started = time.monotonic()
+            window = GTKPassWindow(application=app)
+            construction = time.monotonic() - started
+            arrived = pump_until(
+                lambda: window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+            )
+            return construction, arrived
+
+        construction, arrived = run_in_application(check)
+
+        assert construction < self.SLOW_SECONDS, (
+            "the constructor waited for the backend; that is a window that does "
+            "not appear"
+        )
+        assert arrived, "the backend never turned up afterwards either"
+
+    def test_listing_is_not_done_on_the_ui_thread(self, demo_backend_configured):
+        def check(app):
+            window = listed_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            assert backend is not None
+
+            threads: list[threading.Thread] = []
+            original = backend.list_passwords
+
+            def record(prefix=""):
+                threads.append(threading.current_thread())
+                return original(prefix)
+
+            backend.list_passwords = record  # type: ignore[method-assign]
+            window._load_passwords()
+            pump_until(lambda: bool(threads))
+            return [thread is threading.main_thread() for thread in threads]
+
+        on_main = run_in_application(check)
+
+        assert on_main, "the backend was never asked for its entries"
+        assert not any(on_main)
 
 
 class TestRenaming:
@@ -140,19 +265,13 @@ class TestRenaming:
         set_backend_display_name("demo", DEMO_BACKEND_ID, "")
 
     def test_a_stored_name_is_shown(self, named_demo):
-        from gtkpass.window import GTKPassWindow
-
-        names = run_in_application(
-            lambda app: sidebar_names(GTKPassWindow(application=app))
-        )
+        names = run_in_application(lambda app: sidebar_names(listed_window(app)))
 
         assert "My Vault" in names
 
     def test_renaming_updates_an_open_window(self, demo_backend_configured):
-        from gtkpass.window import GTKPassWindow
-
         def rename_while_open(app):
-            window = GTKPassWindow(application=app)
+            window = listed_window(app)
             assert "Demo" in sidebar_names(window)
 
             set_backend_display_name("demo", DEMO_BACKEND_ID, "Renamed Live")
@@ -169,9 +288,7 @@ class TestShowingDetails:
 
     def open_first_password(self, app):
         """Build a window and select the first demo entry, synchronously."""
-        from gtkpass.window import GTKPassWindow
-
-        window = GTKPassWindow(application=app)
+        window = loaded_window(app)
         backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
         assert backend is not None
         name = backend.list_passwords()[0].name
@@ -195,10 +312,8 @@ class TestShowingDetails:
         assert window.password_detail.password_row.get_text()
 
     def test_a_missing_entry_reports_instead_of_crashing(self, demo_backend_configured):
-        from gtkpass.window import GTKPassWindow
-
         def select_nonsense(app):
-            window = GTKPassWindow(application=app)
+            window = loaded_window(app)
             window._on_password_selected(DEMO_BACKEND_ID, "no/such/entry")
             pump_until(
                 lambda: window.content_stack.get_visible_child_name() == "placeholder"
@@ -282,9 +397,7 @@ class TestEditing:
         Returns the entry name, whatever the backend was asked to write, and
         the toasts the window raised.
         """
-        from gtkpass.window import GTKPassWindow
-
-        window = GTKPassWindow(application=app)
+        window = loaded_window(app)
         backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
         assert backend is not None
         if backend_edit is not None:
@@ -350,10 +463,8 @@ class TestEditing:
         """
         from concurrent.futures import Future
 
-        from gtkpass.window import GTKPassWindow
-
         def select_twice(app):
-            window = GTKPassWindow(application=app)
+            window = loaded_window(app)
             backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
             assert backend is not None
             first, second = (p.name for p in backend.list_passwords()[:2])
@@ -391,9 +502,7 @@ class TestSyncing:
 
     def window_with_sync(self, app, capability, sync=None):
         """A window whose demo backend claims the given sync capability."""
-        from gtkpass.window import GTKPassWindow
-
-        window = GTKPassWindow(application=app)
+        window = loaded_window(app)
         backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
         assert backend is not None
         backend.sync_capability = lambda: capability  # type: ignore[method-assign]

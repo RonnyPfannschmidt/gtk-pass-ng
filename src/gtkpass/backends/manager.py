@@ -78,6 +78,16 @@ class BackendManager:
 
         self._backends[backend_id] = backend
 
+    def submit(self, function: Callable, *args) -> concurrent.futures.Future:
+        """Run something on the pool the backends already use.
+
+        Building a backend belongs here as much as using one does: a constructor
+        runs git over the store and opens a D-Bus connection, so the window can
+        no more do it on the UI thread than it can decrypt there. Sharing the
+        pool rather than starting a thread means the same shutdown covers it.
+        """
+        return self._executor.submit(function, *args)
+
     def add_backend(self, backend_id: str, backend: PasswordBackend) -> None:
         """Add an already-initialized backend.
 
