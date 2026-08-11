@@ -110,6 +110,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     toast_overlay = Gtk.Template.Child()
     content_stack = Gtk.Template.Child()
     password_detail = Gtk.Template.Child()
+    sidebar_button = Gtk.Template.Child()
     add_button = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
     sync_stack = Gtk.Template.Child()
@@ -1090,6 +1091,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
         request = self._detail_request
 
         self._showing_entry = True
+        # Narrow enough for the sidebar to be an overlay, it is covering the
+        # pane the entry is about to appear in.
+        if self.split_view.get_collapsed():
+            self.split_view.set_show_sidebar(False)
         self.content_stack.set_visible_child_name("detail")
         self.password_detail.show_loading(password_name)
         # Before the decrypt returns: a right-click both selects the row and

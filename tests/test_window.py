@@ -5,6 +5,7 @@ its passwords.  That path was silently broken for months because nothing
 exercised it.
 """
 
+import itertools
 import logging
 import threading
 import time
@@ -17,8 +18,20 @@ from gtkpass.config import get_settings, set_backend_display_name
 pytestmark = pytest.mark.gui
 
 
+#: Bumped per application built below, so that no two share an id.
+_run = itertools.count()
+
+
 def run_in_application(callback):
-    """Activate a real application, run ``callback(app)``, and return its result."""
+    """Activate a real application, run ``callback(app)``, and return its result.
+
+    Each one gets an id of its own. A GApplication registers its id on the
+    session bus, and a second one claiming an id that is still registered
+    becomes a *remote* instance of the first: it forwards its activation and
+    never activates locally, so the callback never runs and the failure lands
+    on whichever test came next rather than on the one that held the id.
+    Nothing here shares state between runs, so nothing wants the id shared.
+    """
     captured = {}
 
     def on_activate(app):
@@ -27,7 +40,9 @@ def run_in_application(callback):
         finally:
             app.quit()
 
-    app = Adw.Application(application_id="io.github.RonnyPfannschmidt.GTKPass.Test")
+    app = Adw.Application(
+        application_id=f"io.github.RonnyPfannschmidt.GTKPass.Test{next(_run)}"
+    )
     app.connect("activate", on_activate)
     app.run([])
 
@@ -363,10 +378,17 @@ class TestKeyboard:
         def focus(app):
             window = listed_window(app)
             window.present()
-            pump_until(lambda: window.get_mapped())
-            window.activate_action("win.search", None)
-            pump_until(lambda: focused(window))
-            return focused(window)
+            try:
+                pump_until(lambda: window.get_mapped())
+                window.activate_action("win.search", None)
+                pump_until(lambda: focused(window))
+                return focused(window)
+            finally:
+                # A presented window keeps its application alive, and the next
+                # test to run one under the same id becomes a remote instance
+                # of it, which never activates.
+                window.destroy()
+                pump_until(lambda: not window.get_mapped())
 
         assert run_in_application(focus) is True
 
@@ -476,6 +498,121 @@ class TestKeyboard:
 
         assert copied == []
         assert toasts and "no username" in toasts[0]
+
+
+class TestNarrowWindows:
+    """The metadata claimed 360 points and touch; the layout did neither.
+
+    The split view was fixed open with no breakpoint and no way to put the
+    sidebar away, so below about 650 points it squeezed the detail pane into
+    nothing.
+    """
+
+    def at_width(self, app, width, settled, read):
+        """Present a window ``width`` points wide and read something off it.
+
+        Breakpoints apply during allocation, so the loop has to turn: asking
+        straight after set_default_size reads the state the window had before
+        it was that size.
+
+        The window is destroyed again on the way out, and that is not tidiness.
+        A presented window keeps its GApplication alive, and the next test to
+        run one under the same application id becomes a remote instance of it
+        -- which never activates, so the test after this one fails instead.
+        """
+        window = loaded_window(app)
+        window.set_default_size(width, 600)
+        window.present()
+        try:
+            pump_until(lambda: window.get_width() == width)
+            pump_until(lambda: settled(window))
+            return read(window)
+        finally:
+            window.destroy()
+            pump_until(lambda: not window.get_mapped())
+
+    def test_a_narrow_window_collapses_the_sidebar(self, demo_backend_configured):
+        collapsed = run_in_application(
+            lambda app: self.at_width(
+                app,
+                400,
+                lambda window: window.split_view.get_collapsed(),
+                lambda window: window.split_view.get_collapsed(),
+            )
+        )
+
+        assert collapsed is True
+
+    def test_a_narrow_window_offers_the_sidebar_button(self, demo_backend_configured):
+        visible = run_in_application(
+            lambda app: self.at_width(
+                app,
+                400,
+                lambda window: window.sidebar_button.get_visible(),
+                lambda window: window.sidebar_button.get_visible(),
+            )
+        )
+
+        assert visible is True
+
+    def test_a_wide_window_keeps_the_sidebar_in_place(self, demo_backend_configured):
+        collapsed, button = run_in_application(
+            lambda app: self.at_width(
+                app,
+                1000,
+                lambda window: True,
+                lambda window: (
+                    window.split_view.get_collapsed(),
+                    window.sidebar_button.get_visible(),
+                ),
+            )
+        )
+
+        assert collapsed is False
+        assert button is False, "a button to show what is already shown"
+
+    def test_the_button_follows_the_sidebar(self, demo_backend_configured):
+        """Bidirectional, so it shows the state as well as setting it."""
+
+        def toggled(app):
+            window = loaded_window(app)
+            window.split_view.set_show_sidebar(False)
+            was_off = window.sidebar_button.get_active()
+            window.sidebar_button.set_active(True)
+            return was_off, window.split_view.get_show_sidebar()
+
+        was_off, shown = run_in_application(toggled)
+
+        assert was_off is False
+        assert shown is True
+
+    def test_choosing_an_entry_gets_the_sidebar_out_of_the_way(
+        self, demo_backend_configured
+    ):
+        """Collapsed, the sidebar is an overlay over the pane being filled."""
+
+        def select(app):
+            window = listed_window(app)
+            window.split_view.set_collapsed(True)
+            window.split_view.set_show_sidebar(True)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            window._on_password_selected(
+                DEMO_BACKEND_ID, backend.list_passwords()[0].name
+            )
+            return window.split_view.get_show_sidebar()
+
+        assert run_in_application(select) is False
+
+    def test_the_sidebar_stays_put_at_full_width(self, demo_backend_configured):
+        def select(app):
+            window = listed_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            window._on_password_selected(
+                DEMO_BACKEND_ID, backend.list_passwords()[0].name
+            )
+            return window.split_view.get_show_sidebar()
+
+        assert run_in_application(select) is True
 
 
 class TestSearch:

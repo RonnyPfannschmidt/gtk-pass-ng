@@ -11,9 +11,24 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     <property name="default-width">1000</property>
     <property name="default-height">700</property>
     <child>
+      <object class="AdwBreakpoint">
+        <condition>max-width: 650sp</condition>
+        <setter object="split_view" property="collapsed">true</setter>
+        <setter object="sidebar_button" property="visible">true</setter>
+      </object>
+    </child>
+    <child>
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar" id="header_bar">
+            <child type="start">
+              <object class="GtkToggleButton" id="sidebar_button">
+                <property name="icon-name">sidebar-show-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Show Passwords</property>
+                <property name="visible">false</property>
+                <property name="active" bind-source="split_view" bind-property="show-sidebar" bind-flags="sync-create|bidirectional"/>
+              </object>
+            </child>
             <child type="start">
               <object class="GtkButton" id="add_button">
                 <property name="icon-name">list-add-symbolic</property>
