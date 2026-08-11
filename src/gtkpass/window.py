@@ -4,7 +4,7 @@ import importlib.resources
 import logging
 from pathlib import Path
 
-from gtkpass._gi import Adw, Gio, Gtk
+from gtkpass._gi import Adw, Gio, GLib, Gtk
 from gtkpass.backends import (
     BackendError,
     PasswordBackend,
@@ -25,6 +25,7 @@ from gtkpass.config import (
     get_backend_settings,
     get_settings,
 )
+from gtkpass.firstrun import backend_type_for, existing_store
 
 # Imported for their side effect: the GTypes must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
@@ -74,6 +75,12 @@ PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, bool]] = {
         "dialog-password-symbolic",
         False,
     ),
+    "found-store": (
+        "Use Your Password Store?",
+        None,
+        "folder-symbolic",
+        True,
+    ),
     "no-matches": (
         "No Matches",
         "No entry's path contains what you searched for.",
@@ -110,6 +117,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     toast_overlay = Gtk.Template.Child()
     content_stack = Gtk.Template.Child()
     password_detail = Gtk.Template.Child()
+    adopt_store_button = Gtk.Template.Child()
     sidebar_button = Gtk.Template.Child()
     add_button = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
@@ -163,6 +171,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # listing finishing in that window used to pull the pane out from under
         # an entry that was on its way.
         self._showing_entry = False
+        # The store the first-run screen found, while it is being offered.
+        self._offered_store: Path | None = None
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -229,6 +239,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         reload_action = Gio.SimpleAction.new("reload", None)
         reload_action.connect("activate", self._on_reload)
         self.add_action(reload_action)
+
+        # Taking up the store the first-run screen found. Its button is the
+        # only thing that reaches it, and that button is only shown when there
+        # is one.
+        adopt_action = Gio.SimpleAction.new("adopt-store", None)
+        adopt_action.connect("activate", self._on_adopt_store)
+        self.add_action(adopt_action)
 
         # Reaching the search box from the keyboard. Always available: there is
         # nothing to break by focusing an empty one.
@@ -736,8 +753,51 @@ class GTKPassWindow(Adw.ApplicationWindow):
         return get_backend_display_name(backend_type, backend_id)
 
     def _show_configuration_prompt(self):
-        """Show configuration prompt in main content area."""
-        self._show_placeholder("no-backends")
+        """Ask for a backend -- or offer the store that is already there.
+
+        The first-run screen used to hand somebody a preferences dialog with
+        four backend type names in a combo box and nothing to say which of them
+        they wanted. The overwhelmingly common case is recognisable instead.
+        """
+        store = existing_store()
+        self._offered_store = store
+        if store is None:
+            self._show_placeholder("no-backends")
+            return
+
+        self._show_placeholder("found-store", str(store))
+        self.adopt_store_button.set_label(f"Use {_tilde(store)}")
+        self.adopt_store_button.set_visible(True)
+
+    def _on_adopt_store(self, _action, _param) -> None:
+        """Configure the store the first-run screen found, and open it.
+
+        Written straight into GSettings rather than through the preferences
+        dialog: the settings are the configuration, and the window is already
+        watching them, so recording the instance is the whole of it.
+        """
+        store = self._offered_store
+        if store is None:
+            return
+
+        backend_type = backend_type_for(store)
+        backend_id = f"{backend_type}_{GLib.get_real_time() // 1_000_000}"
+        try:
+            settings = get_backend_settings(backend_type, backend_id)
+            settings.set_string("password-store-dir", str(store))
+            if backend_type == "pass":
+                settings.set_boolean("use-git", True)
+            self.settings.set_value(
+                "backend-instances",
+                GLib.Variant("a(ss)", [(backend_id, backend_type)]),
+            )
+        except Exception as e:
+            logger.error(f"Could not adopt the store at {store}: {e}")
+            self._toast(f"Could not use {store}: {e}")
+            return
+
+        self.adopt_store_button.set_visible(False)
+        self._toast(f"Using {_tilde(store)}")
 
     def _show_placeholder(self, state: str, detail: str = "") -> None:
         """Put the content pane into one of PLACEHOLDER_STATES.
@@ -758,7 +818,20 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.open_preferences_button.set_visible(offer_preferences)
         self._placeholder_state = state
 
-        if state in ("no-backends", "empty", "failed") or not self._showing_entry:
+        if state != "found-store":
+            # Only the first-run screen offers it, and only while it is up.
+            self.adopt_store_button.set_visible(False)
+
+        if (
+            state
+            in (
+                "no-backends",
+                "found-store",
+                "empty",
+                "failed",
+            )
+            or not self._showing_entry
+        ):
             self.content_stack.set_visible_child_name("placeholder")
             self._showing_entry = False
 
@@ -1309,6 +1382,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast.new(message))
+
+
+def _tilde(path: Path) -> str:
+    """A path as its owner writes it, so a button can carry it."""
+    try:
+        return f"~/{path.relative_to(Path.home())}"
+    except ValueError:
+        return str(path)
 
 
 def _field_of(entry, field: str) -> str:

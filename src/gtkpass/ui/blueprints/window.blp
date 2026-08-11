@@ -133,13 +133,27 @@ template $GTKPassWindow : Adw.ApplicationWindow {
               vexpand: true;
 
               // Only relevant when no backend is configured; shown on demand.
-              child: Button open_preferences_button {
-                label: _("Open Preferences");
-                action-name: "app.preferences";
+              // Two buttons rather than one because there are two answers:
+              // adopt the store that is already there, or go and describe one.
+              child: Box {
+                orientation: vertical;
+                spacing: 12;
                 halign: center;
-                visible: false;
 
-                styles ["suggested-action", "pill"]
+                Button adopt_store_button {
+                  action-name: "win.adopt-store";
+                  visible: false;
+
+                  styles ["suggested-action", "pill"]
+                }
+
+                Button open_preferences_button {
+                  label: _("Open Preferences");
+                  action-name: "app.preferences";
+                  visible: false;
+
+                  styles ["pill"]
+                }
               };
             };
           }

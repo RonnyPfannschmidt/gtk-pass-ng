@@ -164,6 +164,108 @@ class TestWindowWithoutBackends:
         assert visible
 
 
+class TestTheFirstRunOffersAStoreThatIsAlreadyThere:
+    """It used to hand the user a preferences dialog and four type names.
+
+    Somebody who already uses `pass` wants a window onto the store they have,
+    and GTKPass can see that it is there.
+    """
+
+    @pytest.fixture
+    def no_backends(self):
+        settings = get_settings()
+        previous = settings.get_value("backend-instances")
+        settings.set_value("backend-instances", GLib.Variant("a(ss)", []))
+        yield settings
+        settings.set_value("backend-instances", previous)
+
+    @pytest.fixture
+    def store(self, tmp_path, monkeypatch, no_backends):
+        """A store to be found, marked as scratch so the guard allows it."""
+        from gtkpass.firstrun import STORE_MARKER
+        from gtkpass.safety import SCRATCH_MARKER
+
+        store = tmp_path / ".password-store"
+        store.mkdir()
+        (store / STORE_MARKER).write_text("ABCDEF01\n")
+        (store / SCRATCH_MARKER).touch()
+        monkeypatch.setenv("PASSWORD_STORE_DIR", str(store))
+        return store
+
+    def test_a_store_that_is_there_is_offered(self, store):
+        from gtkpass.window import GTKPassWindow
+
+        def offered(app):
+            window = GTKPassWindow(application=app)
+            return (
+                window._placeholder_state,
+                window.adopt_store_button.get_visible(),
+                window.adopt_store_button.get_label(),
+            )
+
+        state, visible, label = run_in_application(offered)
+
+        assert state == "found-store"
+        assert visible
+        assert str(store) in label or ".password-store" in label
+
+    def test_nothing_is_offered_when_there_is_no_store(
+        self, tmp_path, monkeypatch, no_backends
+    ):
+        from gtkpass.window import GTKPassWindow
+
+        monkeypatch.setenv("PASSWORD_STORE_DIR", str(tmp_path / "absent"))
+
+        def offered(app):
+            window = GTKPassWindow(application=app)
+            return window._placeholder_state, window.adopt_store_button.get_visible()
+
+        state, visible = run_in_application(offered)
+
+        assert state == "no-backends"
+        assert visible is False
+
+    def test_accepting_it_records_a_backend_for_it(self, store, no_backends):
+        from gtkpass.window import GTKPassWindow
+
+        def adopt(app):
+            window = GTKPassWindow(application=app)
+            window.activate_action("win.adopt-store", None)
+            return list(no_backends.get_value("backend-instances"))
+
+        recorded = run_in_application(adopt)
+
+        assert len(recorded) == 1
+        backend_id, backend_type = recorded[0]
+        assert backend_type in ("pass", "direct")
+        assert backend_id.startswith(backend_type)
+
+    def test_the_recorded_backend_points_at_the_store(self, store, no_backends):
+        from gtkpass.config import get_backend_settings
+        from gtkpass.window import GTKPassWindow
+
+        def adopt(app):
+            window = GTKPassWindow(application=app)
+            window.activate_action("win.adopt-store", None)
+            (recorded,) = list(no_backends.get_value("backend-instances"))
+            backend_id, backend_type = recorded
+            return get_backend_settings(backend_type, backend_id).get_string(
+                "password-store-dir"
+            )
+
+        assert run_in_application(adopt) == str(store)
+
+    def test_the_offer_goes_away_once_it_is_taken(self, store, no_backends):
+        from gtkpass.window import GTKPassWindow
+
+        def adopt(app):
+            window = GTKPassWindow(application=app)
+            window.activate_action("win.adopt-store", None)
+            return window.adopt_store_button.get_visible()
+
+        assert run_in_application(adopt) is False
+
+
 class TestThePlaceholderSaysWhichStateItIsIn:
     """One status page served four situations by being written over in place.
 
