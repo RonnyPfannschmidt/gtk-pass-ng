@@ -103,6 +103,85 @@ class TestExpansion:
         assert visible_rows(view) == ["Demo", "work"]
 
 
+class TestExpansionSurvivesARebuild:
+    """The tree is thrown away and rebuilt after every write and every sync.
+
+    Saving an entry, adding one, deleting one and syncing all re-list, and a
+    re-listing used to come back with every folder shut -- so the reward for
+    saving a password three levels down was finding your way back to it.
+    """
+
+    @pytest.fixture
+    def stocked(self, view, backend):
+        for path in ("work/mail/imap", "work/vpn", "personal/bank"):
+            view.add_password(backend, path)
+        return backend
+
+    def rebuild(self, view, paths=("work/mail/imap", "work/vpn", "personal/bank")):
+        """What the window does when a listing comes back."""
+        view.clear_all()
+        record = view.add_backend("demo_1", "Demo", "emblem-default-symbolic")
+        for path in paths:
+            view.add_password(record, path)
+        view.restore_expansion()
+        return record
+
+    def test_an_expanded_folder_is_still_expanded(self, view, stocked):
+        view.expand_all()
+        before = visible_rows(view)
+
+        self.rebuild(view)
+
+        assert visible_rows(view) == before
+
+    def test_a_closed_folder_stays_closed(self, view, stocked):
+        view.expand_first_level()
+        before = visible_rows(view)
+
+        self.rebuild(view)
+
+        assert visible_rows(view) == before
+        assert "imap" not in visible_rows(view)
+
+    def test_one_open_folder_does_not_open_its_neighbour(self, view, stocked):
+        view.expand_first_level()
+        # Open work/, leave personal/ shut.
+        row = next(
+            view.tree_model.get_row(index)
+            for index in range(view.tree_model.get_n_items())
+            if view.tree_model.get_row(index).get_item().name == "work"
+        )
+        row.set_expanded(True)
+
+        self.rebuild(view)
+
+        assert "mail" in visible_rows(view)
+        assert "bank" not in visible_rows(view)
+
+    def test_a_collapsed_backend_stays_collapsed(self, view, stocked):
+        view.expand_first_level()
+        view.tree_model.get_row(0).set_expanded(False)
+
+        self.rebuild(view)
+
+        assert visible_rows(view) == ["Demo"]
+
+    def test_a_folder_that_is_gone_is_not_missed(self, view, stocked):
+        """Deleting the last entry in a folder takes the folder with it."""
+        view.expand_all()
+
+        self.rebuild(view, paths=("personal/bank",))
+
+        assert visible_rows(view) == ["Demo", "personal", "bank"]
+
+    def test_a_new_folder_is_not_opened_by_a_neighbour(self, view, stocked):
+        view.expand_first_level()
+
+        self.rebuild(view, paths=("personal/bank", "later/added"))
+
+        assert "added" not in visible_rows(view)
+
+
 class TestFiltering:
     """The sidebar is filtered by rebuilding it, not by hiding rows.
 

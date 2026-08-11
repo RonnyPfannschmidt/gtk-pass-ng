@@ -906,6 +906,68 @@ class TestABackendThatWouldNotLoad:
         assert run_in_application(enabled) is True
 
 
+class TestTheTreeKeepsItsShapeAcrossAReListing:
+    """Every write and every sync re-lists, and re-listing rebuilt the tree.
+
+    Saving an entry three levels down and being returned to a shut tree, with
+    the way back to it to be found again, is the same interruption whether it
+    came from a save, an add, a delete or a sync.
+    """
+
+    def visible(self, window):
+        model = window.password_list.tree_model
+        return [
+            model.get_row(index).get_item().name for index in range(model.get_n_items())
+        ]
+
+    def opened_window(self, app):
+        """A listed window with every folder opened, as a user leaves it."""
+        window = listed_window(app)
+        window.password_list.expand_all()
+        return window
+
+    def test_a_reload_leaves_the_tree_as_it_was(self, demo_backend_configured):
+        def reload(app):
+            window = self.opened_window(app)
+            before = self.visible(window)
+            assert any("/" not in name for name in before)
+
+            window._load_passwords()
+            pump_until(lambda: window._pending_listings == 0)
+            return before, self.visible(window)
+
+        before, after = run_in_application(reload)
+
+        assert after == before
+
+    def test_a_folder_left_shut_stays_shut(self, demo_backend_configured):
+        def reload(app):
+            window = listed_window(app)
+            before = self.visible(window)
+
+            window._load_passwords()
+            pump_until(lambda: window._pending_listings == 0)
+            return before, self.visible(window)
+
+        before, after = run_in_application(reload)
+
+        assert after == before
+
+    def test_a_sync_does_not_shut_the_tree(self, demo_backend_configured):
+        def sync(app):
+            window = self.opened_window(app)
+            before = self.visible(window)
+
+            # What _sync_finished does once the last backend has answered.
+            window._sync_finished()
+            pump_until(lambda: window._pending_listings == 0)
+            return before, self.visible(window)
+
+        before, after = run_in_application(sync)
+
+        assert after == before
+
+
 class TestLoadingStaysOffTheUiThread:
     """Nothing slow may happen between construction and a window on screen.
 

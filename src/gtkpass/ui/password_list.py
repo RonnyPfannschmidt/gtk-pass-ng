@@ -44,8 +44,14 @@ class PasswordNode(GObject.Object):
         backend_id: str = "",
         password_name: str = "",
         tooltip: str = "",
+        path: str = "",
     ) -> None:
         super().__init__(name=name, icon_name=icon_name, tooltip=tooltip)
+        #: Where this row sits in its backend: ``work/mail`` for a folder of
+        #: that name and for the entry inside it, empty for a backend heading.
+        #: A row is thrown away and built again on every re-listing, so this is
+        #: what says it is the same row as the one that was open before.
+        self.path = path
         #: The backend this row belongs to. Every descendant carries it, so a
         #: selected entry knows its backend without walking back up the tree.
         self.backend_id = backend_id
@@ -142,6 +148,9 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         self._backends: list[BackendEntries] = []
         #: The search text the tree is currently narrowed to; empty means all.
         self._filter = ""
+        #: (backend id, path) of the rows that were open when the tree was last
+        #: thrown away. Every write and every sync rebuilds it from nothing.
+        self._expanded: set[tuple[str, str]] = set()
 
     def _install_context_menu(self) -> None:
         """Offer the entry actions where the entries are.
@@ -319,7 +328,12 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             How many entries matched, which is what tells an empty store apart
             from a search that found nothing.
         """
-        self._filter = text.strip()
+        wanted = text.strip()
+        if not self._filter and wanted:
+            # A search is about to expand everything it matched. Note how the
+            # tree was left first, so clearing the search can put it back.
+            self._remember_expansion()
+        self._filter = wanted
 
         self.root.remove_all()
         for record in self._backends:
@@ -336,6 +350,9 @@ class PasswordTreeView(Gtk.ScrolledWindow):
 
         if self._filter:
             self.expand_all()
+        elif self._expanded:
+            # Back to the shape the user had before they searched.
+            self.restore_expansion()
         else:
             self.expand_first_level()
         return matched
@@ -377,11 +394,13 @@ class PasswordTreeView(Gtk.ScrolledWindow):
                 continue
 
             is_leaf = depth == len(parts) - 1
+            here = "/".join(parts[: depth + 1])
             node = PasswordNode(
                 name=part,
                 icon_name=ENTRY_ICON if is_leaf else FOLDER_ICON,
                 backend_id=backend.backend_id,
-                password_name="/".join(parts[: depth + 1]) if is_leaf else "",
+                password_name=here if is_leaf else "",
+                path=here,
             )
             parent.children.append(node)
             parent = node
@@ -404,9 +423,67 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             backend.node.children.remove_all()
 
     def clear_all(self) -> None:
-        """Clear all backends and passwords, filtered out ones included."""
+        """Clear all backends and passwords, filtered out ones included.
+
+        Which folders were open is remembered on the way out. Every write and
+        every sync re-lists, and a re-listing that came back with the tree shut
+        made the reward for saving an entry three levels down be finding the
+        way back to it.
+        """
+        self._remember_expansion()
         self._backends.clear()
         self.root.remove_all()
+
+    # -- expansion -----------------------------------------------------------
+
+    def _remember_expansion(self) -> None:
+        """Note which rows are open, unless a filter is deciding that.
+
+        A search expands everything it matched; that is the search's doing and
+        not the user's, and taking it for their preference would leave the tree
+        wide open once the search was over.
+        """
+        if self._filter:
+            return
+        self._expanded = self.expansion_state()
+
+    def expansion_state(self) -> set[tuple[str, str]]:
+        """The (backend, path) of every row that is currently open.
+
+        Only rows the model has built can be open, and a row is only built once
+        its parent has been -- so an open row's ancestors are all in here too,
+        which is what makes this enough to put the tree back as it was.
+        """
+        state = set()
+        for index in range(self.tree_model.get_n_items()):
+            row = self.tree_model.get_row(index)
+            if row is not None and row.get_expanded():
+                node = row.get_item()
+                state.add((node.backend_id, node.path))
+        return state
+
+    def remembers_expansion(self) -> bool:
+        """Whether there is a previous shape to go back to.
+
+        What tells a first listing from a re-listing: the first has nothing to
+        restore and wants its backends opened, and a later one wants exactly
+        what it was given.
+        """
+        return bool(self._expanded)
+
+    def restore_expansion(self) -> None:
+        """Open again the rows that were open before the tree was rebuilt.
+
+        Rows that no longer exist are simply not found: a folder emptied by a
+        deletion stays gone rather than coming back shut. A folder that appeared
+        since is left closed, because nobody has opened it.
+        """
+        if not self._expanded:
+            return
+        self._expand(
+            lambda row: (row.get_item().backend_id, row.get_item().path)
+            in self._expanded
+        )
 
     def get_selected_password(self) -> tuple[str, str] | None:
         """Get the currently selected password.

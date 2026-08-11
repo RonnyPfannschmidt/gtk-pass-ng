@@ -703,7 +703,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         # The backend rows exist; their entries append to a model the tree is
         # already watching, so expanding does not have to wait for them.
-        self.password_list.expand_first_level()
+        # Only on a first listing: after that the tree goes back to the shape
+        # it was left in, which restore_expansion does as each listing arrives.
+        if not self.password_list.remembers_expansion():
+            self.password_list.expand_first_level()
 
     def _list_into(self, request: int, backend_id: str, node) -> None:
         """Fill one backend's row in, when its listing comes back."""
@@ -714,6 +717,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
             logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
             for password in sorted(passwords, key=lambda p: p.name):
                 self.password_list.add_password(node, password.name)
+            # This backend's folders exist again, so they can be opened again.
+            # Per listing rather than once at the end: they arrive one backend
+            # at a time, and a tree that unfolds as it fills reads better than
+            # one that sits shut until the slowest store has answered.
+            self.password_list.restore_expansion()
             self._listing_answered(request, listed=bool(passwords))
 
         def report(error):
