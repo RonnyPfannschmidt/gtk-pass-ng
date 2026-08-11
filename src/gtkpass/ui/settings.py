@@ -393,7 +393,35 @@ class SettingsWindow(Adw.PreferencesDialog):
         row.set_expanded(True)
         self._save_backend_configs()
 
-    def _on_remove_backend(self, row: BackendSettingsRow) -> None:
+    def _on_remove_backend(self, row: BackendSettingsRow) -> Adw.AlertDialog:
+        """Ask before throwing a backend's configuration away.
+
+        It used to go the moment the button was pressed: the row, the name
+        somebody had typed, the store directory they had chosen through the
+        chooser -- and with it, under Flatpak, the access that choosing had
+        granted. None of it recoverable, and nothing had asked.
+
+        Returns the dialog, so a test can drive it to a response.
+        """
+        builder = Gtk.Builder.new_from_file(str(UI / "confirm_remove_backend.ui"))
+        dialog = builder.get_object("confirm_remove_backend_dialog")
+        # What it does not do matters as much as what it does: nobody should
+        # have to guess whether this is about to delete their passwords.
+        dialog.set_body(
+            f"{row.get_display_name() or row.backend_type}\n\n"
+            f"GTKPass forgets how to reach this store. Nothing in the store "
+            f"itself is changed or deleted."
+        )
+
+        def responded(_dialog, response):
+            if response == "remove":
+                self._remove_backend(row)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+        return dialog
+
+    def _remove_backend(self, row: BackendSettingsRow) -> None:
         self.backends_group.remove(row)
         self.backend_rows.pop(row.backend_id, None)
         self.backend_instances.pop(row.backend_id, None)

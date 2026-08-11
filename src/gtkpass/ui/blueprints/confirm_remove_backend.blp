@@ -1,0 +1,23 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Removing a backend threw away its settings the moment the button was
+// pressed: the row, the name somebody had typed, the store directory they had
+// chosen. None of it was recoverable and nothing had asked.
+//
+// The body says which backend, and says what removing does not do. Nobody
+// should have to guess whether this is about to delete their passwords.
+//
+// Adw.AlertDialog is final, so this is a builder object rather than a
+// template, as in recipients_changed.blp.
+Adw.AlertDialog confirm_remove_backend_dialog {
+  heading: _("Remove This Store?");
+
+  responses [
+    cancel: _("Cancel"),
+    remove: _("Remove") destructive,
+  ]
+
+  default-response: "cancel";
+  close-response: "cancel";
+}

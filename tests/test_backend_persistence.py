@@ -221,7 +221,59 @@ class TestAddingAndRemoving:
         dialog._on_add_backend(None)
         (row,) = list(dialog.backend_rows.values())
 
-        dialog._on_remove_backend(row)
+        dialog._remove_backend(row)
 
         assert dialog.backend_rows == {}
         assert list(get_settings().get_value("backend-instances")) == []
+
+
+class TestRemovingAsks:
+    """It used to go the moment the button was pressed.
+
+    The row, the name somebody had typed and the store directory they had
+    chosen were all thrown away with no question and no way back -- and under
+    Flatpak, so was the access that choosing the directory had granted.
+    """
+
+    @pytest.fixture
+    def configured(self):
+        from gtkpass._gi import GLib
+        from gtkpass.config import get_settings
+        from gtkpass.ui.settings import SettingsWindow
+
+        settings = get_settings()
+        previous = settings.get_value("backend-instances")
+        settings.set_value("backend-instances", GLib.Variant("a(ss)", []))
+        dialog = SettingsWindow()
+        dialog.backend_combo.set_selected(0)
+        dialog._on_add_backend(None)
+        yield dialog, next(iter(dialog.backend_rows.values()))
+        settings.set_value("backend-instances", previous)
+
+    def test_the_button_asks_rather_than_removing(self, configured):
+        dialog, row = configured
+
+        row.remove_button.emit("clicked")
+
+        assert dialog.backend_rows, "the backend was removed without asking"
+
+    def test_the_question_says_the_store_is_left_alone(self, configured):
+        dialog, row = configured
+
+        question = dialog._on_remove_backend(row)
+
+        assert "Nothing in the store itself" in question.get_body()
+
+    def test_cancelling_keeps_it(self, configured):
+        dialog, row = configured
+
+        dialog._on_remove_backend(row).emit("response", "cancel")
+
+        assert row.backend_id in dialog.backend_rows
+
+    def test_confirming_removes_it(self, configured):
+        dialog, row = configured
+
+        dialog._on_remove_backend(row).emit("response", "remove")
+
+        assert dialog.backend_rows == {}
