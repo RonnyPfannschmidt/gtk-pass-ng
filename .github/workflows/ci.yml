@@ -312,10 +312,19 @@ jobs:
       matrix:
         fedora: ['43', '44']
     steps:
+      # selinux-policy-targeted and libselinux-utils are not here to enforce
+      # anything -- this runner has no SELinux to enforce it. They are the
+      # file_contexts and the lookup tool build-sysext.sh needs to work out what
+      # every path in the image should be labelled, which it writes into the
+      # image itself rather than copying off the build machine. A runner with no
+      # SELinux cannot label its own filesystem at all, so without these the
+      # image ships unlabelled and relabels /usr/lib on every host that merges
+      # it. Issue #23.
       - name: install assembly tools
         run: |
           dnf -y --setopt=install_weak_deps=False install \
-            git-core squashfs-tools cpio glib2 'dnf-command(download)'
+            git-core squashfs-tools cpio glib2 'dnf-command(download)' \
+            selinux-policy-targeted libselinux-utils
 
       # What the image is for has to resemble what resolves it. These are the
       # packages a GNOME desktop base image has, so installing them makes the
