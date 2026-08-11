@@ -280,11 +280,37 @@ class SettingsWindow(Adw.PreferencesDialog):
             )
             stored.set_string("gpg-home", str(settings.gpg_home or ""))
 
+    def _new_backend_id(self, backend_type: str) -> str:
+        """An id no configured instance is already using.
+
+        The wall clock in whole seconds is a readable stem and a poor
+        identifier: two backends of the same type added in the same second were
+        given the same one, which meant one row on screen where two had been
+        asked for, and both instances reading and writing the same relocatable
+        schema path -- one store's settings holding the other's.
+
+        Taken ids are read back from GSettings as well as from the rows, so an
+        instance this dialog could not load does not have its id handed out
+        from underneath it.
+        """
+        taken = set(self.backend_rows)
+        taken.update(
+            backend_id for backend_id, _ in self.settings.get_value("backend-instances")
+        )
+
+        stem = f"{backend_type}_{GLib.get_real_time() // 1_000_000}"
+        if stem not in taken:
+            return stem
+        suffix = 2
+        while f"{stem}_{suffix}" in taken:
+            suffix += 1
+        return f"{stem}_{suffix}"
+
     @Gtk.Template.Callback()
     def _on_add_backend(self, _button) -> None:
         """Add an instance of the type selected in the combo row."""
         backend_type = BACKEND_TYPES[self.backend_combo.get_selected()]
-        backend_id = f"{backend_type}_{GLib.get_real_time() // 1_000_000}"
+        backend_id = self._new_backend_id(backend_type)
 
         row = self._add_row(backend_id, backend_type, None)
         row.set_expanded(True)

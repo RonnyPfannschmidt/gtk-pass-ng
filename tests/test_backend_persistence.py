@@ -112,6 +112,43 @@ class TestAddingAndRemoving:
         recorded = list(get_settings().get_value("backend-instances"))
         assert [backend_type for _, backend_type in recorded] == ["demo"]
 
+    def test_two_of_a_type_added_at_once_stay_apart(self, dialog):
+        """The id used to be the type and the wall clock in whole seconds.
+
+        Two backends of the same type added within the same second were handed
+        the same id, so the second overwrote the first in the row dictionary
+        and both read and wrote the same relocatable schema path -- one row on
+        screen where two had been asked for, and one store's settings quietly
+        holding the other's.
+        """
+        from gtkpass.config import get_settings
+
+        dialog.backend_combo.set_selected(0)
+        dialog._on_add_backend(None)
+        dialog._on_add_backend(None)
+
+        assert len(dialog.backend_rows) == 2
+        recorded = [
+            backend_id
+            for backend_id, _ in get_settings().get_value("backend-instances")
+        ]
+        assert len(set(recorded)) == 2
+
+    def test_an_id_is_not_reused_by_a_later_session(self, dialog):
+        """A row already recorded holds its id against a new one."""
+        from gtkpass.ui.settings import SettingsWindow
+
+        dialog.backend_combo.set_selected(0)
+        dialog._on_add_backend(None)
+        (existing,) = list(dialog.backend_rows)
+
+        reopened = SettingsWindow()
+        reopened.backend_combo.set_selected(0)
+        reopened._on_add_backend(None)
+
+        assert existing in reopened.backend_rows
+        assert len(reopened.backend_rows) == 2
+
     def test_removing_forgets_the_backend(self, dialog):
         from gtkpass.config import get_settings
 
