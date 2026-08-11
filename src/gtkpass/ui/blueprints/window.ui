@@ -147,6 +147,20 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
   <menu id="primary_menu">
     <section>
       <item>
+        <attribute name="label" translatable="yes">New Password</attribute>
+        <attribute name="action">win.add-password</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Edit Password</attribute>
+        <attribute name="action">win.edit-password</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Delete Password</attribute>
+        <attribute name="action">win.delete-password</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
         <attribute name="label" translatable="yes">Sync with Remote</attribute>
         <attribute name="action">win.sync</attribute>
       </item>

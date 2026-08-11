@@ -918,6 +918,136 @@ class TestAdding:
         assert run_in_application(generate) is True
 
 
+class TestDeleting:
+    """Deleting asks first, and asks about a named entry.
+
+    What GTKPass writes to a store it can commit, but it cannot bring back a
+    secret nobody else has a copy of, so this is the one operation that stops
+    to ask.
+    """
+
+    def deletable_window(self, app):
+        window = listed_window(app)
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        backend.writable = True
+        window._refresh_write_actions()
+        return window
+
+    def open_entry(self, window):
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        name = backend.list_passwords()[0].name
+        window._on_password_selected(DEMO_BACKEND_ID, name)
+        pump_until(
+            lambda: window.password_detail.stack.get_visible_child_name() == "content"
+        )
+        return name
+
+    def test_nothing_is_offered_before_an_entry_is_open(self, demo_backend_configured):
+        def enabled(app):
+            return self.deletable_window(app).lookup_action("delete-password")
+
+        assert run_in_application(enabled).get_enabled() is False
+
+    def test_an_open_entry_can_be_deleted(self, demo_backend_configured):
+        def enabled(app):
+            window = self.deletable_window(app)
+            self.open_entry(window)
+            return window.lookup_action("delete-password").get_enabled()
+
+        assert run_in_application(enabled) is True
+
+    def test_a_read_only_store_offers_nothing(self, demo_backend_configured):
+        def enabled(app):
+            window = listed_window(app)
+            self.open_entry(window)
+            return window.lookup_action("delete-password").get_enabled()
+
+        assert run_in_application(enabled) is False
+
+    def test_the_entry_is_named_in_the_question(self, demo_backend_configured):
+        def ask(app):
+            window = self.deletable_window(app)
+            name = self.open_entry(window)
+            dialog = window._confirm_delete()
+            return name, dialog.get_body()
+
+        name, body = run_in_application(ask)
+
+        assert name in body
+
+    def test_cancelling_deletes_nothing(self, demo_backend_configured):
+        deleted = []
+
+        def ask(app):
+            window = self.deletable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.delete_password = lambda name, commit=True: deleted.append(name)
+            self.open_entry(window)
+
+            window._confirm_delete().emit("response", "cancel")
+            pump_until(lambda: False, timeout_seconds=0.2)
+
+        run_in_application(ask)
+
+        assert deleted == []
+
+    def test_confirming_asks_the_backend_to_delete_it(self, demo_backend_configured):
+        deleted = []
+
+        def ask(app):
+            window = self.deletable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.delete_password = lambda name, commit=True: deleted.append(name)
+            name = self.open_entry(window)
+
+            window._confirm_delete().emit("response", "delete")
+            pump_until(lambda: bool(deleted), timeout_seconds=5.0)
+            return name
+
+        name = run_in_application(ask)
+
+        assert deleted == [name]
+
+    def test_the_pane_lets_go_of_the_deleted_entry(self, demo_backend_configured):
+        def ask(app):
+            window = self.deletable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.delete_password = lambda name, commit=True: None
+            self.open_entry(window)
+
+            window._confirm_delete().emit("response", "delete")
+            pump_until(lambda: window._shown is None, timeout_seconds=5.0)
+            return window._shown, window.content_stack.get_visible_child_name()
+
+        shown, page = run_in_application(ask)
+
+        assert shown is None
+        assert page == "placeholder"
+
+    def test_a_failed_delete_is_reported(self, demo_backend_configured):
+        from gtkpass.backends import BackendError
+
+        def ask(app):
+            window = self.deletable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+
+            def refuse(name, commit=True):
+                raise BackendError("the store is read-only after all")
+
+            backend.delete_password = refuse
+            toasts: list[str] = []
+            window._toast = toasts.append
+            self.open_entry(window)
+
+            window._confirm_delete().emit("response", "delete")
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return toasts
+
+        toasts = run_in_application(ask)
+
+        assert toasts and "read-only after all" in toasts[0]
+
+
 class TestACopiedSecretIsTakenBack:
     """A copy is kept for as long as there is a reason to keep it.
 

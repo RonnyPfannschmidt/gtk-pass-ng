@@ -134,6 +134,23 @@ template $GTKPassWindow : Adw.ApplicationWindow {
 menu primary_menu {
   section {
     item {
+      label: _("New Password");
+      action: "win.add-password";
+    }
+    item {
+      label: _("Edit Password");
+      action: "win.edit-password";
+    }
+    // No header-bar button of its own: a destructive action next to the one
+    // that opens an entry is a mis-click, and this is the operation that
+    // cannot be taken back.
+    item {
+      label: _("Delete Password");
+      action: "win.delete-password";
+    }
+  }
+  section {
+    item {
       label: _("Sync with Remote");
       action: "win.sync";
     }

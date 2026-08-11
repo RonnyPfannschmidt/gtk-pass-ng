@@ -232,6 +232,29 @@ class BackendManager:
 
         return self._executor.submit(backend.add_password, name, content)
 
+    def delete_password_async(
+        self,
+        backend_id: str,
+        name: str,
+    ) -> concurrent.futures.Future:
+        """Remove a password asynchronously.
+
+        Args:
+            backend_id: Backend identifier
+            name: Name of the entry to remove
+
+        Returns:
+            Future that completes when the removal has landed
+
+        Raises:
+            ValueError: If backend not initialized
+        """
+        backend = self._backends.get(backend_id)
+        if not backend:
+            raise ValueError(f"Backend '{backend_id}' not initialized")
+
+        return self._executor.submit(backend.delete_password, name)
+
     def writable_backends(self) -> list[str]:
         """Backends that can be written to, in the order they were added.
 

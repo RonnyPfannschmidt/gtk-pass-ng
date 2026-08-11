@@ -152,6 +152,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # How many entries the current search matched, so an empty store can be
         # told apart from a search that found nothing.
         self._matched = 0
+        # Whether the content pane belongs to an entry: from the moment one is
+        # selected, through the decrypt, until it is closed or fails. Not the
+        # same as _shown, which is empty for the whole of the decrypt -- and a
+        # listing finishing in that window used to pull the pane out from under
+        # an entry that was on its way.
+        self._showing_entry = False
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -195,6 +201,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         edit_action.connect("activate", self._on_edit_password)
         edit_action.set_enabled(False)
         self.add_action(edit_action)
+
+        # Likewise nothing to delete, and nowhere to delete it from until a
+        # store that can be written to holds it.
+        delete_action = Gio.SimpleAction.new("delete-password", None)
+        delete_action.connect("activate", self._on_delete_password)
+        delete_action.set_enabled(False)
+        self.add_action(delete_action)
 
         # Nothing is syncable until the backends have loaded and reported what
         # their stores are, so this starts closed and _refresh_sync_action
@@ -442,6 +455,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         if action is not None:
             action.set_enabled(bool(writable))
 
+        # Deleting needs an entry as well as a store that will take the change.
+        delete_action = self.lookup_action("delete-password")
+        if delete_action is not None:
+            delete_action.set_enabled(
+                self._shown is not None and self._shown[0] in writable
+            )
+
         if writable:
             self.add_button.set_tooltip_text("Add Password")
         elif self.backend_manager.get_all_backends():
@@ -631,9 +651,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.open_preferences_button.set_visible(offer_preferences)
         self._placeholder_state = state
 
-        showing_entry = self.content_stack.get_visible_child_name() == "detail"
-        if state in ("no-backends", "empty", "failed") or not showing_entry:
+        if state in ("no-backends", "empty", "failed") or not self._showing_entry:
             self.content_stack.set_visible_child_name("placeholder")
+            self._showing_entry = False
 
     def _show_backend_errors(self):
         """Show a toast notification for failed backends."""
@@ -954,6 +974,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._detail_request += 1
         request = self._detail_request
 
+        self._showing_entry = True
         self.content_stack.set_visible_child_name("detail")
         self.password_detail.show_loading(password_name)
 
@@ -972,6 +993,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             logger.error(f"Could not open an entry from {backend_id}: {error}")
             self.password_detail.clear()
             self._set_shown(None)
+            self._showing_entry = False
             # On the page rather than only in a toast: five seconds is not long
             # enough to read a GPG error, and the pane is where the user is
             # already looking.
@@ -1002,6 +1024,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         action = self.lookup_action("edit-password")
         if action is not None:
             action.set_enabled(shown is not None)
+        self._refresh_write_actions()
 
     def _on_edit_password(self, action, param):
         """Handle the edit action."""
@@ -1028,6 +1051,72 @@ class GTKPassWindow(Adw.ApplicationWindow):
         )
         dialog.present(self)
         return dialog
+
+    def _on_delete_password(self, action, param):
+        """Handle the delete action."""
+        self._confirm_delete()
+
+    def _confirm_delete(self) -> Adw.AlertDialog | None:
+        """Ask before removing the entry on display.
+
+        The one operation that stops to ask. What GTKPass writes to a store it
+        can commit, and a commit can be undone -- but a Secret Service item has
+        no history at all, and neither has a secret nobody else kept a copy of.
+
+        Returns the dialog, as the other two do, so a test can drive it to a
+        response rather than only prove it was built.
+        """
+        if self._shown is None:
+            return None
+        backend_id, password_name = self._shown
+
+        builder = Gtk.Builder.new_from_file(
+            str(
+                importlib.resources.files("gtkpass.ui.blueprints") / "confirm_delete.ui"
+            )
+        )
+        dialog = builder.get_object("confirm_delete_dialog")
+        # Named, because "Delete this password?" is a question nobody can
+        # answer -- least of all after arrow-keying through a tree.
+        dialog.set_body(
+            f"{password_name}\n\n"
+            f"This removes it from {self._get_backend_display_name(backend_id)}. "
+            f"It cannot be undone from here."
+        )
+
+        def responded(_dialog, response):
+            if response == "delete":
+                self._delete_entry(backend_id, password_name)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+        return dialog
+
+    def _delete_entry(self, backend_id: str, password_name: str) -> None:
+        """Remove an entry, off the UI thread as every other write is."""
+
+        def deleted(_result):
+            self._toast(f"Deleted {password_name}")
+            # Let go of the pane before re-listing: what it holds no longer
+            # exists, and the plaintext it holds has no reason to stay.
+            self.password_detail.clear()
+            self._set_shown(None)
+            self._showing_entry = False
+            self._show_placeholder("ready")
+            self._load_passwords()
+
+        def report(error):
+            logger.error(f"Could not delete an entry from {backend_id}: {error}")
+            self._toast(f"Could not delete {password_name}: {error}")
+
+        try:
+            future = self.backend_manager.delete_password_async(
+                backend_id, password_name
+            )
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, deleted, report)
 
     def _save_entry(self, backend_id: str, password_name: str, content: str) -> None:
         """Write an edited entry back through its backend.
