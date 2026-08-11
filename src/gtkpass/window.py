@@ -29,7 +29,11 @@ from gtkpass.config import (
 # Imported for their side effect: the GTypes must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
 from gtkpass.ui.password_add import PasswordAddDialog
-from gtkpass.ui.password_detail import PasswordDetailView  # noqa: F401
+from gtkpass.ui.password_detail import (  # noqa: F401
+    URL_KEYS,
+    USERNAME_KEYS,
+    PasswordDetailView,
+)
 from gtkpass.ui.password_edit import PasswordEditDialog
 from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
 from gtkpass.utils.async_ui import on_ui_thread
@@ -252,13 +256,47 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.set_help_overlay(overlay)
 
     def _copy_field(self, field: str) -> None:
-        """Copy a field of the entry on display, as its copy button would.
+        """Copy a field of the selected entry, whether or not the pane has it.
 
-        Through the pane rather than around it, so the clipboard timeout, the
-        toast and the take-back on navigation all apply without being repeated
-        here.
+        When the pane holds the entry this goes through the pane rather than
+        around it, so the clipboard timeout, the toast and the take-back on
+        navigation all apply without being repeated here.
+
+        Otherwise the entry is fetched for the copy alone. That is the case
+        whenever the copy is asked for before the decrypt has come back -- a
+        right-click both selects a row and puts a menu over it, and the store
+        takes as long as it takes -- and reading the pane then would copy an
+        empty string or, worse, whatever was on it before.
         """
-        self.password_detail.copy_field(field)
+        selected = self.password_list.get_selected_password()
+        if selected is None or selected == self._shown:
+            if not self.password_detail.copy_field(field):
+                self._toast(f"There is no {field.lower()} to copy")
+            return
+
+        backend_id, password_name = selected
+
+        def copy(entry):
+            value = _field_of(entry, field)
+            entry.clear_password()
+            if not value:
+                self._toast(f"{password_name} has no {field.lower()}")
+                return
+            self._on_copy_requested(None, field, value)
+            # Recorded against the entry it came from, so moving elsewhere
+            # takes it back as it does for a copy made from the pane.
+            self._copied_from = selected
+
+        def report(error):
+            logger.error(f"Could not read an entry from {backend_id}: {error}")
+            self._toast(f"Could not copy from {password_name}: {error}")
+
+        try:
+            future = self.backend_manager.get_password_async(backend_id, password_name)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, copy, report)
 
     def _load_backends(self):
         """Read the configuration here, build the backends on a worker.
@@ -1020,6 +1058,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._showing_entry = True
         self.content_stack.set_visible_child_name("detail")
         self.password_detail.show_loading(password_name)
+        # Before the decrypt returns: a right-click both selects the row and
+        # opens the menu over it, and the menu must not be grey for the second
+        # or two the store takes to answer.
+        self._refresh_copy_actions()
 
         def show(entry):
             # Arrow-keying through the tree starts a decrypt per row; without
@@ -1064,13 +1106,27 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._clipboard.clear_if_ours()
             self._copied_from = None
         self._shown = shown
-        # Everything that acts on the entry on display: editing it, and copying
-        # a field out of it without reaching for the mouse.
-        for name in ("edit-password", "copy-password", "copy-username"):
+        action = self.lookup_action("edit-password")
+        if action is not None:
+            action.set_enabled(shown is not None)
+        self._refresh_copy_actions()
+        self._refresh_write_actions()
+
+    def _refresh_copy_actions(self) -> None:
+        """Copying follows the selection, not the pane.
+
+        The two are the same once an entry has been opened, and they are not
+        while it is still being decrypted -- which is exactly when a context
+        menu opened by the right-click that made the selection is on screen.
+        """
+        selected = (
+            self.password_list.get_selected_password() is not None
+            or self._shown is not None
+        )
+        for name in ("copy-password", "copy-username"):
             action = self.lookup_action(name)
             if action is not None:
-                action.set_enabled(shown is not None)
-        self._refresh_write_actions()
+                action.set_enabled(selected)
 
     def _on_edit_password(self, action, param):
         """Handle the edit action."""
@@ -1214,6 +1270,22 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _toast(self, message: str) -> None:
         self.toast_overlay.add_toast(Adw.Toast.new(message))
+
+
+def _field_of(entry, field: str) -> str:
+    """One of the copyable fields, read straight off a decrypted entry.
+
+    The same keys the detail pane picks its rows out with, so a copy made
+    without opening an entry lands on the same value as one made from the pane.
+    """
+    if field == "Password":
+        return entry.password or ""
+    keys = {"Username": USERNAME_KEYS, "URL": URL_KEYS}[field]
+    metadata = entry.metadata
+    for key in keys:
+        if metadata.get(key):
+            return metadata[key]
+    return ""
 
 
 def _recipient_lines(audit) -> str:

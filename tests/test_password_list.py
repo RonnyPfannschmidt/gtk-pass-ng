@@ -256,6 +256,62 @@ class TestIcons:
         assert self.icon_of(view, "Demo") == "emblem-default-symbolic"
 
 
+class TestTheContextMenu:
+    """Right-click, and press-and-hold, offer the entry actions on the row.
+
+    The menu items are window actions, so what the tree is responsible for is
+    narrow: pick the row that was clicked, and put the menu over it.
+    """
+
+    def test_the_menu_is_parented_to_the_tree(self, view, backend):
+        assert view._menu.get_parent() is view
+
+    def test_its_items_are_window_actions(self, view, backend):
+        model = view._menu.get_menu_model()
+        actions = []
+        for section in range(model.get_n_items()):
+            links = model.get_item_link(section, "section")
+            for index in range(links.get_n_items()):
+                actions.append(
+                    links.get_item_attribute_value(index, "action").get_string()
+                )
+
+        assert actions == [
+            "win.copy-password",
+            "win.copy-username",
+            "win.edit-password",
+            "win.delete-password",
+        ]
+
+    def test_a_click_selects_the_row_under_it(self, view, backend):
+        for path in ("alpha", "beta", "gamma"):
+            view.add_password(backend, path)
+        view.expand_first_level()
+        window = present(view, rendered_rows)
+
+        # Half way down the second row, counting the backend heading as the
+        # first. The column header is hidden, so the rows start at the top.
+        view._popup_at(10.0, view._row_height() * 1.5)
+
+        assert view.get_selected_password() == ("demo_1", "alpha")
+        window.destroy()
+
+    def test_a_click_past_the_last_row_selects_nothing(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
+
+        view._popup_at(10.0, view.get_height() - 1)
+
+        assert view.get_selected_password() is None
+        window.destroy()
+
+    def test_an_empty_tree_offers_no_menu(self, view):
+        view._popup_at(10.0, 10.0)
+
+        assert not view._menu.is_visible()
+
+
 def present(view, ready):
     """Present the view until ``ready(view)`` holds, or the deadline passes.
 

@@ -32,6 +32,7 @@ NON_WIDGET_TYPES = {
     "CssProvider",
     "EventControllerKey",
     "GestureClick",
+    "GestureLongPress",
     "Shortcut",
     "ShortcutController",
 }

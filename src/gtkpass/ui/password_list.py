@@ -12,7 +12,7 @@ that selection reads back; the view only renders them.
 import importlib.resources
 from collections.abc import Callable
 
-from gtkpass._gi import Gio, GObject, Gtk
+from gtkpass._gi import Gdk, Gio, GObject, Graphene, Gtk
 
 #: A leaf carries the same icon the application uses for itself, so an entry is
 #: recognisable as one without counting indentation levels.
@@ -70,6 +70,15 @@ class BackendEntries:
         self.node: PasswordNode | None = None
 
 
+def _descendants(widget: Gtk.Widget):
+    """Every widget below ``widget``, depth first."""
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        yield from _descendants(child)
+        child = child.get_next_sibling()
+
+
 def _children_of(node: PasswordNode) -> Gio.ListStore | None:
     """Child model for a row, or None for one that cannot have children.
 
@@ -119,11 +128,108 @@ class PasswordTreeView(Gtk.ScrolledWindow):
 
         self._on_password_selected: Callable[[str, str], None] | None = None
         self.selection.connect("notify::selected-item", self._selection_changed)
+        self._install_context_menu()
 
         #: What each backend contributed, kept so a filter can be lifted again.
         self._backends: list[BackendEntries] = []
         #: The search text the tree is currently narrowed to; empty means all.
         self._filter = ""
+
+    def _install_context_menu(self) -> None:
+        """Offer the entry actions where the entries are.
+
+        The menu is declared in password_menu.blp and its items are window
+        actions, so the tree neither builds it nor knows what the items do. It
+        is parented to this widget by hand because a popover has no place in
+        the tree's own layout: it is positioned over whichever row was clicked.
+        """
+        builder = Gtk.Builder.new_from_file(
+            str(importlib.resources.files("gtkpass.ui.blueprints") / "password_menu.ui")
+        )
+        self._menu = builder.get_object("password_menu")
+        self._menu.set_parent(self)
+
+        # Right-click on a pointer, and press-and-hold on a touchscreen. The
+        # metadata claims touch, and a context menu no finger can reach is one
+        # of the places that claim comes apart.
+        click = Gtk.GestureClick(button=3)
+        click.connect("pressed", self._on_secondary_press)
+        self.add_controller(click)
+
+        press = Gtk.GestureLongPress(touch_only=True)
+        press.connect("pressed", self._on_long_press)
+        self.add_controller(press)
+
+    def _on_secondary_press(self, gesture, _n_press, x, y) -> None:
+        self._popup_at(x, y)
+
+    def _on_long_press(self, gesture, x, y) -> None:
+        self._popup_at(x, y)
+
+    def _popup_at(self, x: float, y: float) -> None:
+        """Select whatever is under the pointer, then offer the menu there.
+
+        Selecting first is what makes the menu about the row it was opened
+        over. Without it the actions would act on whatever had been selected
+        beforehand, which is the row the user is looking away from.
+        """
+        row = self._row_at(y)
+        if row is None:
+            return
+        self.selection.set_selected(row)
+
+        # Built empty and filled in: passing the fields to the constructor is
+        # deprecated for a boxed type, and silently ignored.
+        at = Gdk.Rectangle()
+        at.x, at.y, at.width, at.height = int(x), int(y), 1, 1
+        self._menu.set_pointing_to(at)
+        self._menu.popup()
+
+    def _row_at(self, y: float) -> int | None:
+        """Which row of the model sits at ``y``, in this widget's coordinates.
+
+        A ColumnView offers no lookup from a position to a row, and its row
+        widgets are recycled, so neither their order among the children nor
+        their identity says which item they are showing. What is dependable is
+        that every row here is the same height -- one template, one line, no
+        wrapping -- so one measured row answers for all of them.
+
+        Measured rather than divided out of the total: the view is stretched to
+        fill its viewport, so its height is the scrolled window's whenever the
+        list is shorter than that, and dividing by the number of rows would put
+        every click on a row of its own.
+
+        The point is translated into the ColumnView's own coordinates first,
+        which is what accounts for the scroll position: the gesture reports
+        where in the viewport the click was, and the list is taller than that.
+        """
+        rows = self.tree_model.get_n_items()
+        if not rows:
+            return None
+
+        ok, point = self.compute_point(self.column_view, Graphene.Point().init(0, y))
+        if not ok:
+            return None
+
+        header = self.column_view.get_first_child()
+        top = header.get_height() if header is not None and header.get_visible() else 0
+        row_height = self._row_height()
+        if row_height <= 0:
+            return None
+
+        position = int((point.y - top) // row_height)
+        return position if 0 <= position < rows else None
+
+    def _row_height(self) -> int:
+        """How tall one row is, taken from one that has been drawn.
+
+        Zero before the view has had a layout pass, which is the answer that
+        makes _row_at decline rather than guess.
+        """
+        for child in _descendants(self.column_view):
+            if child.__gtype__.name == "GtkColumnViewRowWidget" and child.get_height():
+                return child.get_height()
+        return 0
 
     def _hide_column_header(self) -> None:
         """Drop the header row of the one column the sidebar has.

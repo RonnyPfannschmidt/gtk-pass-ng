@@ -402,6 +402,81 @@ class TestKeyboard:
 
         assert copied == [expected]
 
+    def test_a_field_is_copied_before_the_pane_has_the_entry(
+        self, demo_backend_configured
+    ):
+        """What the sidebar's context menu runs into.
+
+        A right-click selects the row and puts the menu over it at once, so
+        Copy Password can be chosen while the store is still decrypting.
+        Reading the pane then would copy an empty string, or whatever the
+        previous entry left in it, so the entry is fetched for the copy.
+        """
+        copied = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            wanted = backend.list_passwords()[0].name
+
+            # Selected in the tree without going through the detail pane, as a
+            # right-click does before its menu is even on screen.
+            window.password_list.expand_all()
+            names = [
+                window.password_list.tree_model.get_row(index).get_item().password_name
+                for index in range(window.password_list.tree_model.get_n_items())
+            ]
+            window.password_list.selection.set_selected(names.index(wanted))
+            window._shown = None
+
+            window.activate_action("win.copy-password", None)
+            pump_until(lambda: bool(copied), timeout_seconds=5.0)
+            return backend.get_password(wanted).password
+
+        expected = run_in_application(copy)
+
+        assert copied == [expected]
+
+    def test_an_entry_with_no_username_says_so_rather_than_copying_nothing(
+        self, demo_backend_configured
+    ):
+        from pathlib import Path
+
+        from gtkpass.backends import PasswordEntry
+
+        copied = []
+        toasts: list[str] = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            window._toast = toasts.append
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            name = backend.list_passwords()[0].name
+            backend.get_password = lambda wanted: PasswordEntry(
+                name=wanted, path=Path("demo://x"), content="s3cret\n"
+            )
+            window.password_list.expand_all()
+            names = [
+                window.password_list.tree_model.get_row(index).get_item().password_name
+                for index in range(window.password_list.tree_model.get_n_items())
+            ]
+            window.password_list.selection.set_selected(names.index(name))
+            window._shown = None
+
+            window.activate_action("win.copy-username", None)
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+
+        run_in_application(copy)
+
+        assert copied == []
+        assert toasts and "no username" in toasts[0]
+
 
 class TestSearch:
     """The box sat in the sidebar with nothing behind it, and a preference
