@@ -16,7 +16,36 @@ BLUEPRINTS := src/gtkpass/ui/blueprints
 # excluded from the sync explicitly.
 SYSTEM_PROVIDED := pygobject pycairo
 NO_INSTALL := $(foreach package,$(SYSTEM_PROVIDED),--no-install-package $(package))
-SYSTEM_PYTHON ?= /usr/bin/python3
+
+# Which interpreter that is, asked rather than assumed. This was hardcoded to
+# /usr/bin/python3, which is right on most machines and quietly wrong on one
+# whose bindings belong to a different minor version -- and quietly is the
+# problem, the answer arriving much later as an ImportError from inside the
+# application. scripts/system-python.sh settles it the only way that settles it,
+# by importing both, and says what to install when nothing can.
+#
+# Left empty here so the script chooses. Name one to override, in either
+# spelling, and it is checked rather than taken on trust:
+#
+#   make sync SYSTEM_PYTHON=/usr/bin/python3.13
+SYSTEM_PYTHON ?=
+SELECT_PYTHON := ./scripts/system-python.sh $(SYSTEM_PYTHON)
+
+# The interpreter the suite runs against, and the reason `test` is one target
+# rather than three spellings of it. The default is the development
+# environment; CI overrides it with the interpreter that has the wheel or the
+# RPM installed, so what CI runs is this target rather than a copy of it that
+# drifts -- which is what the top of this file claims and, until this existed,
+# was not true of the tests.
+#
+#   make test                                     the editable install
+#   make test PYTHON=build/wheel-venv/bin/python   an installed wheel
+#   make test PYTHON=python3                      an installed rpm
+#
+# Assigned rather than defaulted, so an exported PYTHON in somebody's shell
+# cannot redirect the suite behind their back. A command-line override still
+# wins, that being the spelling above.
+PYTHON := uv run python
 
 # Every target below reuses the environment as-is rather than re-resolving it;
 # without this `uv run` re-syncs and tries to build the excluded packages again.
@@ -33,9 +62,9 @@ HEADLESS := ./scripts/headless-session.sh
 FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
 
-.PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev \
-	devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo rpm sysext \
-	sysext-test sysext-install clean
+.PHONY: help venv sync hooks ui schemas check test test-gui test-wheel build \
+	run run-dev devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo \
+	rpm sysext sysext-test sysext-install clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -44,6 +73,8 @@ help:
 	@echo "schemas  compile the GSettings schema"
 	@echo "check    run every pre-commit hook (lint, format, types)"
 	@echo "test     run the test suite headless"
+	@echo "test-gui run only the tests that need a display"
+	@echo "test-wheel  install the built wheel and run the suite against that"
 	@echo "build    build the wheel and sdist"
 	@echo "run      launch the application (make run ARGS=\"--debug\")"
 	@echo "devstore create a throwaway store with fake passwords"
@@ -61,8 +92,12 @@ help:
 # --allow-existing so this is idempotent. Without it `uv venv` refuses outright
 # once .venv is there, which made `make sync` -- the documented way to pick up a
 # dependency change -- fail for everyone who had already run it once.
+#
+# The `&&` matters: a failed command substitution leaves the variable empty and
+# the line would otherwise carry on and build the environment against nothing.
 venv:
-	uv venv --system-site-packages --python $(SYSTEM_PYTHON) --allow-existing
+	python="$$($(SELECT_PYTHON))" && \
+		uv venv --system-site-packages --python "$$python" --allow-existing
 
 sync: venv
 	UV_NO_SYNC=0 uv sync --all-extras $(NO_INSTALL)
@@ -84,13 +119,49 @@ check:
 	uv run pre-commit run --all-files
 
 test: schemas
-	$(HEADLESS) uv run pytest
+	$(HEADLESS) $(PYTHON) -m pytest
 
 test-gui: schemas
-	$(HEADLESS) uv run pytest -m gui
+	$(HEADLESS) $(PYTHON) -m pytest -m gui
 
 build:
 	uv build
+
+# The suite against the wheel, installed. This is the question the working copy
+# cannot answer -- nobody runs the working copy -- and it is where the faults
+# packaging introduces show up: a wheel that installed without its .ui files, a
+# schema that never reached the compiled cache, an entry point resolving to
+# nothing. CI runs this same target; `make build && make test-wheel` is that job
+# on a developer's machine.
+#
+# --system-site-packages for PyGObject, which comes from the distribution here
+# as everywhere else, and the system interpreter for the same reason.
+WHEEL_VENV := build/wheel-venv
+
+test-wheel: schemas
+	@wheels=$$(ls -1 dist/*.whl 2>/dev/null | wc -l); \
+	if [ "$$wheels" != 1 ]; then \
+		echo "make test-wheel: expected one wheel in dist/, found $$wheels."; \
+		echo "  none: run make build"; \
+		echo "  more: run make clean build -- dist/ keeps every wheel ever"; \
+		echo "        built here, and an old one installed is an old one"; \
+		echo "        tested, silently, which is what this target exists to"; \
+		echo "        stop happening"; \
+		exit 1; \
+	fi
+	rm -rf $(WHEEL_VENV)
+	python="$$($(SELECT_PYTHON))" && \
+		"$$python" -m venv --system-site-packages $(WHEEL_VENV)
+	$(WHEEL_VENV)/bin/pip install --quiet dist/*.whl pytest
+	# The src/ layout is what makes this honest: `import gtkpass` from the
+	# repository root finds nothing, so what the suite exercises can only be
+	# the installed copy. Said out loud, because a path that quietly resolved
+	# to the checkout would make the whole target agree with itself and mean
+	# nothing.
+	$(WHEEL_VENV)/bin/python -c \
+		"import gtkpass; print(gtkpass.__file__); \
+		assert 'site-packages' in gtkpass.__file__, 'not the installed copy'"
+	$(MAKE) test PYTHON=$(WHEEL_VENV)/bin/python
 
 # Pass arguments through: make run ARGS="--debug"
 run:

@@ -1,0 +1,216 @@
+"""How the project spells the interpreter it builds and tests against.
+
+PyGObject and pycairo come from the distribution, so the environment has to be
+created against an interpreter that already has them. That was hardcoded to
+``/usr/bin/python3``, which is right on most machines and quietly wrong on one
+whose bindings belong to a different minor version -- and quietly is the whole
+problem, since the answer arrives much later as an ImportError from inside the
+application.
+
+`scripts/system-python.sh` asks instead, and `make test PYTHON=...` is the other
+half: one definition of "run the suite" that the development environment, an
+installed wheel and an installed RPM can all be pointed at, rather than three
+spellings in three places, one of which is a CI workflow nobody reads until it
+breaks.
+"""
+
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+SELECT = ROOT / "scripts" / "system-python.sh"
+MAKEFILE = ROOT / "Makefile"
+WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+pytestmark = pytest.mark.skipif(
+    not sys.platform.startswith("linux") or shutil.which("bash") is None,
+    reason="the toolchain scripts are for the Linux development environment",
+)
+
+
+def run(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(SELECT), *args], capture_output=True, text=True, check=False
+    )
+
+
+def split_jobs(workflow: str) -> dict[str, str]:
+    """The workflow's jobs, by name. Two-space keys under `jobs:` are jobs."""
+    jobs: dict[str, str] = {}
+    name: str | None = None
+    body: list[str] = []
+    for line in workflow.split("\njobs:\n", 1)[1].splitlines():
+        header = re.match(r"^  ([\w-]+):\s*$", line)
+        if header:
+            if name:
+                jobs[name] = "\n".join(body)
+            name, body = header.group(1), []
+        elif name:
+            body.append(line)
+    if name:
+        jobs[name] = "\n".join(body)
+    return jobs
+
+
+def installed_packages(job: str) -> set[str]:
+    """What a job's `dnf install` lines name, continuations included."""
+    packages: set[str] = set()
+    collecting = False
+    for line in job.splitlines():
+        if "dnf " in line and " install" in line:
+            collecting = True
+            line = line.split(" install", 1)[1]
+        elif not collecting:
+            continue
+        packages.update(word for word in line.split() if not word.startswith("-"))
+        collecting = line.rstrip().endswith("\\")
+    return {package.rstrip("\\") for package in packages}
+
+
+class TestChoosingTheInterpreter:
+    def test_the_script_is_there_and_executable(self):
+        assert SELECT.is_file(), "scripts/system-python.sh is missing"
+        assert SELECT.stat().st_mode & 0o111, "the script is not executable"
+
+    def test_it_names_one_that_has_the_bindings(self):
+        """The check that matters: what it prints must actually import gi."""
+        chosen = run().stdout.strip()
+        assert chosen, "no interpreter was chosen"
+
+        proof = subprocess.run(
+            [chosen, "-c", "import gi"], capture_output=True, text=True, check=False
+        )
+        assert proof.returncode == 0, f"{chosen} cannot import gi: {proof.stderr}"
+
+    def test_it_names_an_absolute_path(self):
+        """Not `python3` off PATH.
+
+        Whatever pyenv, conda or a uv toolchain has put in front is somebody
+        else's interpreter, and a uv-managed one's site-packages is precisely
+        the one without the distribution's bindings.
+        """
+        assert run().stdout.strip().startswith("/")
+
+    def test_an_explicit_choice_is_taken(self):
+        result = run(sys.executable)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == sys.executable
+
+    def test_an_explicit_choice_is_checked_rather_than_trusted(self, tmp_path):
+        """Naming the wrong interpreter earns the same answer as having none.
+
+        Taken on trust, it produces an environment that builds and then fails
+        from inside the application, which is the failure this exists to stop.
+        """
+        stub = tmp_path / "python3"
+        stub.write_text("#!/bin/sh\nexit 1\n")
+        stub.chmod(0o755)
+
+        result = run(str(stub))
+
+        assert result.returncode != 0
+        assert "cannot import gi" in result.stderr
+        assert "python3-gobject" in result.stderr, "it should say what to install"
+
+    def test_no_argument_is_not_an_argument(self):
+        """The Makefile passes an unset SYSTEM_PYTHON as an empty word."""
+        assert run("").returncode == 0
+
+    def test_pycairo_is_preferred_and_not_required(self, tmp_path):
+        """PyGObject has not depended on it for some releases.
+
+        Debian's python3-gi does not pull a python3-cairo, and the documented
+        apt line does not name one either, so insisting would refuse to build
+        an environment that works.
+        """
+        stub = tmp_path / "python3"
+        stub.write_text(
+            '#!/bin/sh\ncase "$2" in *cairo*) exit 1 ;; *) exit 0 ;; esac\n'
+        )
+        stub.chmod(0o755)
+
+        result = run(str(stub))
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(stub)
+
+
+class TestOneDefinitionOfRunningTheSuite:
+    """`test` takes an interpreter, so CI can run the target rather than copy it.
+
+    The top of the Makefile says CI runs these same targets so there is one
+    definition rather than two that drift. That was true of `check` and untrue
+    of the tests, which CI spelled out by hand in three places.
+    """
+
+    @pytest.fixture
+    def makefile(self) -> str:
+        return MAKEFILE.read_text()
+
+    def test_the_suite_runs_against_a_chosen_interpreter(self, makefile):
+        assert "$(HEADLESS) $(PYTHON) -m pytest" in makefile
+
+    def test_the_default_is_the_development_environment(self, makefile):
+        assert "PYTHON := uv run python" in makefile, (
+            "assigned rather than defaulted, so an exported PYTHON cannot "
+            "redirect the suite; a command-line override still wins"
+        )
+
+    def test_the_environment_is_built_on_the_chosen_interpreter(self, makefile):
+        """`make sync` must not hardcode one either."""
+        assert "./scripts/system-python.sh" in makefile
+        hardcoded = [
+            line
+            for line in makefile.splitlines()
+            if re.match(r"\s*SYSTEM_PYTHON\s*[:?]?=\s*\S", line)
+        ]
+        assert hardcoded == [], (
+            f"the interpreter is chosen by the script, not written in: {hardcoded}"
+        )
+
+    @pytest.mark.parametrize("target", ["test", "test-gui", "test-wheel"])
+    def test_the_target_is_declared_phony(self, makefile, target):
+        phony = makefile.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
+        assert target in phony.split()
+
+
+class TestCIRunsTheseTargets:
+    @pytest.fixture
+    def workflow(self) -> str:
+        return WORKFLOW.read_text()
+
+    def test_the_suite_is_never_spelled_out_by_hand(self, workflow):
+        """A pytest invocation here is a second definition, and it drifts."""
+        offenders = [
+            line
+            for line in workflow.splitlines()
+            if "-m pytest" in line and not line.lstrip().startswith("#")
+        ]
+        assert offenders == [], offenders
+
+    def test_the_wheel_is_tested_through_the_target(self, workflow):
+        assert "make test-wheel" in workflow
+
+    def test_the_rpm_is_tested_through_the_target(self, workflow):
+        assert "make test PYTHON=python3" in workflow
+
+    def test_the_jobs_that_call_make_install_it(self, workflow):
+        """A container image that has no make cannot run a Makefile target.
+
+        Nothing about the failure points at this: the step reports `make: not
+        found` from a job whose dnf line looks complete.
+        """
+        for name, job in split_jobs(workflow).items():
+            if not re.search(r"run: make\b|make test\b", job):
+                continue
+            if "container:" not in job:
+                continue
+            assert "make" in installed_packages(job), (
+                f"the {name} job runs make and does not install it"
+            )
