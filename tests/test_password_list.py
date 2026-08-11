@@ -182,6 +182,58 @@ class TestExpansionSurvivesARebuild:
         assert "added" not in visible_rows(view)
 
 
+class TestSelectionSurvivesARebuild:
+    """The highlight is the other half of keeping your place.
+
+    A rebuilt tree has no selection at all, so a sync left the detail pane
+    showing an entry that nothing in the sidebar pointed at.
+    """
+
+    @pytest.fixture
+    def stocked(self, view, backend):
+        for path in ("work/mail", "personal/bank"):
+            view.add_password(backend, path)
+        view.expand_all()
+        return backend
+
+    def rebuild(self, view, paths=("work/mail", "personal/bank")):
+        view.clear_all()
+        record = view.add_backend("demo_1", "Demo", "emblem-default-symbolic")
+        for path in paths:
+            view.add_password(record, path)
+        view.restore_expansion()
+        view.restore_selection()
+
+    def test_the_selected_entry_is_selected_again(self, view, stocked):
+        view.selection.set_selected(visible_rows(view).index("mail"))
+
+        self.rebuild(view)
+
+        assert view.get_selected_password() == ("demo_1", "work/mail")
+
+    def test_restoring_does_not_re_announce_the_selection(self, view, stocked):
+        """Announcing it would decrypt an entry the pane is already showing."""
+        view.selection.set_selected(visible_rows(view).index("mail"))
+        seen = []
+        view.connect_password_selected(lambda *args: seen.append(args))
+
+        self.rebuild(view)
+
+        assert seen == []
+
+    def test_an_entry_that_is_gone_leaves_nothing_selected(self, view, stocked):
+        view.selection.set_selected(visible_rows(view).index("mail"))
+
+        self.rebuild(view, paths=("personal/bank",))
+
+        assert view.get_selected_password() is None
+
+    def test_nothing_selected_stays_nothing_selected(self, view, stocked):
+        self.rebuild(view)
+
+        assert view.get_selected_password() is None
+
+
 class TestFiltering:
     """The sidebar is filtered by rebuilding it, not by hiding rows.
 

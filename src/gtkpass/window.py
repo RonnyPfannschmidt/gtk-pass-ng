@@ -722,6 +722,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
             # at a time, and a tree that unfolds as it fills reads better than
             # one that sits shut until the slowest store has answered.
             self.password_list.restore_expansion()
+            # And then the highlight, which needs the folders open to have a
+            # row to sit on.
+            self.password_list.restore_selection()
             self._listing_answered(request, listed=bool(passwords))
 
         def report(error):

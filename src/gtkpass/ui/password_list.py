@@ -151,6 +151,11 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         #: (backend id, path) of the rows that were open when the tree was last
         #: thrown away. Every write and every sync rebuilds it from nothing.
         self._expanded: set[tuple[str, str]] = set()
+        #: The entry that was selected then, to be pointed at again.
+        self._selected: tuple[str, str] | None = None
+        #: Set while the selection is being put back, so that doing so does not
+        #: read as the user choosing an entry.
+        self._restoring = False
 
     def _install_context_menu(self) -> None:
         """Offer the entry actions where the entries are.
@@ -262,6 +267,10 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             header.set_visible(False)
 
     def _selection_changed(self, *_args) -> None:
+        if self._restoring:
+            # Putting the highlight back on the entry the pane is already
+            # showing. Announcing it would decrypt that entry a second time.
+            return
         selected = self.get_selected_password()
         if selected and self._on_password_selected:
             self._on_password_selected(*selected)
@@ -431,6 +440,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         way back to it.
         """
         self._remember_expansion()
+        self._selected = self.get_selected_password()
         self._backends.clear()
         self.root.remove_all()
 
@@ -461,6 +471,32 @@ class PasswordTreeView(Gtk.ScrolledWindow):
                 node = row.get_item()
                 state.add((node.backend_id, node.path))
         return state
+
+    def restore_selection(self) -> None:
+        """Point at the entry that was selected before the tree was rebuilt.
+
+        Only rows the model has built can be selected, so this runs after
+        restore_expansion: an entry inside a folder that is shut again has no
+        row to carry the highlight.
+
+        An entry that is no longer there leaves nothing selected, which is the
+        truth -- something else has to decide what the detail pane does about
+        an entry that has been deleted underneath it.
+        """
+        if self._selected is None:
+            return
+        for index in range(self.tree_model.get_n_items()):
+            row = self.tree_model.get_row(index)
+            node = row.get_item() if row is not None else None
+            if node is not None and (node.backend_id, node.password_name) == (
+                self._selected
+            ):
+                self._restoring = True
+                try:
+                    self.selection.set_selected(index)
+                finally:
+                    self._restoring = False
+                return
 
     def remembers_expansion(self) -> bool:
         """Whether there is a previous shape to go back to.
