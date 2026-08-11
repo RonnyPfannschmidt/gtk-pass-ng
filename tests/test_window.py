@@ -580,6 +580,93 @@ class TestSearch:
         assert run_in_application(search) == "ready"
 
 
+class TestABackendThatWouldNotLoad:
+    """It said so once, in a toast, for five seconds, and then never again.
+
+    The sidebar row read "(unavailable)" and carried no reason, and there was
+    no way to try again short of quitting -- though what stops a backend
+    loading is almost always outside the application and fixed there: a store
+    on a mount that was not up, a locked keyring, an agent that had not
+    started.
+    """
+
+    @pytest.fixture
+    def broken(self, demo_backend_configured, monkeypatch):
+        from gtkpass.backends import BackendError
+        from gtkpass.window import GTKPassWindow
+
+        def refuse(self, backend_type, settings):
+            raise BackendError("the store is not mounted")
+
+        monkeypatch.setattr(GTKPassWindow, "_create_backend", refuse)
+
+    def failed_window(self, app):
+        from gtkpass.window import GTKPassWindow
+
+        window = GTKPassWindow(application=app)
+        assert pump_until(lambda: bool(window.failed_backends)), (
+            "the backend never failed"
+        )
+        return window
+
+    def test_the_row_carries_the_reason(self, broken):
+        def tooltip(app):
+            window = self.failed_window(app)
+            pump_until(lambda: window.password_list.root.get_n_items() > 0)
+            return window.password_list.root.get_item(0).tooltip
+
+        assert "not mounted" in run_in_application(tooltip)
+
+    def test_the_row_says_it_is_unavailable(self, broken):
+        def name(app):
+            window = self.failed_window(app)
+            pump_until(lambda: window.password_list.root.get_n_items() > 0)
+            return window.password_list.root.get_item(0).name
+
+        assert "unavailable" in run_in_application(name)
+
+    def test_the_toast_offers_a_retry(self, broken):
+        from gtkpass._gi import Adw as _Adw
+
+        toasts: list[_Adw.Toast] = []
+
+        def report(app):
+            window = self.failed_window(app)
+            window.toast_overlay.add_toast = toasts.append
+            window._show_backend_errors()
+
+        run_in_application(report)
+
+        assert toasts
+        assert toasts[0].get_button_label() == "Retry"
+        assert toasts[0].get_action_name() == "win.reload"
+
+    def test_reloading_tries_the_backends_again(self, broken, monkeypatch):
+        """The point of the retry: what failed before need not fail again."""
+
+        def reload(app):
+            window = self.failed_window(app)
+
+            # Whatever was wrong is now put right, as it would be outside.
+            monkeypatch.undo()
+            window.activate_action("win.reload", None)
+
+            assert pump_until(
+                lambda: window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+            ), "the reload did not build the backend"
+            return window.failed_backends
+
+        assert run_in_application(reload) == []
+
+    def test_reloading_is_always_offered(self, demo_backend_configured):
+        """It is how somebody picks up a store that changed under the window."""
+
+        def enabled(app):
+            return listed_window(app).lookup_action("reload").get_enabled()
+
+        assert run_in_application(enabled) is True
+
+
 class TestLoadingStaysOffTheUiThread:
     """Nothing slow may happen between construction and a window on screen.
 

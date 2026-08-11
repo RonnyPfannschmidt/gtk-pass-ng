@@ -221,6 +221,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         sync_action.set_enabled(False)
         self.add_action(sync_action)
 
+        # Building the backends again from the configuration that is already
+        # there. What a failed backend needs once whatever stopped it -- an
+        # unmounted store, a locked keyring, an agent that had not started --
+        # has been dealt with outside the application.
+        reload_action = Gio.SimpleAction.new("reload", None)
+        reload_action.connect("activate", self._on_reload)
+        self.add_action(reload_action)
+
         # Reaching the search box from the keyboard. Always available: there is
         # nothing to break by focusing an empty one.
         search_action = Gio.SimpleAction.new("search", None)
@@ -427,6 +435,17 @@ class GTKPassWindow(Adw.ApplicationWindow):
         )
         self._backend_settings[backend_id] = backend_gsettings
 
+    def _on_reload(self, _action, _param) -> None:
+        """Build every configured backend again, from scratch.
+
+        The same path a configuration change takes, because it is the same
+        work: the manager is replaced and everything is asked again. What
+        differs is the reason -- nothing here changed, something out there did.
+        """
+        logger.info("Reloading the backends on request")
+        self._rebuild_backends()
+        self._toast("Reloading...")
+
     def _on_backends_changed(self, settings, key):
         """Handle backend configuration changes.
 
@@ -435,7 +454,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
             key: Changed key (backend-instances)
         """
         logger.info("Backend configuration changed, reloading...")
+        self._rebuild_backends()
 
+    def _rebuild_backends(self) -> None:
+        """Throw the manager away and load everything again."""
         # Shut the old manager down first; it owns a thread pool, and replacing
         # it without doing so leaks four threads on every settings change.
         self.backend_manager.shutdown()
@@ -649,13 +671,16 @@ class GTKPassWindow(Adw.ApplicationWindow):
             )
             self._list_into(request, backend_id, backend_node)
 
-        # Add failed backends with error icon
-        for backend_id, _backend_type, _error in self.failed_backends:
+        # Add failed backends with error icon, carrying why they failed. The
+        # row said "unavailable" and nothing else, so the reason lived only in
+        # a toast -- for five seconds, once, at startup.
+        for backend_id, backend_type, error in self.failed_backends:
             display_name = self._get_backend_display_name(backend_id)
             self.password_list.add_backend(
                 backend_id=backend_id,
                 backend_name=f"{display_name} (unavailable)",
                 icon_name="dialog-error-symbolic",
+                tooltip=f"{backend_type}: {error}",
             )
 
         # The backend rows exist; their entries append to a model the tree is
@@ -737,22 +762,31 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._showing_entry = False
 
     def _show_backend_errors(self):
-        """Show a toast notification for failed backends."""
+        """Say that a backend would not load, and offer to try it again.
+
+        A store on a mount that is not up yet, a GPG agent that had not
+        started, a keyring that was locked: every one of those is fixed outside
+        the application and then wants retrying. Without this the only way to
+        try again was to quit and start over, so the toast carries the retry
+        rather than only the news.
+        """
         if len(self.failed_backends) == 0:
             return
 
-        # Create error message
         if len(self.failed_backends) == 1:
             backend_id, backend_type, error = self.failed_backends[0]
-            message = f"Backend '{backend_id}' ({backend_type}) failed: {error}"
+            name = self._get_backend_display_name(backend_id)
+            message = f"{name} ({backend_type}) did not load: {error}"
         else:
-            message = f"{len(self.failed_backends)} backend(s) failed to load"
+            message = f"{len(self.failed_backends)} backends did not load"
 
         toast = Adw.Toast.new(message)
         toast.set_timeout(5)
+        toast.set_button_label("Retry")
+        toast.set_action_name("win.reload")
         # This add_toast was missing, so a backend that failed to load said so
         # only in the log. The sidebar row was the sole indication, and it did
-        # not carry the reason.
+        # not carry the reason -- it does now, in its tooltip.
         self.toast_overlay.add_toast(toast)
 
         logger.warning(f"Failed backends: {message}")

@@ -164,6 +164,10 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
         <attribute name="label" translatable="yes">Sync with Remote</attribute>
         <attribute name="action">win.sync</attribute>
       </item>
+      <item>
+        <attribute name="label" translatable="yes">Reload Stores</attribute>
+        <attribute name="action">win.reload</attribute>
+      </item>
     </section>
     <section>
       <item>

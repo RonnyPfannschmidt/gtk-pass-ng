@@ -32,6 +32,10 @@ class PasswordNode(GObject.Object):
 
     name = GObject.Property(type=str, default="")
     icon_name = GObject.Property(type=str, default="")
+    #: What the row says when the pointer rests on it. Empty for almost every
+    #: row; a backend that would not load carries the reason it gave, which
+    #: otherwise lived only in a toast that had five seconds and then went.
+    tooltip = GObject.Property(type=str, default="")
 
     def __init__(
         self,
@@ -39,8 +43,9 @@ class PasswordNode(GObject.Object):
         icon_name: str = "",
         backend_id: str = "",
         password_name: str = "",
+        tooltip: str = "",
     ) -> None:
-        super().__init__(name=name, icon_name=icon_name)
+        super().__init__(name=name, icon_name=icon_name, tooltip=tooltip)
         #: The backend this row belongs to. Every descendant carries it, so a
         #: selected entry knows its backend without walking back up the tree.
         self.backend_id = backend_id
@@ -60,10 +65,13 @@ class BackendEntries:
     and missed the rest of the store entirely.
     """
 
-    def __init__(self, backend_id: str, name: str, icon_name: str) -> None:
+    def __init__(
+        self, backend_id: str, name: str, icon_name: str, tooltip: str = ""
+    ) -> None:
         self.backend_id = backend_id
         self.name = name
         self.icon_name = icon_name
+        self.tooltip = tooltip
         #: Full entry paths, in the order they were listed.
         self.entries: list[str] = []
         #: This backend's row while it is shown, None while it is filtered out.
@@ -250,7 +258,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             self._on_password_selected(*selected)
 
     def add_backend(
-        self, backend_id: str, backend_name: str, icon_name: str
+        self, backend_id: str, backend_name: str, icon_name: str, tooltip: str = ""
     ) -> BackendEntries:
         """Add a backend as a root node.
 
@@ -258,13 +266,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             backend_id: Backend identifier
             backend_name: Display name
             icon_name: Icon name
+            tooltip: What the row says when the pointer rests on it, which for
+                a backend that would not load is why
 
         Returns:
             The backend's record, to be passed back as the parent of its
             entries. It outlives the row, which a filter may take away and
             give back.
         """
-        record = BackendEntries(backend_id, backend_name, icon_name)
+        record = BackendEntries(backend_id, backend_name, icon_name, tooltip)
         self._backends.append(record)
         if not self._filter:
             # Unfiltered, a backend has a row before it has entries: the window
@@ -284,7 +294,10 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             return record.node
 
         record.node = PasswordNode(
-            name=record.name, icon_name=record.icon_name, backend_id=record.backend_id
+            name=record.name,
+            icon_name=record.icon_name,
+            backend_id=record.backend_id,
+            tooltip=record.tooltip,
         )
         position = sum(
             1

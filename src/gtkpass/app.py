@@ -135,6 +135,7 @@ class GTKPassApp(Adw.Application):
         "win.copy-username": ["<Control><Shift>u"],
         "win.search": ["<Control>f"],
         "win.sync": ["<Control><Shift>s"],
+        "win.reload": ["<Control>r"],
         # Both spellings: Ctrl+? is the GNOME convention and needs a shift on
         # most layouts, and Ctrl+F1 is what the ones it does not work on have.
         "win.show-help-overlay": ["<Control>question", "<Control>F1"],
