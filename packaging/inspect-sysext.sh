@@ -51,6 +51,68 @@ while read -r entry; do
     esac
 done < <(awk '{print $NF}' <<<"$listing")
 
+echo "==> it carries its own SELinux labels"
+# A merged directory takes its attributes from the layer above, so the image's
+# usr/lib is what SELinux sees for /usr/lib on the whole system while this is
+# merged -- and on a Fedora ostree that is where the system users live. An image
+# labelled by the build machine instead of by the policy takes dnsmasq and the
+# NetworkManager dispatcher scripts down with it. Issue #23, and build-sysext.sh
+# says the rest.
+xattr_ids=$(unsquashfs -s "$image" | awk '/Number of xattr ids/ { print $NF }')
+[ "${xattr_ids:-0}" -gt 0 ] \
+    || fail "the image carries no xattrs, so every path in it is unlabelled"
+
+# Reading the values back means writing security.* xattrs somewhere, which
+# unsquashfs will only attempt as root -- and which the kernel will only allow
+# where SELinux is enabled. A user namespace covers the first half on a normal
+# machine; a CI container with no SELinux at all cannot do it, and says so
+# rather than reporting a check it did not make.
+labels=$(mktemp -d)
+trap 'rm -rf "$labels"' EXIT
+# Reading the value out of getfattr's own output rather than with
+# --only-values: the kernel returns a label with its terminating NUL, which a
+# command substitution strips with a warning on every file. Nothing here may end
+# in `head` either -- this script runs under pipefail, and the SIGPIPE that a
+# closed pipe sends the reader upstream would turn into a silent fallback to the
+# weaker check below.
+extracted_context() {
+    getfattr -n security.selinux --absolute-names "$1" 2>/dev/null \
+        | sed -n 's/^security\.selinux="\(.*\)"$/\1/p'
+}
+
+if unshare -Ur unsquashfs -no-progress -x -d "$labels/root" "$image" >/dev/null 2>&1 \
+    && lib_context=$(extracted_context "$labels/root/usr/lib") \
+    && [ -n "$lib_context" ]
+then
+    echo "    usr/lib is ${lib_context}"
+    # The type, not the level: a confined domain is refused on the type, and a
+    # policy that ranges the level would fail an s0 check while being right.
+    case "$lib_context" in
+        *:lib_t:*) ;;
+        *) fail "usr/lib is ${lib_context}, not lib_t; merging this relabels the host's" ;;
+    esac
+
+    # Whatever the extraction directory itself carries is what an unlabelled
+    # path in the image comes out as, having taken the label of where it landed
+    # rather than one of its own. Comparing against that rather than naming a
+    # type keeps this true wherever TMPDIR points. The image's own root is
+    # exempt: it is above the directory systemd overlays, and is never merged.
+    unlabelled=$(
+        getfattr -R -n security.selinux --absolute-names "$labels/root" 2>/dev/null \
+            | awk -v marker="security.selinux=\"$(extracted_context "$labels")\"" \
+                  -v root="$labels/root" '
+                /^# file: / { path = substr($0, 9); next }
+                $0 == marker && path != root { print substr(path, length(root) + 2) }
+            '
+    )
+    if [ -n "$unlabelled" ]; then
+        printf '%s\n' "$unlabelled" | sed -n '1,5s/^/    /p' >&2
+        fail "those paths carry no label of their own in the image"
+    fi
+else
+    echo "    (labels cannot be read back here; only their presence was checked)"
+fi
+
 echo "==> it ships no merged cache"
 # Each of these is a single file holding every application's entries. An
 # overlay carrying its own copy hides the host's rather than adding to it, so

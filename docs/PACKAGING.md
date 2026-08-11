@@ -166,6 +166,48 @@ to find it. If the icon does not appear in the shell, that is why.
 `ARCHITECTURE` is deliberately absent from the extension-release — systemd only
 checks it when set, and everything in the image is noarch.
 
+### The SELinux labels it carries
+
+A third one of the same shape, and the one that reaches furthest outside the
+application. An overlay directory takes its attributes from the layer above, so
+the image's own `usr/lib` is what SELinux sees for `/usr/lib` **on the whole
+system** while the extension is merged. On a Fedora ostree `/etc` has to stay
+mergeable, so package-created system users live in `/usr/lib/passwd` and are
+resolved through nss-altfiles. Label that directory wrong and every confined
+service loses the ability to look up its own user: `dnsmasq` exits with `unknown
+user or group: dnsmasq`, all five NetworkManager dispatcher scripts exit 126,
+and the machine has an address and a default route but no DNS. Every extension
+carries `usr/lib/extension-release.d` — that is what makes it an extension — so
+none of them escape this, whatever else they ship. Issue #23 is the report.
+
+It misdiagnoses easily. An interactive shell is unconfined and *is* allowed to
+search the wrong label, so `getent passwd dnsmasq` answers perfectly well while
+`dnsmasq` itself cannot.
+
+Nothing about this may be left to the build machine. `mksquashfs` stores xattrs
+by default, and a build in a container gets `container_file_t` on everything —
+podman's `:z` relabels the volume and the staged files inherit it — while a
+build on a runner with no SELinux gets no label at all. Both travel into the
+image, and the second is worse than the first.
+
+So `build-sysext.sh` does not relabel the staging tree. It asks
+`matchpathcon` what the target's policy says each path should be, writes the
+answers into a squashfs pseudo file, and has `mksquashfs` put them in the image
+itself — with `-xattrs-exclude '^security\.selinux'` dropping whatever the
+staging tree happened to carry. That is also the only approach that works in
+both places: a runner with no SELinux cannot write a `security.selinux` xattr to
+its own filesystem at all, so `setfiles` on the staging tree is not an option
+there. It needs `libselinux-utils` and a `file_contexts` from
+`selinux-policy-targeted`; `SYSEXT_FILE_CONTEXTS` names another.
+
+Three checks stand behind it. The build refuses to continue unless every staged
+path got a label and `usr/lib` came out `lib_t`. `inspect-sysext.sh` fails an
+image carrying no labels at all, and where it can read them back — which needs a
+process that may write `security.*` xattrs, so not in a CI container — it checks
+`usr/lib` by value and that nothing is unlabelled, saying which of the two it
+did. `test-sysext.sh` reads `/usr/lib` through the live merge, which is the only
+place the answer is the real one.
+
 ## What CI does with all this
 
 `.github/workflows/ci.yml` builds the RPM on Fedora 43 and 44, **installs** it,
@@ -262,6 +304,16 @@ backends are discoverable — so the vendored `python3-gnupg` arrived — and th
 packaged `.ui` files load. GNOME's own 156 schemas stayed visible throughout,
 which is what shipping no `gschemas.compiled` was for. Unmerging left `/usr`
 clean.
+
+The SELinux labels have been checked through a live merge on the machine that
+reported issue #23. With the image built the old way, `/usr/lib` merged as
+`container_file_t`, `dnsmasq` failed with `unknown user or group: dnsmasq` and
+all five NetworkManager dispatcher scripts exited 126. With the labels computed
+into the image, `/usr/lib` merges as `system_u:object_r:lib_t:s0`, `dnsmasq`
+starts and serves, every dispatcher script exits 0, and there are no denials.
+The same build has been run inside a plain `fedora:44` container — the shape CI
+uses — and produces an image labelled the same way, which the container build
+did not before.
 
 Not done:
 

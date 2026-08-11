@@ -92,6 +92,28 @@ echo "==> the merge put the application on the system"
 # inspection could not answer.
 test -x /usr/bin/gtkpass || { echo "FAIL: /usr/bin/gtkpass is not there"; exit 1; }
 
+echo "==> and did not relabel the host's /usr/lib"
+# The check the inspection can only make against the image. A merged directory
+# takes its attributes from the layer above, so an extension carrying the wrong
+# label for usr/lib puts that label on the whole system's /usr/lib -- which on a
+# Fedora ostree is where the system users live, and confined services that
+# cannot search it lose the ability to look up their own. dnsmasq is the one
+# that says so out loud; issue #23 has the rest. Reading it here, through the
+# merge, is the only place the answer is the real one.
+merged_context=$(getfattr -n security.selinux --absolute-names /usr/lib 2>/dev/null \
+    | sed -n 's/^security\.selinux="\(.*\)"$/\1/p')
+# On the type rather than the whole context: an MLS host ranges the level, and
+# the type is what a confined domain is refused on.
+case "$merged_context" in
+    "") echo "    (no SELinux on this machine, so nothing to check)" ;;
+    *:lib_t:*) echo "    /usr/lib is ${merged_context}" ;;
+    *)
+        echo "FAIL: merging relabelled /usr/lib to ${merged_context}."
+        echo "      Confined services will not be able to look up their users."
+        exit 1
+        ;;
+esac
+
 echo "==> smoke testing what is now installed"
 # In a throwaway session even though this machine has a real one: a private bus
 # has no secret service, so nothing here can reach the real keyring; a window

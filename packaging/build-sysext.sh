@@ -51,6 +51,9 @@ fi
 IMAGE_NAME="${NAME}-${SYSEXT_ID}-${SYSEXT_VERSION_ID}"
 STAGE="dist/sysext/${IMAGE_NAME}"
 IMAGE_OUT="${STAGE}.raw"
+# The SELinux label of every path in the image, computed rather than copied off
+# the build machine. See the file contexts step below for why.
+PSEUDO="${STAGE}.pseudo"
 
 # The RPM has to be built for the same target, for the same reason: it is where
 # the interpreter version in those paths is decided. The derivatives report
@@ -172,7 +175,7 @@ while [ ${#queue[@]} -gt 0 ]; do
 done
 
 echo "==> staging"
-rm -rf "$STAGE" "$IMAGE_OUT"
+rm -rf "$STAGE" "$IMAGE_OUT" "$PSEUDO"
 mkdir -p "$STAGE"
 for rpm in "${bundled[@]}"; do
     echo "    $(basename "$rpm")"
@@ -234,10 +237,170 @@ SYSEXT_SCOPE=system
 SYSEXT_LEVEL=1.0
 EOF
 
+echo "==> file contexts"
+# The SELinux label of every path, worked out from the target's policy and
+# written into the image, rather than whatever the build machine happened to
+# label the staging tree.
+#
+# This is not a detail of the extension's own files. systemd-sysext merges with
+# an overlay, and a merged directory takes its attributes from the layer above --
+# so the image's usr/lib decides what SELinux sees for /usr/lib on the *whole
+# system* while the extension is merged. On a Fedora ostree that is where the
+# package-created system users live, because /etc has to stay mergeable, and
+# nss-altfiles reads them from there. Label it wrong and every confined service
+# loses the ability to look up its own user: dnsmasq exits with "unknown user or
+# group: dnsmasq", the NetworkManager dispatcher scripts all exit 126. An
+# extension has to carry usr/lib/extension-release.d to be an extension at all,
+# so no sysext escapes this, whatever else it ships. Issue #23.
+#
+# It is easy to misdiagnose, too: an interactive shell is unconfined and *is*
+# allowed to search the wrong label, so `getent passwd dnsmasq` answers happily
+# while dnsmasq itself cannot.
+#
+# Nothing here may be left to the build filesystem. Building in a container
+# gives the tree container_file_t (podman's :z relabels the volume, and the
+# staged files inherit it); building on a runner with no SELinux gives it no
+# label at all. mksquashfs stores xattrs by default, so either one travels.
+# Computing the labels instead is also the only approach that works in both
+# places -- a runner with no SELinux cannot write a security.selinux xattr to
+# its own filesystem at all, so `setfiles` on the staging tree is not an option
+# there.
+FILE_CONTEXTS="${SYSEXT_FILE_CONTEXTS:-/etc/selinux/targeted/contexts/files/file_contexts}"
+if [ ! -f "$FILE_CONTEXTS" ]; then
+    echo "error: no file_contexts at ${FILE_CONTEXTS}." >&2
+    echo "       Install selinux-policy-targeted, or name another file with" >&2
+    echo "       SYSEXT_FILE_CONTEXTS=. Building without it would ship an" >&2
+    echo "       unlabelled image, which relabels the host's /usr/lib on merge." >&2
+    exit 1
+fi
+if ! command -v matchpathcon >/dev/null; then
+    echo "error: matchpathcon is not installed (libselinux-utils)." >&2
+    exit 1
+fi
+
+# A pseudo definition is whitespace-separated, so a path containing a space
+# cannot be written as one. Nothing vendored so far has one; a package that did
+# would otherwise get a definition for a path that does not exist and no label
+# for the one that does.
+if [ -n "$(find "$STAGE" -name '* *' -print -quit)" ]; then
+    echo "error: a staged path contains whitespace, which a pseudo file cannot" >&2
+    echo "       express. $(find "$STAGE" -name '* *' -print -quit)" >&2
+    exit 1
+fi
+
+# Anything that is not a directory, a regular file or a symlink has no business
+# in a sysext, and would go unlabelled below rather than being noticed.
+if [ -n "$(find "$STAGE" -mindepth 1 ! -type d ! -type f ! -type l -print -quit)" ]; then
+    echo "error: $(find "$STAGE" -mindepth 1 ! -type d ! -type f ! -type l -print -quit)" \
+        "is not a file, directory or symlink" >&2
+    exit 1
+fi
+
+# matchpathcon answers for the path a file will have on the target, which is
+# not where it is staged -- hence the leading slash on the lookup and the
+# staged-relative name in the definition. -m names the kind of file, so the
+# lookup is decided by the policy alone; without it matchpathcon stat()s the
+# builder's own filesystem to guess, and answers about the build machine's
+# /usr/lib rather than about the image's.
+emit_contexts() {
+    local mode=$1 findtype=$2 path answers index
+    local -a staged=() contexts=()
+    while IFS= read -r path; do
+        staged+=("$path")
+    done < <(find "$STAGE" -mindepth 1 -type "$findtype" -printf '%P\n')
+    [ ${#staged[@]} -gt 0 ] || return 0
+
+    # Taken as a whole and checked, rather than read straight into the loop
+    # below: matchpathcon that cannot parse the policy answers for nothing, and
+    # a pipe would turn that into a pseudo file quietly missing those paths.
+    if ! answers=$(matchpathcon -m "$mode" -f "$FILE_CONTEXTS" -n "${staged[@]/#//}"); then
+        echo "error: matchpathcon could not answer from ${FILE_CONTEXTS}" >&2
+        return 1
+    fi
+    while IFS= read -r path; do
+        contexts+=("$path")
+    done <<< "$answers"
+
+    # One answer per path, in the order they were asked -- the definitions are
+    # paired up by position, so answers going missing would not leave paths
+    # unlabelled, it would label them with each other's contexts.
+    if [ "${#contexts[@]}" -ne "${#staged[@]}" ]; then
+        echo "error: matchpathcon answered for ${#contexts[@]} of ${#staged[@]}" \
+            "${mode} paths" >&2
+        return 1
+    fi
+
+    for index in "${!staged[@]}"; do
+        echo "${staged[index]} x security.selinux=${contexts[index]}"
+    done
+}
+
+{
+    emit_contexts dir d
+    emit_contexts file f
+    emit_contexts lnk_file l
+} > "$PSEUDO"
+
+# Every path, or the ones left out are unlabelled in the image and land on the
+# filesystem's default rather than on anything the policy chose.
+staged_count=$(find "$STAGE" -mindepth 1 | wc -l)
+labelled_count=$(wc -l < "$PSEUDO")
+if [ "$staged_count" -ne "$labelled_count" ]; then
+    echo "error: ${labelled_count} of ${staged_count} staged paths got a label" >&2
+    exit 1
+fi
+
+# The one the host's services depend on, checked by name rather than trusted.
+# On the type alone: the level is not what a confined domain is refused on, and
+# a policy that ranges it (an MLS one, or a file_contexts named through
+# SYSEXT_FILE_CONTEXTS) would fail a check that insisted on s0 while being
+# perfectly correct.
+lib_context=$(sed -n 's/^usr\/lib x security\.selinux=//p' "$PSEUDO")
+case "$lib_context" in
+    *:lib_t:*) ;;
+    *)
+        echo "error: usr/lib would be labelled '${lib_context}', not lib_t." >&2
+        echo "       Merging that relabels the host's /usr/lib; see issue #23." >&2
+        exit 1
+        ;;
+esac
+echo "    usr/lib is ${lib_context}, from $(basename "$FILE_CONTEXTS")"
+
+# mksquashfs gives hardlinked files a single shared xattr set, so two names for
+# one inode that want different labels both silently take whichever was written
+# last. The hardlinks an RPM brings are duplicate .pyc files next to each other,
+# which want the same label anyway -- but a vendored package that linked across
+# directories would produce a mislabelled image that looks perfectly built.
+conflicting=$(
+    awk '
+        NR == FNR {
+            split($0, field, " x security.selinux=")
+            context[field[1]] = field[2]
+            next
+        }
+        {
+            if ($1 in seen && seen[$1] != context[$2]) print $2
+            seen[$1] = context[$2]
+        }
+    ' "$PSEUDO" <(find "$STAGE" -mindepth 1 -type f -links +1 -printf '%i %P\n')
+)
+if [ -n "$conflicting" ]; then
+    echo "error: hardlinked files want different labels, and squashfs can only" >&2
+    echo "       hold one for both:" >&2
+    echo "$conflicting" | sed 's/^/       /' >&2
+    exit 1
+fi
+
 echo "==> squashfs"
 # -all-root because the extension is merged as root and the build runs as the
 # user; without it every file would carry the builder's uid.
-mksquashfs "$STAGE" "$IMAGE_OUT" -all-root -noappend -quiet -no-progress
+#
+# -xattrs-exclude drops the staging tree's own SELinux labels, and is not
+# optional: mksquashfs refuses outright ("Duplicate xattr name security.selinux")
+# when a pseudo definition names an xattr the file already carries, so on any
+# builder that labelled the tree this would fail rather than override.
+mksquashfs "$STAGE" "$IMAGE_OUT" -all-root -noappend -quiet -no-progress \
+    -xattrs-exclude '^security\.selinux' -pf "$PSEUDO"
 
 echo
 echo "==> built ${IMAGE_OUT} ($(du -h "$IMAGE_OUT" | cut -f1))"
