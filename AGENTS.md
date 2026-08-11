@@ -116,12 +116,19 @@ present the widget and read back what it rendered.
 ## Commands
 
 `make help` lists them. `make check` runs lint, format and types via pre-commit;
-`make test` runs the suite headless under xvfb, on its own X server and its own
-D-Bus session. Both halves are deliberate: GDK ignores `DISPLAY` whenever
-`WAYLAND_DISPLAY` is set, and a desktop session exports `GDK_BACKEND=wayland`
-itself, so xvfb alone put every window on the real screen and let a clipboard
-test overwrite whatever the developer had copied. conftest sets the same thing
-again for a bare `pytest`.
+`make test` runs the suite through `scripts/headless-session.sh`, which gives it
+its own X server, its own D-Bus session and its own `XDG_RUNTIME_DIR`. All three
+are deliberate. GDK ignores `DISPLAY` whenever `WAYLAND_DISPLAY` is set, and a
+desktop session exports `GDK_BACKEND=wayland` itself, so xvfb alone put every
+window on the real screen and let a clipboard test overwrite whatever the
+developer had copied; conftest sets the same thing again for a bare `pytest`.
+The runtime directory is the one that cannot move into conftest: a shared
+`XDG_RUNTIME_DIR` means the test bus activates a second `xdg-document-portal`
+over the real session's `/run/user/$UID/doc`, and tears that mount down on exit
+— after which no flatpak on the machine launches, while the portal service still
+reports itself healthy. Every headless call site goes through the wrapper, and
+`tests/test_headless_isolation.py` fails if one stops; DEVELOPMENT.md has the
+whole story.
 
 CI packages first and tests the packages: it builds the wheel, sdist and RPMs,
 then runs this suite against each of them installed, over two Fedora releases.

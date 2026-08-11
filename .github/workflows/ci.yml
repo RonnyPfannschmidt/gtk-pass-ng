@@ -174,10 +174,15 @@ jobs:
           print(gtkpass.__file__)
           sys.exit(0 if 'site-packages' in gtkpass.__file__ else 1)"
 
+      # Through the same wrapper `make test` uses, rather than a second spelling
+      # of it here: xvfb, a private bus and a private XDG_RUNTIME_DIR, with the
+      # reasoning for each in one place. The Makefile target itself is not an
+      # option in this job -- there is no uv and no dev environment, the point
+      # being to exercise the installed wheel.
       - name: the suite, against the installed wheel
         run: |
           glib-compile-schemas data/
-          xvfb-run -a dbus-run-session -- /tmp/venv/bin/python -m pytest
+          ./scripts/headless-session.sh /tmp/venv/bin/python -m pytest
 
   test-rpm:
     name: tests, installed rpm (fedora ${{ matrix.fedora }})
@@ -216,13 +221,13 @@ jobs:
       - name: the suite, against the installed rpm
         run: |
           glib-compile-schemas data/
-          xvfb-run -a dbus-run-session -- python3 -m pytest
+          ./scripts/headless-session.sh python3 -m pytest
 
       # The suite covers the code; this covers where the package put it --
       # the launcher on PATH, the schema in the system cache, the desktop files
       # where the shell looks. None of that is visible from inside a test run.
       - name: the installed package, in place
-        run: xvfb-run -a dbus-run-session -- ./packaging/smoke-test-install.sh
+        run: ./scripts/headless-session.sh ./packaging/smoke-test-install.sh
 
   windows:
     name: windows executable and installer

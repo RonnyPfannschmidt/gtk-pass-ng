@@ -22,17 +22,13 @@ SYSTEM_PYTHON ?= /usr/bin/python3
 # without this `uv run` re-syncs and tries to build the excluded packages again.
 export UV_NO_SYNC := 1
 
-# GTK4 has no usable headless backend, and a private bus keeps the tests away
-# from the developer's real keyring.
-#
-# The env prefix is not decoration. GDK ignores DISPLAY whenever WAYLAND_DISPLAY
-# is set, and a Wayland session commonly exports GDK_BACKEND=wayland outright,
-# so xvfb-run on its own connected to the developer's own compositor: windows
-# appeared on their screen and the clipboard tests overwrote whatever they had
-# copied -- which, working on this, may well have been a password. Xvfb was
-# started, and nothing used it.
-ISOLATE := env -u WAYLAND_DISPLAY GDK_BACKEND=x11
-HEADLESS := $(ISOLATE) xvfb-run -a dbus-run-session --
+# GTK4 has no usable headless backend, a private bus keeps the tests away from
+# the developer's real keyring, and a private XDG_RUNTIME_DIR keeps them away
+# from the real document portal -- whose mount a test run otherwise tears down
+# for the whole session, silently. The script is the one definition of all
+# three, shared with packaging/test-sysext.sh and the test jobs in CI; the
+# reasoning, including why none of it can move into conftest.py, is in there.
+HEADLESS := ./scripts/headless-session.sh
 
 FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
