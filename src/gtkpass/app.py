@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from typing import ClassVar
 
 from gtkpass._gi import Adw, Gio, GLib, Gtk
 from gtkpass.config import APP_ID
@@ -110,24 +111,54 @@ class GTKPassApp(Adw.Application):
         Adw.Application.do_startup(self)
         self._setup_actions()
 
+    #: Every accelerator the application installs, including the ones for
+    #: actions the window owns -- set_accels_for_action lives here, and a
+    #: binding registered before its window exists is still waiting when it
+    #: does.
+    #:
+    #: Delete is bound bare on purpose. It is the conventional binding, and the
+    #: shortcuts GtkApplication installs are managed-scope: an entry or a text
+    #: view with the focus consumes the key itself, so this only reaches the
+    #: window when nothing being edited wanted it. It asks before it acts in
+    #: any case.
+    #:
+    #: Copying is Ctrl+Shift+C rather than Ctrl+C for the other half of that
+    #: reason: Ctrl+C has to keep copying the selection out of the notes and
+    #: the username, which are selectable so that it can.
+    ACCELS: ClassVar[dict[str, list[str]]] = {
+        "app.quit": ["<Control>q"],
+        "app.preferences": ["<Control>comma"],
+        "win.add-password": ["<Control>n"],
+        "win.edit-password": ["<Control>e"],
+        "win.delete-password": ["Delete"],
+        "win.copy-password": ["<Control><Shift>c"],
+        "win.copy-username": ["<Control><Shift>u"],
+        "win.search": ["<Control>f"],
+        "win.sync": ["<Control><Shift>s"],
+        # Both spellings: Ctrl+? is the GNOME convention and needs a shift on
+        # most layouts, and Ctrl+F1 is what the ones it does not work on have.
+        "win.show-help-overlay": ["<Control>question", "<Control>F1"],
+    }
+
     def _setup_actions(self):
         """Set up application actions."""
         # Quit action
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", lambda *_: self.quit())
         self.add_action(quit_action)
-        self.set_accels_for_action("app.quit", ["<Control>q"])
 
         # Preferences action
         preferences_action = Gio.SimpleAction.new("preferences", None)
         preferences_action.connect("activate", self._on_preferences_action)
         self.add_action(preferences_action)
-        self.set_accels_for_action("app.preferences", ["<Control>comma"])
 
         # About action
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self._on_about_action)
         self.add_action(about_action)
+
+        for action_name, accelerators in self.ACCELS.items():
+            self.set_accels_for_action(action_name, accelerators)
 
     def _on_preferences_action(self, action: Gio.SimpleAction, param):
         """Show the preferences dialog."""

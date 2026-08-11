@@ -268,6 +268,141 @@ class TestWindowWithDemoBackend:
         assert not [row for row in rows if "unavailable" in row]
 
 
+class TestKeyboard:
+    """Two accelerators for the whole application is not a keyboard interface.
+
+    Ctrl+Q and Ctrl+, were the only ones, while the AppStream metadata claimed
+    keyboard control. Every action the interface offers now has one, and a
+    window documents them.
+    """
+
+    def test_every_window_action_an_accelerator_names_exists(
+        self, demo_backend_configured
+    ):
+        """The bindings live on the application and the actions live here.
+
+        A binding to an action that does not exist is a key that does nothing,
+        and nothing else reports it: set_accels_for_action takes any name at
+        all, including one nobody ever added.
+        """
+        from gtkpass.app import GTKPassApp
+
+        wanted = sorted(
+            name.removeprefix("win.")
+            for name in GTKPassApp.ACCELS
+            if name.startswith("win.")
+        )
+
+        def present(app):
+            window = listed_window(app)
+            return [name for name in wanted if window.lookup_action(name) is None]
+
+        assert run_in_application(present) == []
+
+    def test_the_shortcuts_window_is_installed(self, demo_backend_configured):
+        """Without this, win.show-help-overlay does not exist to bind to."""
+
+        def overlay(app):
+            return listed_window(app).get_help_overlay()
+
+        assert run_in_application(overlay) is not None
+
+    def test_every_documented_shortcut_is_one_that_exists(
+        self, demo_backend_configured
+    ):
+        """The window is written by hand, so it can drift from the bindings.
+
+        A shortcuts window that lists an accelerator nothing is bound to is
+        worse than no shortcuts window: it is a promise the application does
+        not keep.
+        """
+        from gtkpass._gi import Gtk
+
+        def documented(app):
+            window = listed_window(app)
+
+            def walk(widget):
+                child = widget.get_first_child()
+                while child is not None:
+                    if isinstance(child, Gtk.ShortcutsShortcut):
+                        yield child.get_property("accelerator")
+                    yield from walk(child)
+                    child = child.get_next_sibling()
+
+            return list(walk(window.get_help_overlay()))
+
+        from gtkpass.app import GTKPassApp
+
+        listed = run_in_application(documented)
+
+        assert listed, "the shortcuts window documents nothing at all"
+        # Escape is not an accelerator: GtkSearchEntry emits stop-search for it
+        # and the window clears the box, which is documented all the same.
+        bound = {
+            accelerator
+            for accelerators in GTKPassApp.ACCELS.values()
+            for accelerator in accelerators
+        } | {"Escape"}
+        assert set(listed) <= bound, f"documented but not bound: {set(listed) - bound}"
+
+    def test_search_focuses_the_box(self, demo_backend_configured):
+        def focused(window):
+            """Whether the focus is on the search box or inside it.
+
+            A GtkSearchEntry delegates its editing to a GtkText, and that is
+            what actually takes the focus, so asking the entry itself answers
+            False while the caret is blinking in it.
+            """
+            widget = window.get_focus()
+            while widget is not None:
+                if widget is window.search_entry:
+                    return True
+                widget = widget.get_parent()
+            return False
+
+        def focus(app):
+            window = listed_window(app)
+            window.present()
+            pump_until(lambda: window.get_mapped())
+            window.activate_action("win.search", None)
+            pump_until(lambda: focused(window))
+            return focused(window)
+
+        assert run_in_application(focus) is True
+
+    def test_copying_the_password_needs_an_entry(self, demo_backend_configured):
+        def enabled(app):
+            return listed_window(app).lookup_action("copy-password").get_enabled()
+
+        assert run_in_application(enabled) is False
+
+    def test_copying_the_password_copies_the_one_on_display(
+        self, demo_backend_configured
+    ):
+        copied = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            name = backend.list_passwords()[0].name
+            window._on_password_selected(DEMO_BACKEND_ID, name)
+            pump_until(
+                lambda: window.password_detail.stack.get_visible_child_name()
+                == "content"
+            )
+            expected = window.password_detail.password_row.get_text()
+
+            window.activate_action("win.copy-password", None)
+            return expected
+
+        expected = run_in_application(copy)
+
+        assert copied == [expected]
+
+
 class TestSearch:
     """The box sat in the sidebar with nothing behind it, and a preference
     switch offered control over a feature that did not exist. Typing in it did

@@ -173,6 +173,10 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     </section>
     <section>
       <item>
+        <attribute name="label" translatable="yes">Keyboard Shortcuts</attribute>
+        <attribute name="action">win.show-help-overlay</attribute>
+      </item>
+      <item>
         <attribute name="label" translatable="yes">About GTKPass</attribute>
         <attribute name="action">app.about</attribute>
       </item>

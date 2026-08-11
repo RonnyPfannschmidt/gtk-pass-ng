@@ -45,6 +45,10 @@ SENSITIVE_KEYS = frozenset(
     }
 )
 
+#: Fields that can be copied from outside the pane, named as the copy is
+#: reported. The keyboard shortcuts reach two of these.
+COPYABLE_FIELDS = ("Password", "Username", "URL")
+
 PLACEHOLDER = "—"
 
 #: What a masked field shows instead of itself.
@@ -266,6 +270,20 @@ class PasswordDetailView(Gtk.Box):
     @Gtk.Template.Callback()
     def _on_copy_url(self, _button) -> None:
         self._request_copy("URL", self.url_row.get_subtitle())
+
+    def copy_field(self, field: str) -> None:
+        """Copy one of COPYABLE_FIELDS, exactly as its own button would.
+
+        What the keyboard shortcuts go through, so the clipboard timeout and
+        the take-back on navigation apply to those without any of it being
+        written out a second time.
+        """
+        getter = {
+            "Password": self.password_row.get_text,
+            "Username": self.username_row.get_subtitle,
+            "URL": self.url_row.get_subtitle,
+        }[field]
+        self._request_copy(field, getter())
 
     def _request_copy(self, field: str, value: str | None) -> None:
         if value and value != PLACEHOLDER:

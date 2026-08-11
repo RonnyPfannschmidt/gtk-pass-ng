@@ -217,6 +217,49 @@ class GTKPassWindow(Adw.ApplicationWindow):
         sync_action.set_enabled(False)
         self.add_action(sync_action)
 
+        # Reaching the search box from the keyboard. Always available: there is
+        # nothing to break by focusing an empty one.
+        search_action = Gio.SimpleAction.new("search", None)
+        search_action.connect("activate", lambda *_: self.search_entry.grab_focus())
+        self.add_action(search_action)
+
+        # Copying without reaching for the mouse. Both follow the entry on
+        # display, so they are closed for exactly as long as the edit action is.
+        for name, field in (
+            ("copy-password", "Password"),
+            ("copy-username", "Username"),
+        ):
+            copy_action = Gio.SimpleAction.new(name, None)
+            copy_action.connect(
+                "activate", lambda _action, _param, field=field: self._copy_field(field)
+            )
+            copy_action.set_enabled(False)
+            self.add_action(copy_action)
+
+        self._install_help_overlay()
+
+    def _install_help_overlay(self) -> None:
+        """Give the window its shortcuts window, and with it the action.
+
+        ``set_help_overlay`` is what adds ``win.show-help-overlay``, so this has
+        to happen before anything binds an accelerator to that name.
+        """
+        builder = Gtk.Builder.new_from_file(
+            str(importlib.resources.files("gtkpass.ui.blueprints") / "shortcuts.ui")
+        )
+        overlay = builder.get_object("help_overlay")
+        if overlay is not None:
+            self.set_help_overlay(overlay)
+
+    def _copy_field(self, field: str) -> None:
+        """Copy a field of the entry on display, as its copy button would.
+
+        Through the pane rather than around it, so the clipboard timeout, the
+        toast and the take-back on navigation all apply without being repeated
+        here.
+        """
+        self.password_detail.copy_field(field)
+
     def _load_backends(self):
         """Read the configuration here, build the backends on a worker.
 
@@ -1021,9 +1064,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._clipboard.clear_if_ours()
             self._copied_from = None
         self._shown = shown
-        action = self.lookup_action("edit-password")
-        if action is not None:
-            action.set_enabled(shown is not None)
+        # Everything that acts on the entry on display: editing it, and copying
+        # a field out of it without reaching for the mouse.
+        for name in ("edit-password", "copy-password", "copy-username"):
+            action = self.lookup_action(name)
+            if action is not None:
+                action.set_enabled(shown is not None)
         self._refresh_write_actions()
 
     def _on_edit_password(self, action, param):

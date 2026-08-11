@@ -19,6 +19,76 @@ class TestGTKPassApp:
         assert app.window is None
 
 
+class TestAccelerators:
+    """Two of them was the whole keyboard interface, while the AppStream
+    metadata claimed keyboard control. They are declared in one table now, and
+    registered from it.
+    """
+
+    def registered(self):
+        """The accelerators a started application actually holds."""
+        from gtkpass.app import GTKPassApp
+
+        app = GTKPassApp()
+        held = {}
+
+        def on_activate(_app):
+            for action_name in GTKPassApp.ACCELS:
+                held[action_name] = app.get_accels_for_action(action_name)
+            app.quit()
+
+        # do_activate would build a window and load backends; the actions are
+        # registered in do_startup, which has run by the time this fires.
+        app.connect("activate", on_activate)
+        app.run([])
+        return held
+
+    def normalised(self, accelerator):
+        """GTK's own spelling of an accelerator.
+
+        It reorders the modifiers -- ``<Control><Shift>c`` comes back as
+        ``<Shift><Control>c`` -- so comparing the strings as written would fail
+        on nothing at all.
+        """
+        from gtkpass._gi import Gtk
+
+        _ok, key, modifiers = Gtk.accelerator_parse(accelerator)
+        return Gtk.accelerator_name(key, modifiers)
+
+    def test_every_declared_accelerator_is_registered(self):
+        from gtkpass.app import GTKPassApp
+
+        held = self.registered()
+
+        assert held == {
+            name: [self.normalised(accelerator) for accelerator in accelerators]
+            for name, accelerators in GTKPassApp.ACCELS.items()
+        }
+
+    def test_every_accelerator_is_spelled_in_a_way_gtk_understands(self):
+        """A typo here is a shortcut that silently never fires."""
+        from gtkpass._gi import Gtk
+        from gtkpass.app import GTKPassApp
+
+        for accelerators in GTKPassApp.ACCELS.values():
+            for accelerator in accelerators:
+                ok, key, _modifiers = Gtk.accelerator_parse(accelerator)
+                assert ok and key, f"GTK does not understand {accelerator!r}"
+
+    def test_no_accelerator_is_bound_to_two_actions(self):
+        """Whichever action won would do so silently, and by declaration order."""
+        from gtkpass.app import GTKPassApp
+
+        seen: dict[str, str] = {}
+        for name, accelerators in GTKPassApp.ACCELS.items():
+            for accelerator in accelerators:
+                spelling = self.normalised(accelerator)
+                assert spelling not in seen, (
+                    f"{accelerator} is bound to both {seen.get(spelling)} and {name}"
+                )
+                seen[spelling] = name
+
+
 class TestQuittingTakesTheClipboardWithIt:
     """A copied password must not outlive the application.
 
