@@ -85,8 +85,10 @@ if unshare -Ur unsquashfs -no-progress -x -d "$labels/root" "$image" >/dev/null 
     && [ -n "$lib_context" ]
 then
     echo "    usr/lib is ${lib_context}"
+    # The type, not the level: a confined domain is refused on the type, and a
+    # policy that ranges the level would fail an s0 check while being right.
     case "$lib_context" in
-        *:lib_t:s0) ;;
+        *:lib_t:*) ;;
         *) fail "usr/lib is ${lib_context}, not lib_t; merging this relabels the host's" ;;
     esac
 

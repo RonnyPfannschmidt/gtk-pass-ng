@@ -102,9 +102,11 @@ echo "==> and did not relabel the host's /usr/lib"
 # merge, is the only place the answer is the real one.
 merged_context=$(getfattr -n security.selinux --absolute-names /usr/lib 2>/dev/null \
     | sed -n 's/^security\.selinux="\(.*\)"$/\1/p')
+# On the type rather than the whole context: an MLS host ranges the level, and
+# the type is what a confined domain is refused on.
 case "$merged_context" in
     "") echo "    (no SELinux on this machine, so nothing to check)" ;;
-    *:lib_t:s0) echo "    /usr/lib is ${merged_context}" ;;
+    *:lib_t:*) echo "    /usr/lib is ${merged_context}" ;;
     *)
         echo "FAIL: merging relabelled /usr/lib to ${merged_context}."
         echo "      Confined services will not be able to look up their users."

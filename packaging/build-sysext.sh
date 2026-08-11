@@ -303,18 +303,36 @@ fi
 # builder's own filesystem to guess, and answers about the build machine's
 # /usr/lib rather than about the image's.
 emit_contexts() {
-    local mode=$1 findtype=$2 path context
-    local -a staged=()
+    local mode=$1 findtype=$2 path answers index
+    local -a staged=() contexts=()
     while IFS= read -r path; do
         staged+=("$path")
     done < <(find "$STAGE" -mindepth 1 -type "$findtype" -printf '%P\n')
     [ ${#staged[@]} -gt 0 ] || return 0
 
-    while IFS= read -r context; do
-        path=${staged[0]}
-        staged=("${staged[@]:1}")
-        echo "${path} x security.selinux=${context}"
-    done < <(matchpathcon -m "$mode" -f "$FILE_CONTEXTS" -n "${staged[@]/#//}")
+    # Taken as a whole and checked, rather than read straight into the loop
+    # below: matchpathcon that cannot parse the policy answers for nothing, and
+    # a pipe would turn that into a pseudo file quietly missing those paths.
+    if ! answers=$(matchpathcon -m "$mode" -f "$FILE_CONTEXTS" -n "${staged[@]/#//}"); then
+        echo "error: matchpathcon could not answer from ${FILE_CONTEXTS}" >&2
+        return 1
+    fi
+    while IFS= read -r path; do
+        contexts+=("$path")
+    done <<< "$answers"
+
+    # One answer per path, in the order they were asked -- the definitions are
+    # paired up by position, so answers going missing would not leave paths
+    # unlabelled, it would label them with each other's contexts.
+    if [ "${#contexts[@]}" -ne "${#staged[@]}" ]; then
+        echo "error: matchpathcon answered for ${#contexts[@]} of ${#staged[@]}" \
+            "${mode} paths" >&2
+        return 1
+    fi
+
+    for index in "${!staged[@]}"; do
+        echo "${staged[index]} x security.selinux=${contexts[index]}"
+    done
 }
 
 {
@@ -333,9 +351,13 @@ if [ "$staged_count" -ne "$labelled_count" ]; then
 fi
 
 # The one the host's services depend on, checked by name rather than trusted.
+# On the type alone: the level is not what a confined domain is refused on, and
+# a policy that ranges it (an MLS one, or a file_contexts named through
+# SYSEXT_FILE_CONTEXTS) would fail a check that insisted on s0 while being
+# perfectly correct.
 lib_context=$(sed -n 's/^usr\/lib x security\.selinux=//p' "$PSEUDO")
 case "$lib_context" in
-    *:lib_t:s0) ;;
+    *:lib_t:*) ;;
     *)
         echo "error: usr/lib would be labelled '${lib_context}', not lib_t." >&2
         echo "       Merging that relabels the host's /usr/lib; see issue #23." >&2
