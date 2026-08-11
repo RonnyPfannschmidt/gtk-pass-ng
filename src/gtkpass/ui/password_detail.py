@@ -4,7 +4,7 @@ import importlib.resources
 from typing import ClassVar
 
 from gtkpass._gi import Adw, Gio, GObject, Gtk
-from gtkpass.backends import PasswordEntry
+from gtkpass.backends import PasswordEntry, metadata_pair
 
 #: Metadata keys that mean "the account name", in order of preference. Stores
 #: written by different tools disagree about which to use.
@@ -286,6 +286,11 @@ def _notes(entry: PasswordEntry) -> str:
 
     Both spellings are common: an explicit ``notes:`` key, as pass templates and
     the demo data use, and plain prose on its own lines.
+
+    Prose is whatever :func:`metadata_pair` does not claim as a field, which is
+    what keeps the two halves in step. The test for it used to be "no colon
+    anywhere in the line", so a sentence carrying a time or a URL was shown
+    neither here nor as a field -- it simply went missing.
     """
     if not entry.content:
         return ""
@@ -297,6 +302,6 @@ def _notes(entry: PasswordEntry) -> str:
     parts.extend(
         line.strip()
         for line in entry.content.split("\n")[1:]
-        if line.strip() and ":" not in line
+        if line.strip() and metadata_pair(line) is None
     )
     return "\n".join(parts).strip()

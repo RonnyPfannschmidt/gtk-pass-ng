@@ -1,5 +1,6 @@
 """Backend base classes and interfaces for password storage."""
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -29,6 +30,53 @@ if TYPE_CHECKING:
 #: window quits by shutting that pool down. A command with no deadline is a
 #: worker that never returns.
 SUBPROCESS_TIMEOUT_SECONDS = 120
+
+#: A line that is nothing but a URI, captured with its scheme.
+#:
+#: pass-otp writes ``otpauth://`` on a line of its own, and people paste bare
+#: URLs the same way. Splitting those on the first colon produced the key
+#: ``otpauth`` with the value ``//totp/...``: a field whose value was no longer
+#: the URI it came from.
+_URI_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*)://\S*$")
+
+
+def metadata_pair(line: str) -> tuple[str, str] | None:
+    """Read one line below the password as a field, or decide it is prose.
+
+    The one rule both halves of the interface follow. `pass` prescribes no
+    format for what sits under the password, so this is a convention rather
+    than a specification: a line is a field when its colon is followed by
+    whitespace or ends the line, which is how every store and every other
+    frontend writes one. Everything else is prose, and the detail pane shows it
+    as notes.
+
+    The two have to agree, because they divide the same lines between them. The
+    pane used to keep a line only when it had no colon anywhere in it while
+    this counted every colon as a separator, and a sentence like "the safe
+    opens at 10:30" fell between the two: shown as neither, and lost without a
+    word.
+
+    Returns:
+        The lowercased key and its value, or None for a line that is prose.
+    """
+    line = line.strip()
+    if not line:
+        return None
+
+    uri = _URI_LINE.match(line)
+    if uri:
+        # The whole line is the value: the scheme names it, it does not
+        # introduce it.
+        return uri.group(1).lower(), line
+
+    key, separator, value = line.partition(":")
+    if not separator or not key.strip():
+        return None
+    if value and not value[:1].isspace():
+        # A colon inside a word -- a time, a ratio, a path -- rather than one
+        # separating a name from what it holds.
+        return None
+    return key.strip().lower(), value.strip()
 
 
 @dataclass
@@ -90,23 +138,22 @@ class PasswordEntry:
 
     @property
     def metadata(self) -> dict[str, str]:
-        """Parse metadata from content (lines after password).
+        """The ``key: value`` fields written below the password.
 
         Returns:
-            Dictionary of key-value pairs from lines containing ':'
+            One entry per field line, keyed by its lowercased name. Lines that
+            are prose rather than fields are not here; the detail pane shows
+            those as notes, and :func:`metadata_pair` is the single rule that
+            decides which a line is.
         """
         if not self.content:
             return {}
 
-        lines = self.content.split("\n")[1:]  # Skip password line
         metadata = {}
-
-        for line in lines:
-            line = line.strip()
-            if ":" in line:
-                key, value = line.split(":", 1)
-                metadata[key.strip().lower()] = value.strip()
-
+        for line in self.content.split("\n")[1:]:  # Skip password line
+            pair = metadata_pair(line)
+            if pair is not None:
+                metadata[pair[0]] = pair[1]
         return metadata
 
     def clear_password(self) -> None:

@@ -7,7 +7,7 @@ import pytest
 
 from gtkpass._gi import Adw, GLib, Gtk
 from gtkpass.backends import PasswordEntry
-from gtkpass.ui.password_detail import PLACEHOLDER, PasswordDetailView
+from gtkpass.ui.password_detail import PLACEHOLDER, PasswordDetailView, _notes
 
 pytestmark = pytest.mark.gui
 
@@ -286,6 +286,30 @@ class TestNotes:
         view.show_entry(entry("s3cret\nusername: alice"))
 
         assert not view.notes_group.get_visible()
+
+    def test_prose_containing_a_colon_is_kept(self):
+        """It used to be dropped, and it was dropped silently.
+
+        The pane kept a line only when it had no colon anywhere in it, so a
+        time, a ratio or a URL written in a sentence took the whole line with
+        it. Nothing was shown in its place, so an entry could lose half its
+        notes without saying so. The rule is now the one that decides fields:
+        a line is prose exactly when it is not a field.
+        """
+        content = "s3cret\nusername: alice\nthe safe opens at 10:30"
+
+        assert _notes(entry(content)) == "the safe opens at 10:30"
+
+    def test_a_field_line_is_not_repeated_as_prose(self):
+        content = "s3cret\nhost: db.example.com\nkeep this quiet"
+
+        assert _notes(entry(content)) == "keep this quiet"
+
+    def test_a_bare_uri_is_a_field_rather_than_prose(self):
+        """It is shown as a field, so showing it here too would duplicate it."""
+        content = "s3cret\notpauth://totp/ACME?secret=JBSWY3DPEHPK3PXP"
+
+        assert _notes(entry(content)) == ""
 
 
 class TestStackState:
