@@ -72,6 +72,71 @@ class TestRenamingThroughTheDialog:
         )
 
 
+class TestChoosingAPath:
+    """A store directory was typed in and nothing else.
+
+    Under Flatpak that is worse than inconvenient: choosing through the file
+    chooser goes through the portal, and the portal is what grants the sandbox
+    access to the directory. A path typed by hand is a store the application
+    then cannot open, and it says so later and in terms of GPG.
+    """
+
+    @pytest.fixture
+    def row(self):
+        from gtkpass.ui.settings import BackendSettingsRow
+
+        return BackendSettingsRow("pass", "pass_1")
+
+    def test_every_path_row_has_a_chooser(self, row):
+        from gtkpass.ui.settings import BackendSettingsRow
+
+        rows = {
+            "demo": ("demo_path_row", "demo_path_button"),
+            "pass": ("pass_store_row", "pass_store_button"),
+            "direct": ("direct_store_row", "direct_store_button"),
+        }
+        for backend_type, (row_name, button_name) in rows.items():
+            built = BackendSettingsRow(backend_type, f"{backend_type}_1")
+            chooser = built._chooser_for(getattr(built, button_name))
+            assert chooser is not None
+            assert chooser[0] is getattr(built, row_name)
+
+    def test_a_store_asks_for_a_folder(self, row):
+        assert row._chooser_for(row.pass_store_button) == (row.pass_store_row, True)
+
+    def test_the_demo_data_asks_for_a_file(self):
+        from gtkpass.ui.settings import BackendSettingsRow
+
+        built = BackendSettingsRow("demo", "demo_1")
+
+        assert built._chooser_for(built.demo_path_button) == (
+            built.demo_path_row,
+            False,
+        )
+
+    def test_a_chosen_path_lands_in_its_row(self, row):
+        from gtkpass._gi import Gio
+
+        row.apply_choice(row.pass_store_row, Gio.File.new_for_path("/srv/store"))
+
+        assert row.pass_store_row.get_text() == "/srv/store"
+
+    def test_a_chosen_path_is_read_back_as_a_setting(self, row):
+        """Setting the text is what saves it, exactly as typing would."""
+        from gtkpass._gi import Gio
+
+        row.apply_choice(row.pass_store_row, Gio.File.new_for_path("/srv/store"))
+
+        assert str(row.get_settings().password_store_dir) == "/srv/store"
+
+    def test_a_cancelled_chooser_leaves_the_row_alone(self, row):
+        row.pass_store_row.set_text("/srv/store")
+
+        row.apply_choice(row.pass_store_row, None)
+
+        assert row.pass_store_row.get_text() == "/srv/store"
+
+
 class TestAddingAndRemoving:
     """The add flow reads the combo row's selection index, not a string id."""
 

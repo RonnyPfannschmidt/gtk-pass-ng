@@ -55,6 +55,10 @@ class BackendSettingsRow(Adw.ExpanderRow):
     direct_store_row = Gtk.Template.Child()
     direct_gpg_home_row = Gtk.Template.Child()
     remove_button = Gtk.Template.Child()
+    demo_path_button = Gtk.Template.Child()
+    pass_store_button = Gtk.Template.Child()
+    direct_store_button = Gtk.Template.Child()
+    direct_gpg_home_button = Gtk.Template.Child()
 
     #: Which of the declared rows belong to which backend type.
     ROWS_BY_TYPE: ClassVar[dict[str, tuple[str, ...]]] = {
@@ -135,6 +139,79 @@ class BackendSettingsRow(Adw.ExpanderRow):
     @Gtk.Template.Callback()
     def _on_remove_clicked(self, *_args) -> None:
         self.emit("remove-backend")
+
+    # -- choosing a path -----------------------------------------------------
+
+    def _chooser_for(self, button) -> tuple[Adw.EntryRow, bool] | None:
+        """Which row a chooser button fills in, and whether it wants a folder.
+
+        One handler for all of them rather than four that differ in a name:
+        Blueprint can point every button at the same callback, and the button
+        that was pressed says the rest.
+        """
+        targets = {
+            self.demo_path_button: (self.demo_path_row, False),
+            self.pass_store_button: (self.pass_store_row, True),
+            self.direct_store_button: (self.direct_store_row, True),
+            self.direct_gpg_home_button: (self.direct_gpg_home_row, True),
+        }
+        return targets.get(button)
+
+    @Gtk.Template.Callback()
+    def _on_choose(self, button) -> None:
+        """Ask for a path with the file chooser rather than by typing.
+
+        Under Flatpak this is not a convenience. Choosing through the chooser
+        goes through the portal, and that is what grants the sandbox access to
+        the directory -- so a store typed in by hand is one the application
+        then cannot open, and says so only later and in terms of GPG.
+        """
+        chooser = self._chooser_for(button)
+        if chooser is None:
+            return
+        row, folder = chooser
+
+        dialog = Gtk.FileDialog(
+            title="Choose a Folder" if folder else "Choose a File",
+            modal=True,
+        )
+        current = _optional_path(row.get_text())
+        if current is not None and current.exists():
+            dialog.set_initial_folder(
+                Gio.File.new_for_path(str(current if folder else current.parent))
+            )
+
+        window = self.get_root()
+        if folder:
+            dialog.select_folder(window, None, self._chosen, (row, True))
+        else:
+            dialog.open(window, None, self._chosen, (row, False))
+
+    def _chosen(self, dialog, result, target) -> None:
+        """Take the answer, or let a cancelled chooser pass in silence."""
+        row, folder = target
+        try:
+            chosen = (
+                dialog.select_folder_finish(result)
+                if folder
+                else dialog.open_finish(result)
+            )
+        except GLib.Error as e:
+            # Dismissing the chooser is not a failure worth reporting.
+            logger.debug("No path was chosen: %s", e)
+            return
+        self.apply_choice(row, chosen)
+
+    def apply_choice(self, row, chosen) -> None:
+        """Put a chosen path in its row, which saves it as typing would.
+
+        Separate from the chooser so that it can be exercised: a GtkFileDialog
+        cannot be driven from a test, and this is the half that has anything to
+        get wrong.
+        """
+        path = chosen.get_path() if chosen is not None else None
+        if path:
+            row.set_text(path)
 
     def get_display_name(self) -> str:
         """Name currently typed in the entry, empty if the user cleared it."""

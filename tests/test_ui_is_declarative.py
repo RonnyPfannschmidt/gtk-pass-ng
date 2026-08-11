@@ -28,6 +28,7 @@ NON_WIDGET_TYPES = {
     "SimpleActionGroup",
     "Settings",
     "Builder",
+    "FileDialog",
     "ContentProvider",
     "CssProvider",
     "EventControllerKey",
