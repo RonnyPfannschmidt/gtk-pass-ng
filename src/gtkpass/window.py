@@ -36,6 +36,42 @@ from gtkpass.utils.clipboard import ClipboardCopier
 
 logger = logging.getLogger(__name__)
 
+#: What the content pane shows when it is not showing an entry, by state name.
+#:
+#: One status page serves all of these, and it used to be written over in place
+#: from three different methods with no record of which situation it was in --
+#: so whatever it had last been set to was what the next one showed. A window
+#: with a full sidebar and nothing selected still read "Loading...", and an
+#: entry that would not decrypt dropped the user onto "No Passwords Found"
+#: while its store sat listed beside it.
+#:
+#: Each entry is (title, description, icon, whether to offer Preferences). A
+#: description of None is filled in by the caller, which is how the failure
+#: state carries what went wrong.
+PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, bool]] = {
+    "loading": ("GTKPass", "Loading...", "dialog-password-symbolic", False),
+    "no-backends": (
+        "No Backends Configured",
+        "GTKPass needs a password backend to work.\n"
+        "Choose a backend in Preferences to get started.",
+        "preferences-system-symbolic",
+        True,
+    ),
+    "empty": (
+        "No Passwords Found",
+        "Your password store is empty.\nAdd a password to get started.",
+        "dialog-password-symbolic",
+        False,
+    ),
+    "ready": (
+        "Nothing Selected",
+        "Choose an entry in the sidebar to see it here.",
+        "dialog-password-symbolic",
+        False,
+    ),
+    "failed": ("Could Not Open This Entry", None, "dialog-warning-symbolic", False),
+}
+
 
 @Gtk.Template(
     filename=str(importlib.resources.files("gtkpass.ui.blueprints") / "window.ui")
@@ -103,6 +139,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Backends whose store no longer matches the recipient set approved for
         # it. Writing to those is refused until somebody has looked.
         self._changed_recipients: list[str] = []
+        # Which of PLACEHOLDER_STATES the content pane is currently offering.
+        self._placeholder_state = "loading"
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -457,17 +495,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         self._listed_anything = self._listed_anything or listed
         self._pending_listings -= 1
-        if self._pending_listings > 0 or self._listed_anything:
+        if self._pending_listings > 0:
             return
 
-        # Backends loaded but no passwords
-        self.placeholder_page.set_title("No Passwords Found")
-        self.placeholder_page.set_description(
-            "Your password store is empty.\nAdd a password to get started."
-        )
-        self.placeholder_page.set_icon_name("dialog-password-symbolic")
-        # The configuration prompt reveals this and nothing else hides it.
-        self.open_preferences_button.set_visible(False)
+        # Every backend has answered, so what the pane should offer is settled:
+        # an invitation to pick something, or the news that there is nothing to
+        # pick. Neither may overwrite an entry that is already on display -- a
+        # sync finishing while one is open re-lists, and the listing is not what
+        # the user is looking at.
+        self._show_placeholder("ready" if self._listed_anything else "empty")
 
     def _get_backend_display_name(self, backend_id: str) -> str:
         """Name to show for a configured backend instance.
@@ -480,14 +516,30 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _show_configuration_prompt(self):
         """Show configuration prompt in main content area."""
-        # Update the status page to show configuration instructions
-        self.placeholder_page.set_title("No Backends Configured")
+        self._show_placeholder("no-backends")
+
+    def _show_placeholder(self, state: str, detail: str = "") -> None:
+        """Put the content pane into one of PLACEHOLDER_STATES.
+
+        Every situation that has no entry to show goes through here, so the
+        page always says which one it is in rather than whatever the last
+        caller happened to leave behind.
+
+        An entry already on display is left alone: only the states that mean
+        "there is nothing to show" take the pane back from it.
+        """
+        title, description, icon, offer_preferences = PLACEHOLDER_STATES[state]
+        self.placeholder_page.set_title(title)
         self.placeholder_page.set_description(
-            "GTKPass needs a password backend to work.\n"
-            "Choose a backend in Preferences to get started."
+            detail if description is None else description
         )
-        self.placeholder_page.set_icon_name("preferences-system-symbolic")
-        self.open_preferences_button.set_visible(True)
+        self.placeholder_page.set_icon_name(icon)
+        self.open_preferences_button.set_visible(offer_preferences)
+        self._placeholder_state = state
+
+        showing_entry = self.content_stack.get_visible_child_name() == "detail"
+        if state in ("no-backends", "empty", "failed") or not showing_entry:
+            self.content_stack.set_visible_child_name("placeholder")
 
     def _show_backend_errors(self):
         """Show a toast notification for failed backends."""
@@ -773,9 +825,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 return
             logger.error(f"Could not open an entry from {backend_id}: {error}")
             self.password_detail.clear()
-            self.content_stack.set_visible_child_name("placeholder")
             self._set_shown(None)
-            self._toast(f"Could not open {password_name}: {error}")
+            # On the page rather than only in a toast: five seconds is not long
+            # enough to read a GPG error, and the pane is where the user is
+            # already looking.
+            self._show_placeholder("failed", f"{password_name}\n\n{error}")
 
         try:
             future = self.backend_manager.get_password_async(backend_id, password_name)

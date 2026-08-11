@@ -137,6 +137,77 @@ class TestWindowWithoutBackends:
 
         assert title == "No Backends Configured"
 
+    def test_the_preferences_button_is_offered(self):
+        from gtkpass.window import GTKPassWindow
+
+        visible = run_in_application(
+            lambda app: GTKPassWindow(
+                application=app
+            ).open_preferences_button.get_visible()
+        )
+
+        assert visible
+
+
+class TestThePlaceholderSaysWhichStateItIsIn:
+    """One status page served four situations by being written over in place.
+
+    Whatever it had last been set to was what the next situation showed. A
+    window with entries in the sidebar and nothing selected still read
+    "Loading...", and a failed decrypt dropped the user onto a page announcing
+    "No Passwords Found" while the passwords sat in the sidebar beside it.
+    """
+
+    def test_listed_entries_invite_a_selection(self, demo_backend_configured):
+        def state(app):
+            window = listed_window(app)
+            return window._placeholder_state, window.placeholder_page.get_title()
+
+        state_name, title = run_in_application(state)
+
+        assert state_name == "ready"
+        assert "Loading" not in title
+
+    def test_the_preferences_button_goes_away_once_a_backend_loads(
+        self, demo_backend_configured
+    ):
+        def visible(app):
+            return listed_window(app).open_preferences_button.get_visible()
+
+        assert run_in_application(visible) is False
+
+    def test_a_failed_open_says_so_rather_than_blaming_the_store(
+        self, demo_backend_configured
+    ):
+        def select_nonsense(app):
+            window = listed_window(app)
+            window._on_password_selected(DEMO_BACKEND_ID, "no/such/entry")
+            pump_until(lambda: window._placeholder_state == "failed")
+            return window._placeholder_state, window.placeholder_page.get_description()
+
+        state_name, description = run_in_application(select_nonsense)
+
+        assert state_name == "failed"
+        assert "no/such/entry" in description
+
+    def test_a_store_with_no_entries_says_it_is_empty(self, monkeypatch):
+        from gtkpass.backends.demo import DemoBackend
+
+        monkeypatch.setattr(DemoBackend, "list_passwords", lambda self, prefix="": [])
+
+        def state(app):
+            return listed_window(app)._placeholder_state
+
+        settings = get_settings()
+        previous = settings.get_value("backend-instances")
+        settings.set_value(
+            "backend-instances", GLib.Variant("a(ss)", [(DEMO_BACKEND_ID, "demo")])
+        )
+        try:
+            assert run_in_application(state) == "empty"
+        finally:
+            settings.set_value("backend-instances", previous)
+
 
 class TestTheWindowOpensWhereItWasLeft:
     """Three schema keys existed from the start with nothing reading them.
