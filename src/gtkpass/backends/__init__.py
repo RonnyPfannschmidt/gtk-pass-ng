@@ -240,6 +240,14 @@ class PasswordBackend(ABC):
     # This must be defined by subclasses
     metadata: BackendMetadata
 
+    #: Whether entries can be added, edited and deleted through this backend.
+    #:
+    #: The interface offers all three and the demo backend raises on every one
+    #: of them, so without something to ask beforehand the only way to find out
+    #: is to offer somebody a dialog, let them fill it in and refuse it
+    #: afterwards. Writable is the default: a backend that cannot write says so.
+    writable: bool = True
+
     @classmethod
     @abstractmethod
     def is_available(cls) -> bool:

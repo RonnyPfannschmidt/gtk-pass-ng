@@ -28,6 +28,7 @@ from gtkpass.config import (
 
 # Imported for their side effect: the GTypes must be registered before the
 # template below is parsed, or window.ui fails with "Invalid object type".
+from gtkpass.ui.password_add import PasswordAddDialog
 from gtkpass.ui.password_detail import PasswordDetailView  # noqa: F401
 from gtkpass.ui.password_edit import PasswordEditDialog
 from gtkpass.ui.password_list import PasswordTreeView  # noqa: F401
@@ -105,6 +106,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     toast_overlay = Gtk.Template.Child()
     content_stack = Gtk.Template.Child()
     password_detail = Gtk.Template.Child()
+    add_button = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
     sync_stack = Gtk.Template.Child()
     recipient_banner = Gtk.Template.Child()
@@ -179,9 +181,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _setup_actions(self):
         """Set up window actions."""
-        # Add password action
+        # Nothing can be added until a backend that can be written to has
+        # loaded. The demo store never can be, so this stays closed for it
+        # rather than offering a dialog whose save is refused.
         add_action = Gio.SimpleAction.new("add-password", None)
         add_action.connect("activate", self._on_add_password)
+        add_action.set_enabled(False)
         self.add_action(add_action)
 
         # There is nothing to edit until an entry has been decrypted, and the
@@ -297,6 +302,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 logger.info(f"Successfully loaded backend: {backend_id}")
 
         self._refresh_sync_action()
+        self._refresh_write_actions()
         self._refresh_recipient_banner()
         self._show_backend_errors()
         self._load_passwords()
@@ -424,6 +430,26 @@ class GTKPassWindow(Adw.ApplicationWindow):
             "changed::show-hidden-passwords", self._apply_reveal_preference
         )
         self._apply_reveal_preference()
+
+    def _refresh_write_actions(self) -> None:
+        """Offer adding only where something can take it.
+
+        The tooltip carries the reason when it cannot, because "the button is
+        grey" is not an answer to "why can I not add a password?".
+        """
+        writable = self.backend_manager.writable_backends()
+        action = self.lookup_action("add-password")
+        if action is not None:
+            action.set_enabled(bool(writable))
+
+        if writable:
+            self.add_button.set_tooltip_text("Add Password")
+        elif self.backend_manager.get_all_backends():
+            self.add_button.set_tooltip_text(
+                "No configured store can be written to. The demo store is read-only."
+            )
+        else:
+            self.add_button.set_tooltip_text("No backends are configured.")
 
     def _setup_search(self):
         """Connect the search box to the sidebar.
@@ -851,13 +877,65 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
     def _on_add_password(self, action, param):
         """Handle add password button click."""
-        builder = Gtk.Builder.new_from_file(
-            str(
-                importlib.resources.files("gtkpass.ui.blueprints")
-                / "not_implemented.ui"
-            )
+        self._open_add_dialog()
+
+    def _open_add_dialog(self) -> PasswordAddDialog | None:
+        """Offer a new entry in whichever stores can take one.
+
+        Returns the dialog, as the editor does, so a test can drive it to a
+        response rather than only prove it was built.
+
+        Returns:
+            The dialog, or None when no configured backend can be written to.
+        """
+        writable = self.backend_manager.writable_backends()
+        if not writable:
+            # The action is insensitive whenever this is so; reaching here means
+            # the shortcut or the menu got there first.
+            self._toast("No configured store can be written to.")
+            return None
+
+        dialog = PasswordAddDialog()
+        dialog.offer(
+            backends=[
+                (backend_id, self._get_backend_display_name(backend_id))
+                for backend_id in writable
+            ],
+            taken=self.password_list.entry_names(),
+            preselect=self._selected_backend(),
+            folder=self.password_list.selected_folder(),
         )
-        builder.get_object("not_implemented_dialog").present(self)
+        dialog.connect("added", lambda _dialog, *args: self._add_entry(*args))
+        dialog.present(self)
+        return dialog
+
+    def _selected_backend(self) -> str:
+        """The store the sidebar is standing in, if it is standing in one."""
+        if self._shown is not None:
+            return self._shown[0]
+        return self.password_list.selected_backend()
+
+    def _add_entry(self, backend_id: str, name: str, content: str) -> None:
+        """Write a new entry, off the UI thread as every other write is."""
+
+        def added(_result):
+            self._toast(f"Added {name}")
+            # Re-list rather than inserting the row here: the store is what
+            # decides whether the entry exists, and a listing is how the rest
+            # of the window finds out.
+            self._load_passwords()
+            self._on_password_selected(backend_id, name)
+
+        def report(error):
+            logger.error(f"Could not add an entry to {backend_id}: {error}")
+            self._toast(f"Could not add {name}: {error}")
+
+        try:
+            future = self.backend_manager.add_password_async(backend_id, name, content)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, added, report)
 
     def _on_password_selected(self, backend_id: str, password_name: str):
         """Decrypt the selected entry and show it in the detail pane.

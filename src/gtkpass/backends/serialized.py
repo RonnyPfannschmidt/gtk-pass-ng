@@ -46,6 +46,10 @@ class SerializedBackend(PasswordBackend):
         # A proxy has to answer as the backend it stands for: the sidebar and
         # the manager both read this.
         self.metadata = backend.metadata
+        # Likewise. Left behind on the wrapped backend, this would answer for
+        # SerializedBackend -- which is writable, being nothing in particular --
+        # and the demo store would be offered an Add Password dialog.
+        self.writable = backend.writable
 
     @property
     def wrapped(self) -> PasswordBackend:

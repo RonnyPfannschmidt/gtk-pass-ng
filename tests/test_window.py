@@ -706,6 +706,218 @@ class TestEditing:
         assert shown == expected
 
 
+class TestAdding:
+    """The `+` button opened a "Not Implemented Yet" dialog for as long as
+    there had been a `+` button, while every backend that can write had
+    implemented add_password all along.
+    """
+
+    def writable_window(self, app):
+        """A loaded window whose demo backend will accept a write.
+
+        The demo store is read-only on purpose, so nothing offers to add to it.
+        Making this one writable is what lets the flow above it be exercised
+        without a GPG store and a key.
+        """
+        window = listed_window(app)
+        backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+        backend.writable = True
+        window._refresh_write_actions()
+        return window
+
+    def test_a_read_only_store_is_not_offered_the_dialog(self, demo_backend_configured):
+        def enabled(app):
+            window = listed_window(app)
+            return window.lookup_action("add-password").get_enabled()
+
+        assert run_in_application(enabled) is False
+
+    def test_the_reason_is_in_the_tooltip(self, demo_backend_configured):
+        def tooltip(app):
+            return listed_window(app).add_button.get_tooltip_text()
+
+        assert "read-only" in run_in_application(tooltip)
+
+    def test_a_writable_store_is_offered_the_dialog(self, demo_backend_configured):
+        def enabled(app):
+            window = self.writable_window(app)
+            return window.lookup_action("add-password").get_enabled()
+
+        assert run_in_application(enabled) is True
+
+    def test_saving_asks_the_backend_to_write_it(self, demo_backend_configured):
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.add_password = lambda name, content, commit=True: written.append(
+                (name, content)
+            )
+
+            dialog = window._open_add_dialog()
+            assert dialog is not None, "the add dialog did not open"
+            dialog.name_row.set_text("new/entry")
+            dialog.password_row.set_text("s3cret")
+            dialog.save_button.emit("clicked")
+            pump_until(lambda: bool(written), timeout_seconds=5.0)
+
+        run_in_application(add)
+
+        assert written == [("new/entry", "s3cret\n")]
+
+    def test_the_name_is_tidied_rather_than_taken_literally(
+        self, demo_backend_configured
+    ):
+        """A stray slash is a typo, not a folder with no name."""
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.add_password = lambda name, content, commit=True: written.append(
+                name
+            )
+
+            dialog = window._open_add_dialog()
+            dialog.name_row.set_text("/work//mail/")
+            dialog.password_row.set_text("s3cret")
+            dialog.save_button.emit("clicked")
+            pump_until(lambda: bool(written), timeout_seconds=5.0)
+
+        run_in_application(add)
+
+        assert written == ["work/mail"]
+
+    def test_an_entry_with_no_name_is_not_written(self, demo_backend_configured):
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.add_password = lambda *args, **kwargs: written.append(args)
+
+            dialog = window._open_add_dialog()
+            dialog.password_row.set_text("s3cret")
+            dialog.save_button.emit("clicked")
+            return dialog
+
+        dialog = run_in_application(add)
+
+        assert written == []
+        assert dialog.get_child() is not None, "the dialog closed on a refusal"
+
+    def test_an_entry_with_no_password_is_not_written(self, demo_backend_configured):
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.add_password = lambda *args, **kwargs: written.append(args)
+
+            dialog = window._open_add_dialog()
+            dialog.name_row.set_text("new/entry")
+            dialog.save_button.emit("clicked")
+
+        run_in_application(add)
+
+        assert written == []
+
+    def test_a_name_already_in_the_store_is_refused(self, demo_backend_configured):
+        """Before the write, rather than as a FileExistsError after it."""
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            existing = backend.list_passwords()[0].name
+            backend.add_password = lambda *args, **kwargs: written.append(args)
+
+            dialog = window._open_add_dialog()
+            dialog.name_row.set_text(existing)
+            dialog.password_row.set_text("s3cret")
+            dialog.save_button.emit("clicked")
+            return dialog.name_row.has_css_class("error")
+
+        marked = run_in_application(add)
+
+        assert written == []
+        assert marked, "nothing on the row said why the save did nothing"
+
+    def test_a_failed_write_is_reported(self, demo_backend_configured):
+        from gtkpass.backends import BackendError
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+
+            def refuse(name, content, commit=True):
+                raise BackendError("the store is on fire")
+
+            backend.add_password = refuse
+            toasts: list[str] = []
+            window._toast = toasts.append
+
+            dialog = window._open_add_dialog()
+            dialog.name_row.set_text("new/entry")
+            dialog.password_row.set_text("s3cret")
+            dialog.save_button.emit("clicked")
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return toasts
+
+        toasts = run_in_application(add)
+
+        assert toasts and "the store is on fire" in toasts[0]
+
+    def test_the_dialog_starts_in_the_folder_the_user_was_in(
+        self, demo_backend_configured
+    ):
+        def prefilled(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            nested = next(
+                entry.name for entry in backend.list_passwords() if "/" in entry.name
+            )
+            window.password_list.expand_all()
+            names = [
+                window.password_list.tree_model.get_row(index).get_item().password_name
+                for index in range(window.password_list.tree_model.get_n_items())
+            ]
+            window.password_list.selection.set_selected(names.index(nested))
+
+            dialog = window._open_add_dialog()
+            return nested.rpartition("/")[0], dialog.name_row.get_text()
+
+        folder, prefilled_name = run_in_application(prefilled)
+
+        assert prefilled_name == f"{folder}/"
+
+    def test_generating_fills_the_password_in(self, demo_backend_configured):
+        def generate(app):
+            window = self.writable_window(app)
+            dialog = window._open_add_dialog()
+            dialog.length_row.set_value(24)
+            dialog.generate_button.emit("clicked")
+            return dialog.password_row.get_text()
+
+        generated = run_in_application(generate)
+
+        assert len(generated) == 24
+
+    def test_a_generated_password_is_shown_rather_than_dotted_out(
+        self, demo_backend_configured
+    ):
+        """Somebody who has just generated one has not seen it yet."""
+
+        def generate(app):
+            window = self.writable_window(app)
+            dialog = window._open_add_dialog()
+            dialog.generate_button.emit("clicked")
+            return dialog.password_row.get_delegate().get_visibility()
+
+        assert run_in_application(generate) is True
+
+
 class TestACopiedSecretIsTakenBack:
     """A copy is kept for as long as there is a reason to keep it.
 

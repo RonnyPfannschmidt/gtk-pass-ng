@@ -305,6 +305,71 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             return None
         return (node.backend_id, node.password_name)
 
+    def selected_backend(self) -> str:
+        """The backend the selected row belongs to, whatever kind of row it is.
+
+        Every row carries its backend, so this answers for a folder and for a
+        backend heading as well as for an entry -- which is what makes "add a
+        password" land in the store the user is standing in.
+        """
+        row = self.selection.get_selected_item()
+        return row.get_item().backend_id if row is not None else ""
+
+    def selected_folder(self) -> str:
+        """The folder the selection is standing in, without a trailing slash.
+
+        A selected folder is that folder; a selected entry is the folder that
+        holds it; a backend heading is the root of its store.
+        """
+        row = self.selection.get_selected_item()
+        if row is None:
+            return ""
+        node = row.get_item()
+        if node.password_name:
+            folder, _, _ = node.password_name.rpartition("/")
+            return folder
+        return self._path_of(node)
+
+    def _path_of(self, wanted: PasswordNode) -> str:
+        """Where a folder row sits, by finding it again from the top.
+
+        A node does not know its parent -- the tree is built downwards and the
+        row template binds to the node, not to a path -- so this walks for it.
+        Cheap enough: it runs once, when a dialog is opened.
+        """
+
+        def walk(store: Gio.ListStore, prefix: str) -> str | None:
+            for index in range(store.get_n_items()):
+                node = store.get_item(index)
+                if node.password_name:
+                    continue
+                here = f"{prefix}/{node.name}" if prefix else node.name
+                if node is wanted:
+                    return here
+                found = walk(node.children, here)
+                if found is not None:
+                    return found
+            return None
+
+        for record in self._backends:
+            if record.node is wanted:
+                # A backend heading: the root of its store, not a folder in it.
+                return ""
+            if record.node is not None:
+                found = walk(record.node.children, "")
+                if found is not None:
+                    return found
+        return ""
+
+    def entry_names(self) -> dict[str, set[str]]:
+        """Every entry each backend holds, filtered out ones included.
+
+        What the add dialog checks a new name against, so a clash is caught
+        while it is still being typed rather than reported as a FileExistsError
+        once the store has been asked.
+        """
+        return {record.backend_id: set(record.entries) for record in self._backends}
+
     def connect_password_selected(self, callback: Callable[[str, str], None]) -> None:
         """Connect callback for password selection.
 
