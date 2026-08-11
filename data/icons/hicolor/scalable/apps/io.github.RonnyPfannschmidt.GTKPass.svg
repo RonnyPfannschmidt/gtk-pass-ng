@@ -1,28 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <defs>
-    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+    <!-- Both gradients are in user space, so they light the icon from the top
+         of the canvas rather than from the top of whatever shape references
+         them. An objectBoundingBox gradient would tilt with a rotated use. -->
+    <linearGradient id="card" x1="0" y1="24" x2="0" y2="104"
+                    gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#dc8add"/>
       <stop offset="1" stop-color="#9141ac"/>
     </linearGradient>
-    <linearGradient id="key" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="key" x1="0" y1="52" x2="0" y2="100"
+                    gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#f9f06b"/>
       <stop offset="1" stop-color="#f5c211"/>
     </linearGradient>
+
+    <clipPath id="cardclip">
+      <rect x="16" y="24" width="96" height="80" rx="14"/>
+    </clipPath>
+
+    <!-- The key is one closed contour plus the bow's hole, not a circle with
+         rectangles laid over it. Stroking the pieces separately drew the
+         shank's outline straight through the bow and left a seam where every
+         tooth met it; a single subpath has no interior edges to show. The hole
+         is a second subpath, punched by fill-rule="evenodd".
+
+         Bow centred on (48, 75) at r=16, shank from there to x=96 between
+         y=68.5 and y=81.5, teeth hanging to y=92. Where the shank's edges
+         meet the bow is x = 48 + sqrt(16^2 - 6.5^2) = 62.62, and that is the
+         only number here that is not round: getting it wrong leaves a notch. -->
+    <path id="key-shape"
+          d="M 62.62 68.5 L 96 68.5 L 96 92 L 87 92 L 87 81.5
+             L 81 81.5 L 81 92 L 72 92 L 72 81.5 L 62.62 81.5
+             A 16 16 0 1 1 62.62 68.5 Z
+             M 54.5 75 A 6.5 6.5 0 1 0 41.5 75 A 6.5 6.5 0 1 0 54.5 75 Z"/>
   </defs>
 
   <!-- The store: a card standing in for the encrypted file it represents. -->
-  <rect x="16" y="24" width="96" height="80" rx="12" fill="url(#card)"/>
-  <rect x="16" y="24" width="96" height="80" rx="12" fill="none"
-        stroke="#613583" stroke-width="2" opacity="0.6"/>
-  <rect x="16" y="40" width="96" height="6" fill="#613583" opacity="0.35"/>
-
-  <!-- The key: bow, shank and two bits, the usual shorthand for a secret. -->
-  <g fill="url(#key)" stroke="#a06816" stroke-width="1.5">
-    <circle cx="52" cy="74" r="16"/>
-    <rect x="52" y="68" width="44" height="12" rx="3"/>
-    <rect x="80" y="80" width="8" height="12" rx="2"/>
-    <rect x="92" y="80" width="8" height="10" rx="2"/>
+  <rect x="16" y="24" width="96" height="80" rx="14" fill="url(#card)"/>
+  <g clip-path="url(#cardclip)">
+    <rect x="16" y="40" width="96" height="5" fill="#613583" opacity="0.3"/>
   </g>
-  <circle cx="52" cy="74" r="6" fill="#613583"/>
+  <!-- Inset by half the stroke width so the outline lands inside the fill
+       rather than straddling the edge and fringing at small sizes. -->
+  <rect x="16.75" y="24.75" width="94.5" height="78.5" rx="13.25" fill="none"
+        stroke="#613583" stroke-width="1.5" opacity="0.55"/>
+
+  <!-- The key: bow, shank and two bits, the usual shorthand for a secret.
+       Scaled to fill the card below the stripe, and dropped a shadow to lift
+       it off the card. -->
+  <g fill-rule="evenodd">
+    <use href="#key-shape" fill="#241f31" opacity="0.22"
+         transform="translate(64,78) scale(1.14) translate(-64,-75.5)"/>
+    <use href="#key-shape" fill="url(#key)" stroke="#a06816" stroke-width="1.75"
+         stroke-linejoin="round"
+         transform="translate(64,76) scale(1.14) translate(-64,-75.5)"/>
+  </g>
 </svg>
