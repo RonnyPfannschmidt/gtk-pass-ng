@@ -268,6 +268,108 @@ class TestWindowWithDemoBackend:
         assert not [row for row in rows if "unavailable" in row]
 
 
+class TestSearch:
+    """The box sat in the sidebar with nothing behind it, and a preference
+    switch offered control over a feature that did not exist. Typing in it did
+    nothing at all.
+    """
+
+    @pytest.fixture
+    def search_as_you_type(self):
+        """Both settings, restored afterwards, because the default matters."""
+        settings = get_settings()
+        previous = settings.get_boolean("search-as-you-type")
+
+        def set_to(value):
+            settings.set_boolean("search-as-you-type", value)
+
+        yield set_to
+        settings.set_boolean("search-as-you-type", previous)
+
+    def test_typing_narrows_the_sidebar(
+        self, demo_backend_configured, search_as_you_type
+    ):
+        search_as_you_type(True)
+
+        def search(app):
+            window = listed_window(app)
+            before = sidebar_names(window)
+            window.search_entry.set_text("mail")
+            # GtkSearchEntry holds search-changed back for a moment, so that a
+            # search is not run per keystroke. Turning the loop is what a typing
+            # user does by pausing.
+            pump_until(lambda: sidebar_names(window) != before)
+            return before, sidebar_names(window)
+
+        before, after = run_in_application(search)
+
+        assert len(after) < len(before)
+        assert [name for name in after if "mail" in name.lower()]
+
+    def test_clearing_the_box_brings_the_tree_back(
+        self, demo_backend_configured, search_as_you_type
+    ):
+        search_as_you_type(True)
+
+        def search(app):
+            window = listed_window(app)
+            before = sidebar_names(window)
+            window.search_entry.set_text("mail")
+            pump_until(lambda: sidebar_names(window) != before)
+            window.search_entry.set_text("")
+            pump_until(lambda: sidebar_names(window) == before)
+            return before, sidebar_names(window)
+
+        before, after = run_in_application(search)
+
+        assert after == before
+
+    def test_without_search_as_you_type_nothing_happens_until_enter(
+        self, demo_backend_configured, search_as_you_type
+    ):
+        search_as_you_type(False)
+
+        def search(app):
+            window = listed_window(app)
+            window.search_entry.set_text("mail")
+            typed = sidebar_names(window)
+            window.search_entry.emit("activate")
+            return typed, sidebar_names(window)
+
+        typed, entered = run_in_application(search)
+
+        assert len(entered) < len(typed)
+
+    def test_a_search_with_no_matches_says_so(
+        self, demo_backend_configured, search_as_you_type
+    ):
+        """Distinct from an empty store, which is not the user's mistake."""
+        search_as_you_type(True)
+
+        def search(app):
+            window = listed_window(app)
+            window.search_entry.set_text("no such entry anywhere")
+            pump_until(lambda: window._placeholder_state != "ready")
+            return window._placeholder_state
+
+        assert run_in_application(search) == "no-matches"
+
+    def test_the_store_is_not_called_empty_because_a_search_matched_nothing(
+        self, demo_backend_configured, search_as_you_type
+    ):
+        search_as_you_type(True)
+
+        def search(app):
+            window = listed_window(app)
+            window.search_entry.set_text("no such entry anywhere")
+            pump_until(lambda: window._placeholder_state == "no-matches")
+            window.search_entry.set_text("")
+            pump_until(lambda: window._placeholder_state != "no-matches")
+            return window._placeholder_state
+
+        assert run_in_application(search) == "ready"
+
+
 class TestLoadingStaysOffTheUiThread:
     """Nothing slow may happen between construction and a window on screen.
 

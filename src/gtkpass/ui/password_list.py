@@ -50,6 +50,26 @@ class PasswordNode(GObject.Object):
         self.children: Gio.ListStore = Gio.ListStore(item_type=PasswordNode)
 
 
+class BackendEntries:
+    """Everything one backend contributed, whether or not it is on screen.
+
+    The sidebar is filtered by rebuilding it from these rather than by laying a
+    ``Gtk.FilterListModel`` over the tree: a ``Gtk.TreeListModel`` materialises
+    a folder's children only once that folder has been expanded, so a filter
+    over the view would have matched whatever happened to be open at the time
+    and missed the rest of the store entirely.
+    """
+
+    def __init__(self, backend_id: str, name: str, icon_name: str) -> None:
+        self.backend_id = backend_id
+        self.name = name
+        self.icon_name = icon_name
+        #: Full entry paths, in the order they were listed.
+        self.entries: list[str] = []
+        #: This backend's row while it is shown, None while it is filtered out.
+        self.node: PasswordNode | None = None
+
+
 def _children_of(node: PasswordNode) -> Gio.ListStore | None:
     """Child model for a row, or None for one that cannot have children.
 
@@ -100,6 +120,11 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         self._on_password_selected: Callable[[str, str], None] | None = None
         self.selection.connect("notify::selected-item", self._selection_changed)
 
+        #: What each backend contributed, kept so a filter can be lifted again.
+        self._backends: list[BackendEntries] = []
+        #: The search text the tree is currently narrowed to; empty means all.
+        self._filter = ""
+
     def _hide_column_header(self) -> None:
         """Drop the header row of the one column the sidebar has.
 
@@ -120,7 +145,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
 
     def add_backend(
         self, backend_id: str, backend_name: str, icon_name: str
-    ) -> PasswordNode:
+    ) -> BackendEntries:
         """Add a backend as a root node.
 
         Args:
@@ -129,25 +154,101 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             icon_name: Icon name
 
         Returns:
-            The node, to be passed back as the parent of its entries.
+            The backend's record, to be passed back as the parent of its
+            entries. It outlives the row, which a filter may take away and
+            give back.
         """
-        node = PasswordNode(
-            name=backend_name, icon_name=icon_name, backend_id=backend_id
-        )
-        self.root.append(node)
-        return node
+        record = BackendEntries(backend_id, backend_name, icon_name)
+        self._backends.append(record)
+        if not self._filter:
+            # Unfiltered, a backend has a row before it has entries: the window
+            # adds every backend first and fills them in as the listings come
+            # back, so an empty store still says it is there.
+            self._node_for(record)
+        return record
 
-    def add_password(self, backend: PasswordNode, path: str) -> PasswordNode:
+    def _node_for(self, record: BackendEntries) -> PasswordNode:
+        """The backend's row, created if a filter had taken it away.
+
+        Inserted where the record sits among the backends that are on screen,
+        so the sidebar keeps the order the backends were added in however they
+        come and go.
+        """
+        if record.node is not None:
+            return record.node
+
+        record.node = PasswordNode(
+            name=record.name, icon_name=record.icon_name, backend_id=record.backend_id
+        )
+        position = sum(
+            1
+            for other in self._backends[: self._backends.index(record)]
+            if other.node is not None
+        )
+        self.root.insert(position, record.node)
+        return record.node
+
+    def set_filter(self, text: str) -> int:
+        """Narrow the tree to the entries whose path contains ``text``.
+
+        Matching is a case-insensitive substring of the whole path, so ``work/``
+        finds a folder and ``mail`` finds every entry called that wherever it
+        sits. Folders that lead to a match are kept, and everything is expanded:
+        a match inside a collapsed folder is a match nobody can see.
+
+        Returns:
+            How many entries matched, which is what tells an empty store apart
+            from a search that found nothing.
+        """
+        self._filter = text.strip()
+
+        self.root.remove_all()
+        for record in self._backends:
+            record.node = None
+
+        matched = 0
+        for record in self._backends:
+            entries = [path for path in record.entries if self._matches(path)]
+            matched += len(entries)
+            if not self._filter:
+                self._node_for(record)
+            for path in entries:
+                self._insert(record, path)
+
+        if self._filter:
+            self.expand_all()
+        else:
+            self.expand_first_level()
+        return matched
+
+    def _matches(self, path: str) -> bool:
+        return self._filter.lower() in path.lower()
+
+    def add_password(self, backend: BackendEntries, path: str) -> PasswordNode | None:
         """Add an entry under a backend, creating folder rows as needed.
 
         Args:
-            backend: Node returned by :meth:`add_backend`
+            backend: Record returned by :meth:`add_backend`
             path: Full entry path, ``work/mail`` style
 
         Returns:
-            The leaf node for the entry.
+            The leaf node for the entry, or None when a filter is on and the
+            entry does not match it. The entry is remembered either way, so
+            clearing the filter brings it back.
         """
-        parent = backend
+        backend.entries.append(path)
+        if not self._matches(path):
+            return None
+        node = self._insert(backend, path)
+        if self._filter:
+            # It arrived while a search was running -- a listing coming back
+            # late, or an entry just saved -- so open the way down to it.
+            self.expand_all()
+        return node
+
+    def _insert(self, backend: BackendEntries, path: str) -> PasswordNode:
+        """Put one entry into the visible tree, building its folders."""
+        parent = self._node_for(backend)
         parts = path.split("/")
 
         for depth, part in enumerate(parts):
@@ -177,12 +278,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
                 return child
         return None
 
-    def clear_backend_passwords(self, backend: PasswordNode) -> None:
+    def clear_backend_passwords(self, backend: BackendEntries) -> None:
         """Remove all entries under a backend."""
-        backend.children.remove_all()
+        backend.entries.clear()
+        if backend.node is not None:
+            backend.node.children.remove_all()
 
     def clear_all(self) -> None:
-        """Clear all backends and passwords."""
+        """Clear all backends and passwords, filtered out ones included."""
+        self._backends.clear()
         self.root.remove_all()
 
     def get_selected_password(self) -> tuple[str, str] | None:

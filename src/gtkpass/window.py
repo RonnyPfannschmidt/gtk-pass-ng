@@ -69,6 +69,12 @@ PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, bool]] = {
         "dialog-password-symbolic",
         False,
     ),
+    "no-matches": (
+        "No Matches",
+        "No entry's path contains what you searched for.",
+        "system-search-symbolic",
+        False,
+    ),
     "failed": ("Could Not Open This Entry", None, "dialog-warning-symbolic", False),
 }
 
@@ -141,6 +147,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._changed_recipients: list[str] = []
         # Which of PLACEHOLDER_STATES the content pane is currently offering.
         self._placeholder_state = "loading"
+        # How many entries the current search matched, so an empty store can be
+        # told apart from a search that found nothing.
+        self._matched = 0
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -148,6 +157,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._restore_geometry()
         self._setup_actions()
         self._setup_password_list()
+        self._setup_search()
         self._refresh_sync_action()
         self._load_backends()
 
@@ -415,6 +425,67 @@ class GTKPassWindow(Adw.ApplicationWindow):
         )
         self._apply_reveal_preference()
 
+    def _setup_search(self):
+        """Connect the search box to the sidebar.
+
+        It sat there with a placeholder promising search and nothing behind it,
+        and Preferences offered a "search as you type" switch over a feature
+        that did not exist. Both signals are connected either way and the
+        preference decides which one acts: reading it at the moment of the
+        keystroke means a change to it takes effect without reopening anything.
+        """
+        self.search_entry.connect("search-changed", self._on_search_changed)
+        # Enter is the other half of the preference, and is also what somebody
+        # who has switched typing off will reach for.
+        self.search_entry.connect("activate", lambda *_: self._apply_search())
+        # Escape in the box clears it rather than leaving the tree narrowed by
+        # a search the user has visibly abandoned.
+        self.search_entry.connect("stop-search", lambda *_: self._clear_search())
+
+    def _on_search_changed(self, _entry) -> None:
+        if self.settings.get_boolean("search-as-you-type"):
+            self._apply_search()
+        elif not self.search_entry.get_text().strip():
+            # Emptying the box is not a search, it is the end of one, and
+            # leaving the tree narrowed to a query no longer on screen would
+            # look like entries had gone missing.
+            self._apply_search()
+
+    def _clear_search(self) -> None:
+        self.search_entry.set_text("")
+        self._apply_search()
+
+    def _apply_search(self) -> None:
+        """Narrow the sidebar to the current query and say what came of it."""
+        self._matched = self.password_list.set_filter(self.search_entry.get_text())
+        self._refresh_placeholder(reapply=False)
+
+    def _refresh_placeholder(self, reapply: bool = True) -> None:
+        """Say what the sidebar currently holds, once it is settled.
+
+        A search that matched nothing is not an empty store: one is the user's
+        query and the other is their store, and telling them apart is the whole
+        point of saying anything at all.
+
+        ``reapply`` narrows a sidebar that has just been rebuilt. Listings come
+        back one backend at a time and go into the tree as they arrive, so a
+        search running while they land has to be applied again over the result.
+        """
+        if self._pending_listings > 0:
+            return
+        if not self.backend_manager.get_all_backends() and not self.failed_backends:
+            # The configuration prompt owns the pane; there is nothing to list.
+            return
+
+        if self.search_entry.get_text().strip():
+            if reapply:
+                self._matched = self.password_list.set_filter(
+                    self.search_entry.get_text()
+                )
+            self._show_placeholder("ready" if self._matched else "no-matches")
+        else:
+            self._show_placeholder("ready" if self._listed_anything else "empty")
+
     def _load_passwords(self):
         """Rebuild the sidebar, asking each backend for its entries off the UI thread.
 
@@ -495,15 +566,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         self._listed_anything = self._listed_anything or listed
         self._pending_listings -= 1
-        if self._pending_listings > 0:
-            return
-
-        # Every backend has answered, so what the pane should offer is settled:
-        # an invitation to pick something, or the news that there is nothing to
-        # pick. Neither may overwrite an entry that is already on display -- a
-        # sync finishing while one is open re-lists, and the listing is not what
-        # the user is looking at.
-        self._show_placeholder("ready" if self._listed_anything else "empty")
+        # Every backend having answered is what settles the pane: an invitation
+        # to pick something, or the news that there is nothing to pick. Neither
+        # may overwrite an entry already on display -- a sync finishing while
+        # one is open re-lists, and the listing is not what the user is looking
+        # at.
+        self._refresh_placeholder()
 
     def _get_backend_display_name(self, backend_id: str) -> str:
         """Name to show for a configured backend instance.

@@ -103,6 +103,133 @@ class TestExpansion:
         assert visible_rows(view) == ["Demo", "work"]
 
 
+class TestFiltering:
+    """The sidebar is filtered by rebuilding it, not by hiding rows.
+
+    A GtkFilterListModel over the tree can only see rows that have been
+    materialised, and a TreeListModel materialises a folder's children only
+    once it is expanded -- so a filter laid over the view would have matched
+    whatever happened to be open and nothing else.
+    """
+
+    @pytest.fixture
+    def stocked(self, view, backend):
+        for path in ("work/mail", "work/vpn", "personal/mail", "bank"):
+            view.add_password(backend, path)
+        return backend
+
+    def test_no_filter_shows_everything(self, view, stocked):
+        view.set_filter("")
+
+        assert set(names(view.root)) == {
+            "Demo",
+            "work",
+            "mail",
+            "vpn",
+            "personal",
+            "bank",
+        }
+
+    def test_a_filter_keeps_only_matching_entries(self, view, stocked):
+        view.set_filter("vpn")
+
+        assert list(names(view.root)) == ["Demo", "work", "vpn"]
+
+    def test_matching_is_case_insensitive(self, view, stocked):
+        view.set_filter("VPN")
+
+        assert list(names(view.root)) == ["Demo", "work", "vpn"]
+
+    def test_a_folder_name_matches_everything_below_it(self, view, stocked):
+        view.set_filter("work/")
+
+        assert list(names(view.root)) == ["Demo", "work", "mail", "vpn"]
+
+    def test_matches_in_two_folders_keep_both(self, view, stocked):
+        view.set_filter("mail")
+
+        assert list(names(view.root)) == ["Demo", "work", "mail", "personal", "mail"]
+
+    def test_matches_are_visible_without_expanding(self, view, stocked):
+        """A match inside a collapsed folder is a match nobody can see."""
+        view.set_filter("vpn")
+
+        assert visible_rows(view) == ["Demo", "work", "vpn"]
+
+    def test_a_backend_with_no_matches_is_dropped(self, view, stocked):
+        other = view.add_backend("demo_2", "Other", "")
+        view.add_password(other, "unrelated")
+
+        view.set_filter("vpn")
+
+        assert "Other" not in list(names(view.root))
+
+    def test_nothing_matching_empties_the_tree(self, view, stocked):
+        view.set_filter("nothing here")
+
+        assert list(names(view.root)) == []
+
+    def test_the_count_of_matches_is_reported(self, view, stocked):
+        """The window needs it to tell an empty store from an empty search."""
+        assert view.set_filter("mail") == 2
+        assert view.set_filter("nothing here") == 0
+
+    def test_clearing_the_filter_brings_everything_back(self, view, stocked):
+        view.set_filter("vpn")
+
+        view.set_filter("")
+
+        assert list(names(view.root)) == [
+            "Demo",
+            "work",
+            "mail",
+            "vpn",
+            "personal",
+            "mail",
+            "bank",
+        ]
+
+    def test_folders_are_closed_again_once_the_filter_clears(self, view, stocked):
+        view.set_filter("vpn")
+
+        view.set_filter("")
+
+        assert visible_rows(view) == ["Demo", "work", "personal", "bank"]
+
+    def test_an_entry_arriving_under_a_filter_is_filtered_too(self, view, stocked):
+        """Listings arrive per backend, and can land while a search is running."""
+        view.set_filter("vpn")
+
+        view.add_password(stocked, "later/vpn-two")
+        view.add_password(stocked, "later/unrelated")
+
+        assert list(names(view.root)) == ["Demo", "work", "vpn", "later", "vpn-two"]
+
+    def test_a_backend_added_under_a_filter_waits_for_a_match(self, view, stocked):
+        view.set_filter("vpn")
+        other = view.add_backend("demo_2", "Other", "")
+
+        assert "Other" not in list(names(view.root))
+
+        view.add_password(other, "office/vpn")
+
+        assert list(names(view.root)) == [
+            "Demo",
+            "work",
+            "vpn",
+            "Other",
+            "office",
+            "vpn",
+        ]
+
+    def test_clear_all_forgets_the_entries_behind_the_filter(self, view, stocked):
+        view.clear_all()
+
+        view.set_filter("")
+
+        assert list(names(view.root)) == []
+
+
 class TestIcons:
     """What a row is has to be readable at a glance, not inferred from depth."""
 
