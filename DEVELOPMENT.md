@@ -47,6 +47,17 @@ with `--system-site-packages` — a uv-managed Python's site-packages does not
 contain the distribution's GTK bindings — installs the dependencies with
 PyGObject and pycairo excluded, and installs the pre-commit hook.
 
+Which interpreter that is, `scripts/system-python.sh` works out by importing
+`gi` rather than assuming `/usr/bin/python3`: on a machine where the bindings
+belong to a different minor version, assuming it produces an environment that
+builds happily and fails much later, from inside the application. If it picks
+the wrong one, or finds none, name yours and it will be checked rather than
+taken on trust:
+
+```bash
+make sync SYSTEM_PYTHON=/usr/bin/python3.13
+```
+
 If you find yourself running `uv run` by hand, set `UV_NO_SYNC=1`. Without it
 uv re-resolves the environment and tries to build the excluded packages again.
 The Makefile exports it for you.
@@ -61,6 +72,7 @@ The Makefile exports it for you.
 | `make run-dev` | launch against a throwaway store of invented entries |
 | `make devstore` | create that throwaway store under `.dev/` |
 | `make test` | the test suite, headless under xvfb |
+| `make test-wheel` | install the built wheel and run the suite against that |
 | `make check` | every pre-commit hook: lint, format, types |
 | `make ui` | compile `.blp` sources to `.ui` |
 | `make schemas` | compile the GSettings schema |
@@ -104,9 +116,26 @@ Never print a decrypted value, and do not defeat the redacted
 
 ```bash
 make test                       # everything, headless
+make test-gui                   # only what needs a display
 UV_NO_SYNC=1 uv run pytest tests/test_backend_contract.py
 UV_NO_SYNC=1 uv run pytest -m "not gui"      # no display needed
 ```
+
+`make test` runs against whatever `PYTHON` names, which defaults to this
+checkout's environment. CI overrides it, so the job runs this target rather than
+a copy of it that drifts — and so you can run what CI runs:
+
+```bash
+make build && make test-wheel   # the suite against the installed wheel
+make test PYTHON=python3        # against something installed system-wide
+```
+
+`make test-wheel` is the CI wheel job on your machine: a throwaway environment
+on the system interpreter, the wheel installed into it, and the suite run
+against that. It answers the question the working copy cannot — nobody runs the
+working copy — and catches what packaging breaks: a wheel that installed without
+its `.ui` files, a schema that never reached the compiled cache, an entry point
+resolving to nothing.
 
 Anything touching widgets needs a display, so `make test` wraps the run in
 `scripts/headless-session.sh`: an Xvfb display with GDK actually pointed at it,
@@ -198,7 +227,8 @@ the `.xml` beside it, so a stale compiled blob wins. Re-run `make schemas`.
 
 **`uv sync` tries to build pycairo and fails.** The environment was created
 against a uv-managed Python instead of the system one. Remove `.venv` and run
-`make sync`.
+`make sync`, which asks `scripts/system-python.sh` which interpreter has the
+bindings rather than guessing.
 
 **Tests emit D-Bus and portal warnings.** Expected under
 `scripts/headless-session.sh`; there is no secret service on the private bus.

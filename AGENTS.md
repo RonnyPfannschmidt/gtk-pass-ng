@@ -130,6 +130,15 @@ reports itself healthy. Every headless call site goes through the wrapper, and
 `tests/test_headless_isolation.py` fails if one stops; DEVELOPMENT.md has the
 whole story.
 
+`make test` runs against whatever `PYTHON` names, defaulting to this checkout's
+environment; CI overrides it, so the jobs run this target rather than a copy of
+it. `make build && make test-wheel` is the CI wheel job here. Which interpreter
+`make sync` builds the environment against is worked out by
+`scripts/system-python.sh`, which imports `gi` rather than assuming
+`/usr/bin/python3` — assuming it builds an environment that fails later, from
+inside the application. `make sync SYSTEM_PYTHON=...` names one, and that is
+checked too.
+
 CI packages first and tests the packages: it builds the wheel, sdist and RPMs,
 then runs this suite against each of them installed, over two Fedora releases.
 It also freezes the Windows bundle out of that same wheel and checks it, built

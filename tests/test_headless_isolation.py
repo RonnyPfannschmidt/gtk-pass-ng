@@ -178,16 +178,29 @@ class TestEveryCallSiteGoesThroughIt:
         assert "scripts/headless-session.sh packaging/smoke-test-install.sh" in script
 
     def test_ci_runs_every_suite_through_it(self):
+        """Through the wrapper, or through a make target that uses it.
+
+        Either is fine and both are checked -- what must not appear is a job
+        running the suite some third way, which is what every one of these was
+        before the wrapper existed.
+        """
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        # The lookbehind keeps python3-pytest, a package in a dnf list, from
+        # reading as an invocation of it.
         runs = [
             line
             for line in workflow.splitlines()
             if not line.lstrip().startswith("#")
-            and ("-m pytest" in line or "smoke-test-install.sh" in line)
+            and (
+                re.search(r"(?<![-\w])pytest\b", line)
+                or "smoke-test-install.sh" in line
+            )
         ]
         assert runs, "no test invocations found in ci.yml"
         for line in runs:
-            assert "scripts/headless-session.sh" in line, line
+            assert "scripts/headless-session.sh" in line or re.search(
+                r"\bmake\s+test", line
+            ), line
 
     @pytest.mark.parametrize(
         "path",
