@@ -4,7 +4,8 @@
 # Run it against a system where the package is already in place -- CI does this
 # straight after `dnf install`, and packaging/test-sysext.sh after merging the
 # extension. Needs a display and a session bus; both callers wrap it in
-# `xvfb-run -a dbus-run-session --`.
+# `scripts/headless-session.sh`, which arranges those and a private runtime
+# directory besides.
 #
 # What it is looking for is the class of breakage a build cannot see: a wheel
 # that installed without its .ui files, a schema that never reached the compiled

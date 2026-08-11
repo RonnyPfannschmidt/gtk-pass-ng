@@ -109,8 +109,48 @@ UV_NO_SYNC=1 uv run pytest -m "not gui"      # no display needed
 ```
 
 Anything touching widgets needs a display, so `make test` wraps the run in
-`xvfb-run` and a private D-Bus session — the latter keeps the tests away from
-your real keyring.
+`scripts/headless-session.sh`: an Xvfb display with GDK actually pointed at it,
+a private D-Bus session — which keeps the tests away from your real keyring —
+and a private `XDG_RUNTIME_DIR`.
+
+### Why the tests get their own runtime directory
+
+The third one looks like belt and braces and is not. `xdg-document-portal`
+mounts itself at `$XDG_RUNTIME_DIR/doc`, and `dbus-run-session` inherits
+`XDG_RUNTIME_DIR` from the session around it. So anything on the test bus that
+activated `org.freedesktop.portal.Documents` got a *second* portal aimed at the
+same `/run/user/$UID/doc` as your real one. That mount is `auto_unmount`: when
+the test bus exited, it was torn down — and the real session's mount went with
+it. After a test run, every flatpak on the machine died at launch with
+
+```
+bwrap: Can't find source path /run/user/1000/doc/by-app/<app-id>
+```
+
+`systemctl --user status xdg-document-portal` reported `active (running)` with
+no restarts and an empty journal throughout, because the service was never the
+process that died. `findmnt /run/user/$UID/doc` is the check that answers it.
+
+Two things about the fix, both of which look like details and are not:
+
+- It is a *private* directory, not an unset variable. With `XDG_RUNTIME_DIR`
+  unset, `g_get_user_runtime_dir()` falls back to the user cache directory and
+  the portal mounts at `~/.cache/doc` instead — a documented upstream nuisance
+  ([xdg-desktop-portal#512](https://github.com/flatpak/xdg-desktop-portal/issues/512)),
+  not an improvement.
+- It has to be set *outside* `dbus-run-session`. Setting it in `conftest.py`
+  does nothing: dbus-daemon is already running by then, and it starts activated
+  services with its own environment rather than pytest's.
+
+It cuts one more thread while it is there, which is worth knowing about: a
+gnome-keyring client finds the daemon through
+`$XDG_RUNTIME_DIR/keyring/control`, so a private runtime directory means the
+tests cannot reach the real keyring by that route either, private bus or not.
+
+`tests/test_headless_isolation.py` asserts that every headless invocation — the
+Makefile, `packaging/test-sysext.sh`, the CI workflow — goes through the
+wrapper. CI has no real portal to protect, so that wiring check is the only
+thing that can notice the isolation being dropped.
 
 Registered markers:
 
@@ -160,5 +200,12 @@ the `.xml` beside it, so a stale compiled blob wins. Re-run `make schemas`.
 against a uv-managed Python instead of the system one. Remove `.venv` and run
 `make sync`.
 
-**Tests emit D-Bus and portal warnings.** Expected under `xvfb-run
-dbus-run-session`; there is no secret service on the private bus.
+**Tests emit D-Bus and portal warnings.** Expected under
+`scripts/headless-session.sh`; there is no secret service on the private bus.
+
+**Flatpaks stop launching after a test run.** `bwrap: Can't find source path
+/run/user/$UID/doc/...` means the document portal's mount is gone. Check with
+`findmnt /run/user/$UID/doc`, not `systemctl status`, which reports healthy
+either way. If it happens, something ran a bus without the private runtime
+directory; see above. `systemctl --user restart xdg-document-portal` puts the
+mount back.

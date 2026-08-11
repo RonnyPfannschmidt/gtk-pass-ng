@@ -93,11 +93,13 @@ echo "==> the merge put the application on the system"
 test -x /usr/bin/gtkpass || { echo "FAIL: /usr/bin/gtkpass is not there"; exit 1; }
 
 echo "==> smoke testing what is now installed"
-# Under xvfb and a private bus even though this machine has a real session:
-# a private bus has no secret service, so nothing here can reach the real
-# keyring, and a window opening on the developer's own display is not the
-# thing being tested.
-xvfb-run -a dbus-run-session -- packaging/smoke-test-install.sh
+# In a throwaway session even though this machine has a real one: a private bus
+# has no secret service, so nothing here can reach the real keyring; a window
+# opening on the developer's own display is not the thing being tested; and a
+# private runtime directory is what stops the throwaway session's document
+# portal from unmounting the real session's. See scripts/headless-session.sh --
+# this runs on a live desktop, so it is the call site with the most to lose.
+scripts/headless-session.sh packaging/smoke-test-install.sh
 
 echo
 echo "==> the merged extension works"

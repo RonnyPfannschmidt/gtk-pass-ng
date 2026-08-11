@@ -22,24 +22,20 @@ SYSTEM_PYTHON ?= /usr/bin/python3
 # without this `uv run` re-syncs and tries to build the excluded packages again.
 export UV_NO_SYNC := 1
 
-# GTK4 has no usable headless backend, and a private bus keeps the tests away
-# from the developer's real keyring.
-#
-# The env prefix is not decoration. GDK ignores DISPLAY whenever WAYLAND_DISPLAY
-# is set, and a Wayland session commonly exports GDK_BACKEND=wayland outright,
-# so xvfb-run on its own connected to the developer's own compositor: windows
-# appeared on their screen and the clipboard tests overwrote whatever they had
-# copied -- which, working on this, may well have been a password. Xvfb was
-# started, and nothing used it.
-ISOLATE := env -u WAYLAND_DISPLAY GDK_BACKEND=x11
-HEADLESS := $(ISOLATE) xvfb-run -a dbus-run-session --
+# GTK4 has no usable headless backend, a private bus keeps the tests away from
+# the developer's real keyring, and a private XDG_RUNTIME_DIR keeps them away
+# from the real document portal -- whose mount a test run otherwise tears down
+# for the whole session, silently. The script is the one definition of all
+# three, shared with packaging/test-sysext.sh and the test jobs in CI; the
+# reasoning, including why none of it can move into conftest.py, is in there.
+HEADLESS := ./scripts/headless-session.sh
 
 FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
 
 .PHONY: help venv sync hooks ui schemas check test test-gui build run run-dev \
 	devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo rpm sysext \
-	sysext-test clean
+	sysext-test sysext-install clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -59,6 +55,7 @@ help:
 	@echo "rpm      build the RPM in a Fedora container"
 	@echo "sysext   build a systemd-sysext image for Bluefin/Silverblue"
 	@echo "sysext-test  merge that image onto this machine, test it, unmerge"
+	@echo "sysext-install  install that image on this machine and merge it, for keeps"
 	@echo "clean    remove build and cache artefacts"
 
 # --allow-existing so this is idempotent. Without it `uv venv` refuses outright
@@ -171,6 +168,13 @@ sysext:
 # cannot do: merging needs a running systemd, which a container has not got.
 sysext-test:
 	./packaging/test-sysext.sh
+
+# The one that keeps the image installed. Replaces an earlier one, which means
+# unmerging first: a merged image is loop-mounted, so writing over the file
+# underneath it is not an update but a running system reading from a file that
+# has gone. ARGS="--yes" to skip the confirmation.
+sysext-install:
+	./packaging/install-sysext.sh $(ARGS)
 
 clean:
 	rm -rf build/ dist/ htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .mypy_cache/
