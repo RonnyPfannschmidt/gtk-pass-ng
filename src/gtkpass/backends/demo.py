@@ -52,6 +52,9 @@ class DemoBackend(PasswordBackend):
         description="Read-only demo data for testing",
     )
 
+    #: Every write raises, so nothing may offer one for this backend.
+    writable = False
+
     def __init__(self, demo_data: list[dict]):
         """Initialize demo backend with data.
 

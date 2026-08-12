@@ -112,6 +112,15 @@ class TestBackendClass:
         assert cls.metadata.name
         assert cls.metadata.icon
 
+    def test_declares_whether_it_can_be_written_to(self, name):
+        """The interface offers writing; not every backend can do it.
+
+        The demo backend raises on every write. Without something to ask
+        beforehand, the only way to find that out is to offer somebody an "Add
+        Password" dialog, let them fill it in, and refuse it afterwards.
+        """
+        assert isinstance(load(name).writable, bool)
+
     def test_is_available_answers_promptly(self, name):
         """Availability probing must answer, quickly, without raising.
 
@@ -207,6 +216,31 @@ class TestTheSerializingProxyCoversTheWholeInterface:
             f"SerializedBackend inherits {method_name} from the interface "
             f"instead of forwarding it to the backend it wraps"
         )
+
+
+class TestTheProxyAnswersForWritability:
+    """It is read off the proxy, not off the backend, so it has to be carried.
+
+    ``metadata`` is copied across in the constructor for the same reason: the
+    manager hands out the proxy, and a class attribute left behind on the
+    wrapped backend would answer for ``SerializedBackend`` -- which is
+    writable, being nothing in particular.
+    """
+
+    def test_a_read_only_backend_stays_read_only_through_the_proxy(self):
+        from gtkpass.backends.serialized import SerializedBackend
+
+        proxied = SerializedBackend(load("demo").create())
+
+        assert proxied.writable is False
+
+    def test_a_writable_backend_stays_writable(self):
+        from gtkpass.backends.serialized import SerializedBackend
+
+        backend = load("demo").create()
+        backend.writable = True
+
+        assert SerializedBackend(backend).writable is True
 
 
 class TestDemoBackendBehaviour:

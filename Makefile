@@ -47,6 +47,14 @@ SELECT_PYTHON := ./scripts/system-python.sh $(SYSTEM_PYTHON)
 # wins, that being the spelling above.
 PYTHON := uv run python
 
+# Whether the suite about to run is the one that reads the working copy. Only
+# the default does; every override above names an interpreter with the package
+# installed into it. See UI_PREREQUISITES below, which is the one thing that
+# turns on the difference.
+ifeq ($(PYTHON),uv run python)
+TESTS_THE_WORKING_COPY := yes
+endif
+
 # Every target below reuses the environment as-is rather than re-resolving it;
 # without this `uv run` re-syncs and tries to build the excluded packages again.
 export UV_NO_SYNC := 1
@@ -61,6 +69,51 @@ HEADLESS := ./scripts/headless-session.sh
 
 FLATPAK_ID := io.github.RonnyPfannschmidt.GTKPass
 FLATPAK_MANIFEST := build-aux/$(FLATPAK_ID).yml
+
+# -- what is built from what ---------------------------------------------------
+#
+# The packaging targets used to be phony, and the scripts behind them decided
+# for themselves whether there was anything to do. build-sysext.sh builds an RPM
+# only when dist/rpm holds none at all, so an image built the day after a change
+# was an image of the day before it -- silently, and with the version in the
+# filename saying so to anyone who thought to look.
+#
+# So the outputs are files with prerequisites now, and make decides. The phony
+# names stay as the way to ask for them.
+BLUEPRINT_SOURCES := $(wildcard $(BLUEPRINTS)/*.blp)
+UI_FILES := $(BLUEPRINT_SOURCES:.blp=.ui)
+
+SCHEMA_SOURCES := $(wildcard data/*.gschema.xml)
+COMPILED_SCHEMAS := data/gschemas.compiled
+
+PYTHON_SOURCES := $(shell find src -name '*.py' -not -path '*/__pycache__/*')
+DATA_SOURCES := $(wildcard data/*.xml) $(wildcard data/*.desktop) \
+	$(shell find data/icons -type f 2>/dev/null)
+
+# The version comes from the git tags through setuptools-scm, so a commit with
+# no file change still produces a different package -- which is what the
+# packaging targets were getting wrong. HEAD moves on checkout, and the branch
+# ref it names moves on commit; both together are "a different revision is
+# checked out now". Not the index, which `git status` rewrites when it refreshes
+# its stat cache, and which would put a container build behind every status.
+GIT_DIR := $(shell git rev-parse --git-dir 2>/dev/null)
+GIT_REF := $(shell git symbolic-ref -q HEAD 2>/dev/null)
+GIT_STATE := $(wildcard $(GIT_DIR)/HEAD $(if $(GIT_REF),$(GIT_DIR)/$(GIT_REF)))
+
+# Everything a package is built out of.
+PACKAGE_SOURCES := $(PYTHON_SOURCES) $(UI_FILES) $(DATA_SOURCES) $(GIT_STATE) \
+	pyproject.toml uv.lock
+
+# The RPM's own name carries the version, so it cannot be named as a target
+# before it is built. The stamp stands in for it: build-rpm.sh empties dist/rpm
+# before it starts, so nothing older survives beside what it produces.
+RPM_STAMP := dist/rpm/.built
+
+# An extension names the system it was built for and systemd refuses it
+# anywhere else, so the image for *this* machine is what these targets mean.
+OS_ID := $(shell . /etc/os-release && echo $$ID)
+OS_VERSION_ID := $(shell . /etc/os-release && echo $$VERSION_ID)
+SYSEXT_IMAGE := dist/sysext/gtkpass-$(OS_ID)-$(OS_VERSION_ID).raw
 
 .PHONY: help venv sync hooks ui schemas check test test-gui test-wheel build \
 	run run-dev devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo \
@@ -109,22 +162,54 @@ hooks:
 	uv run pre-commit install
 
 # Never hand-edit a .ui file: it is generated. Edit the .blp and run this.
-ui:
-	uv run blueprint-compiler batch-compile $(BLUEPRINTS) $(BLUEPRINTS) $(BLUEPRINTS)/*.blp
+#
+# One recipe produces all of them -- batch-compile takes the whole directory at
+# once -- so this is a grouped target. With a plain rule make would run the
+# batch once per .ui it wanted, which is fifteen compilations of everything to
+# produce the one file that changed.
+ui: $(UI_FILES)
 
-schemas:
+# The touch is not cosmetic. batch-compile leaves a .ui alone when what it
+# would write is what is already there, so an unchanged one keeps a timestamp
+# older than every .blp beside it -- and make, seeing a target it just built
+# still older than its prerequisites, would run the compiler again on the next
+# invocation, and the one after that, forever.
+$(UI_FILES) &: $(BLUEPRINT_SOURCES)
+	uv run blueprint-compiler batch-compile $(BLUEPRINTS) $(BLUEPRINTS) $(BLUEPRINTS)/*.blp
+	@touch $(UI_FILES)
+
+schemas: $(COMPILED_SCHEMAS)
+
+$(COMPILED_SCHEMAS): $(SCHEMA_SOURCES)
 	glib-compile-schemas data/
 
 check:
 	uv run pre-commit run --all-files
 
-test: schemas
+# The generated files rather than an assumption that they are current: a suite
+# run against a stale .ui tests the widgets somebody had an hour ago, and
+# passes.
+#
+# The .ui files only when the suite reads them, though, which is when it runs
+# against the working copy. Against an installed wheel or RPM the widgets come
+# out of the installed copy, compiled when the package was built -- the files
+# here are not opened at all. And asking for them there does not merely do
+# nothing: those jobs in CI deliberately have no development environment, so the
+# recipe below reaches for a uv that is not installed and the suite never runs.
+#
+# It would reach for it every time, too. A checkout writes files in path order,
+# so window.blp lands after about.ui, and the grouped rule makes every .ui
+# depend on every .blp -- which leaves a freshly checked-out .ui older than a
+# prerequisite that was never edited.
+UI_PREREQUISITES := $(if $(TESTS_THE_WORKING_COPY),$(UI_FILES))
+
+test: $(COMPILED_SCHEMAS) $(UI_PREREQUISITES)
 	$(HEADLESS) $(PYTHON) -m pytest
 
-test-gui: schemas
+test-gui: $(COMPILED_SCHEMAS) $(UI_PREREQUISITES)
 	$(HEADLESS) $(PYTHON) -m pytest -m gui
 
-build:
+build: $(UI_FILES)
 	uv build
 
 # The suite against the wheel, installed. This is the question the working copy
@@ -138,7 +223,11 @@ build:
 # as everywhere else, and the system interpreter for the same reason.
 WHEEL_VENV := build/wheel-venv
 
-test-wheel: schemas
+# No generated files among the prerequisites: what is tested here is the wheel
+# in dist/, which carries the .ui files it was built with, and the delegated
+# `test` below brings up the schema. `make build` is what compiles a .blp into
+# the wheel, and this target says so when dist/ holds nothing.
+test-wheel:
 	@wheels=$$(ls -1 dist/*.whl 2>/dev/null | wc -l); \
 	if [ "$$wheels" != 1 ]; then \
 		echo "make test-wheel: expected one wheel in dist/, found $$wheels."; \
@@ -164,7 +253,11 @@ test-wheel: schemas
 	$(MAKE) test PYTHON=$(WHEEL_VENV)/bin/python
 
 # Pass arguments through: make run ARGS="--debug"
-run:
+#
+# The generated files are prerequisites here too: launching the application to
+# look at a change to a .blp, and being shown the previous one, is the most
+# expensive minute in the day.
+run: $(COMPILED_SCHEMAS) $(UI_FILES)
 	./run_app.sh $(ARGS)
 
 # A store full of invented passwords, for manual testing and screenshots.
@@ -182,7 +275,7 @@ devstore:
 # store by default; without turning it back off the development run would have
 # the guard disabled. The scratch store is opened on its own merits -- it is
 # marked as throwaway -- and everything else stays refused.
-run-dev: devstore
+run-dev: devstore $(COMPILED_SCHEMAS) $(UI_FILES)
 	PASSWORD_STORE_DIR=$(PWD)/$(DEV_STORE) GNUPGHOME=$(PWD)/$(DEV_GNUPGHOME) \
 		GTKPASS_ALLOW_REAL_STORE=0 ./run_app.sh $(ARGS)
 
@@ -229,22 +322,40 @@ flatpak-lint-repo:
 # Both build in a Fedora container: this is developed on an ostree desktop,
 # where layering rpm-build in order to package something is a reboot and a
 # permanent addition to the image. See docs/PACKAGING.md.
-rpm:
-	./packaging/build-rpm.sh
+rpm: $(RPM_STAMP)
 
-sysext:
+# The container it is built in counts as an input: a change to the toolchain
+# is a change to what comes out of it.
+BUILD_CONTAINER := packaging/Containerfile.build packaging/builder-image.sh
+
+$(RPM_STAMP): $(PACKAGE_SOURCES) packaging/build-rpm.sh packaging/gtkpass.spec \
+	$(BUILD_CONTAINER)
+	./packaging/build-rpm.sh
+	@touch $@
+
+# The image is built from the RPM, so it is out of date whenever that is. This
+# is the dependency that was missing: build-sysext.sh builds an RPM only when
+# dist/rpm has none at all, so once one existed every later image was made from
+# it however old it had become.
+sysext: $(SYSEXT_IMAGE)
+
+$(SYSEXT_IMAGE): $(RPM_STAMP) packaging/build-sysext.sh $(BUILD_CONTAINER)
 	./packaging/build-sysext.sh
 
 # Needs root, and says what it changes before it changes it. This is the step CI
 # cannot do: merging needs a running systemd, which a container has not got.
-sysext-test:
+sysext-test: $(SYSEXT_IMAGE)
 	./packaging/test-sysext.sh
 
 # The one that keeps the image installed. Replaces an earlier one, which means
 # unmerging first: a merged image is loop-mounted, so writing over the file
 # underneath it is not an update but a running system reading from a file that
 # has gone. ARGS="--yes" to skip the confirmation.
-sysext-install:
+#
+# Depends on the image, so what gets installed is built from the working tree as
+# it is now. It used to install whatever was in dist/sysext, which is why the
+# script prints the build date and the commit before it asks.
+sysext-install: $(SYSEXT_IMAGE)
 	./packaging/install-sysext.sh $(ARGS)
 
 clean:

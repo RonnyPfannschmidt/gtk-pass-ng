@@ -1,0 +1,22 @@
+using Gtk 4.0;
+using Adw 1;
+
+// Deleting an entry is not undoable from here: what GTKPass writes to a store
+// it can commit, but it cannot bring back a decrypted secret nobody has a copy
+// of. So this asks first, and names what it is about to remove -- the body is
+// filled in with the entry, because "Delete this password?" is a question
+// nobody can answer.
+//
+// Adw.AlertDialog is final, so this is a builder object rather than a template,
+// as in recipients_changed.blp.
+Adw.AlertDialog confirm_delete_dialog {
+  heading: _("Delete This Entry?");
+
+  responses [
+    cancel: _("Cancel"),
+    delete: _("Delete") destructive,
+  ]
+
+  default-response: "cancel";
+  close-response: "cancel";
+}

@@ -101,7 +101,21 @@ cleanup() {
 # without running it, and the runtime directory outlives the run.
 trap cleanup EXIT INT TERM HUP
 
+# And a screen size that is said rather than inherited. GTK will not give a
+# window more room than the monitor has, so the desktop this invents is an upper
+# bound on every width a test can ask for -- and xvfb-run carries a default that
+# differs by where it came from: Fedora's is 640x480, Homebrew's is this. A
+# window presented at 1000 points on the smaller one is silently 640 instead,
+# which is under the breakpoint, so the test for a wide window read the layout of
+# a narrow one and asserted the opposite of what it meant. It passed on the
+# machine it was written on and failed in CI, and neither said anything about a
+# screen.
+#
+# Larger than any window the suite presents, and 24-bit because the cairo
+# renderer wants a truecolor visual.
+SCREEN="-screen 0 1280x1024x24"
+
 status=0
 env -u WAYLAND_DISPLAY GDK_BACKEND=x11 XDG_RUNTIME_DIR="$runtime" \
-    xvfb-run -a dbus-run-session -- "$@" || status=$?
+    xvfb-run -a -s "$SCREEN" dbus-run-session -- "$@" || status=$?
 exit "$status"

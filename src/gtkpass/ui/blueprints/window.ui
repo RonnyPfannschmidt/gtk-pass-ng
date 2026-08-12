@@ -11,9 +11,24 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     <property name="default-width">1000</property>
     <property name="default-height">700</property>
     <child>
+      <object class="AdwBreakpoint">
+        <condition>max-width: 650sp</condition>
+        <setter object="split_view" property="collapsed">true</setter>
+        <setter object="sidebar_button" property="visible">true</setter>
+      </object>
+    </child>
+    <child>
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar" id="header_bar">
+            <child type="start">
+              <object class="GtkToggleButton" id="sidebar_button">
+                <property name="icon-name">sidebar-show-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Show Passwords</property>
+                <property name="visible">false</property>
+                <property name="active" bind-source="split_view" bind-property="show-sidebar" bind-flags="sync-create|bidirectional"/>
+              </object>
+            </child>
             <child type="start">
               <object class="GtkButton" id="add_button">
                 <property name="icon-name">list-add-symbolic</property>
@@ -112,15 +127,30 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                             <property name="icon-name">dialog-password-symbolic</property>
                             <property name="vexpand">true</property>
                             <property name="child">
-                              <object class="GtkButton" id="open_preferences_button">
-                                <property name="label" translatable="yes">Open Preferences</property>
-                                <property name="action-name">app.preferences</property>
+                              <object class="GtkBox">
+                                <property name="orientation">1</property>
+                                <property name="spacing">12</property>
                                 <property name="halign">3</property>
-                                <property name="visible">false</property>
-                                <style>
-                                  <class name="suggested-action"/>
-                                  <class name="pill"/>
-                                </style>
+                                <child>
+                                  <object class="GtkButton" id="adopt_store_button">
+                                    <property name="action-name">win.adopt-store</property>
+                                    <property name="visible">false</property>
+                                    <style>
+                                      <class name="suggested-action"/>
+                                      <class name="pill"/>
+                                    </style>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="open_preferences_button">
+                                    <property name="label" translatable="yes">Open Preferences</property>
+                                    <property name="action-name">app.preferences</property>
+                                    <property name="visible">false</property>
+                                    <style>
+                                      <class name="pill"/>
+                                    </style>
+                                  </object>
+                                </child>
                               </object>
                             </property>
                           </object>
@@ -147,8 +177,40 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
   <menu id="primary_menu">
     <section>
       <item>
+        <attribute name="label" translatable="yes">New Password</attribute>
+        <attribute name="action">win.add-password</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Edit Password</attribute>
+        <attribute name="action">win.edit-password</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Delete Password</attribute>
+        <attribute name="action">win.delete-password</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Show Folders Only</attribute>
+        <attribute name="action">win.expand-folders</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Expand Everything</attribute>
+        <attribute name="action">win.expand-all</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Collapse Everything</attribute>
+        <attribute name="action">win.collapse-all</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
         <attribute name="label" translatable="yes">Sync with Remote</attribute>
         <attribute name="action">win.sync</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Reload Stores</attribute>
+        <attribute name="action">win.reload</attribute>
       </item>
     </section>
     <section>
@@ -158,6 +220,10 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
       </item>
     </section>
     <section>
+      <item>
+        <attribute name="label" translatable="yes">Keyboard Shortcuts</attribute>
+        <attribute name="action">win.show-help-overlay</attribute>
+      </item>
       <item>
         <attribute name="label" translatable="yes">About GTKPass</attribute>
         <attribute name="action">app.about</attribute>

@@ -16,6 +16,6 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gtk  # noqa: E402
 
-__all__ = ["Adw", "GLib", "GObject", "Gdk", "Gio", "Gtk"]
+__all__ = ["Adw", "GLib", "GObject", "Gdk", "Gio", "Graphene", "Gtk"]

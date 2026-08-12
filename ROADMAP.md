@@ -25,11 +25,20 @@ application; none of its dates survived contact with the work.
 **Interface**
 - Widgets declared in Blueprint, with a test that keeps them there
 - Sidebar tree over ColumnView: backends as roots, folders nested by path
+- Search over the tree, as you type or on Enter, as the preference says
 - Detail pane: username, URL and notes picked out of the entry
 - Decryption off the UI thread, with stale results discarded
 - Copy to clipboard, cleared again after a timeout
+- Adding an entry, with a generated password: `secrets`, no dependency, and no
+  characters that cost a retype when read off one screen and typed into another
 - Editing an entry and writing it back through its backend
+- Deleting an entry, after a question that names it and the store it leaves
+- A context menu on the sidebar rows, reached by right-click or press-and-hold
+- An accelerator for every action, and a window that documents them
 - Showing a password rather than dotting it out, from the preference
+- A breakpoint, so the window works at the 360 points its metadata claims
+- The store that is already there offered on first run, rather than a combo box
+  of four backend type names
 - Syncing a git-backed store: pull with rebase, then push, off the UI thread
 
 **Hardening**
@@ -73,16 +82,9 @@ application; none of its dates survived contact with the work.
 
 Roughly in the order that would make the application usable day to day.
 
-- **Search.** The entry box sits in the sidebar and nothing is connected to it,
-  so typing does nothing at all. The tree is already in memory, so this is a
-  filter over the model rather than backend work. Preferences already offers a
-  "search as you type" switch, which is a control over a feature that does not
-  exist; it should start working rather than be taken away.
-- **Adding an entry.** The `+` button still opens a "not implemented" dialog.
-  The backends implement `add_password`; the dialog is most of what is missing.
-- **Deleting an entry**, with a confirmation, and pruning the emptied folders.
-- **Renaming and moving**, on top of `move_password`.
-- **Password generation** when adding an entry.
+- **Renaming and moving**, on top of `move_password`. Deleting leaves an emptied
+  folder in the sidebar until the next listing, which is the same problem seen
+  from the other end.
 - **`pass-otp`.** Reading an entry's `otpauth://` line and showing a code with
   its countdown, in the format `pass-otp` already writes, so a store stays
   usable from both. Generating the code is RFC 6238 over `hmac` — the work is in
@@ -111,6 +113,12 @@ Smaller things, worth doing when passing:
 
 - `examples/` is stale: an old application id, and a `SettingsWindow` call that
   no longer matches the class.
+- Nothing is translated. Blueprint marks its strings with `_()`, but there is no
+  `po/`, nothing calls `bindtextdomain`, and every string built in Python -- all
+  the toasts, all the placeholder titles -- is unmarked. Either wire gettext up
+  or stop marking, because the half-measure reads as translatable and is not.
+- `Gtk.ShortcutsWindow` is deprecated as of GTK 4.18. `Adw.ShortcutsDialog`
+  replaces it and needs libadwaita 1.8, which is newer than this supports.
 - `secretstorage` is not in the Flatpak, so the Secret Service backend reports
   itself unavailable there. It needs `cryptography`, which is a Rust build.
 - Neither the RPM nor the sysext image is signed, and there is no repository to

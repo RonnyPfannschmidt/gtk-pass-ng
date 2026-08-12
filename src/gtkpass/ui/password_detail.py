@@ -4,7 +4,7 @@ import importlib.resources
 from typing import ClassVar
 
 from gtkpass._gi import Adw, Gio, GObject, Gtk
-from gtkpass.backends import PasswordEntry
+from gtkpass.backends import PasswordEntry, metadata_pair
 
 #: Metadata keys that mean "the account name", in order of preference. Stores
 #: written by different tools disagree about which to use.
@@ -44,6 +44,10 @@ SENSITIVE_KEYS = frozenset(
         "apikey",
     }
 )
+
+#: Fields that can be copied from outside the pane, named as the copy is
+#: reported. The keyboard shortcuts reach two of these.
+COPYABLE_FIELDS = ("Password", "Username", "URL")
 
 PLACEHOLDER = "—"
 
@@ -267,6 +271,27 @@ class PasswordDetailView(Gtk.Box):
     def _on_copy_url(self, _button) -> None:
         self._request_copy("URL", self.url_row.get_subtitle())
 
+    def copy_field(self, field: str) -> bool:
+        """Copy one of COPYABLE_FIELDS, exactly as its own button would.
+
+        What the keyboard shortcuts and the sidebar's menu go through, so the
+        clipboard timeout and the take-back on navigation apply to those
+        without any of it being written out a second time.
+
+        Returns:
+            Whether there was anything to copy. A field the entry does not have
+            is not an error, but it is not nothing either: the caller says so,
+            rather than leaving a keystroke that did nothing at all.
+        """
+        getter = {
+            "Password": self.password_row.get_text,
+            "Username": self.username_row.get_subtitle,
+            "URL": self.url_row.get_subtitle,
+        }[field]
+        value = getter()
+        self._request_copy(field, value)
+        return bool(value) and value != PLACEHOLDER
+
     def _request_copy(self, field: str, value: str | None) -> None:
         if value and value != PLACEHOLDER:
             self.emit("copy-requested", field, value)
@@ -286,6 +311,11 @@ def _notes(entry: PasswordEntry) -> str:
 
     Both spellings are common: an explicit ``notes:`` key, as pass templates and
     the demo data use, and plain prose on its own lines.
+
+    Prose is whatever :func:`metadata_pair` does not claim as a field, which is
+    what keeps the two halves in step. The test for it used to be "no colon
+    anywhere in the line", so a sentence carrying a time or a URL was shown
+    neither here nor as a field -- it simply went missing.
     """
     if not entry.content:
         return ""
@@ -297,6 +327,6 @@ def _notes(entry: PasswordEntry) -> str:
     parts.extend(
         line.strip()
         for line in entry.content.split("\n")[1:]
-        if line.strip() and ":" not in line
+        if line.strip() and metadata_pair(line) is None
     )
     return "\n".join(parts).strip()

@@ -4,6 +4,11 @@ using Adw 1;
 // One row per configured backend instance. Every backend type's settings are
 // declared here and the ones that do not apply are hidden, which keeps all
 // widget construction declarative instead of branching in Python.
+//
+// Every path row carries a chooser button as well as its entry. Under Flatpak
+// that is not a convenience: picking a directory through the file chooser is
+// what grants the sandbox access to it, so a path typed in by hand is a store
+// the application then cannot open.
 template $BackendSettingsRow : Adw.ExpanderRow {
   [suffix]
   Button remove_button {
@@ -26,6 +31,16 @@ template $BackendSettingsRow : Adw.ExpanderRow {
     title: _("Custom demo.json");
     visible: false;
     changed => $_on_settings_changed();
+
+    [suffix]
+    Button demo_path_button {
+      icon-name: "document-open-symbolic";
+      valign: center;
+      tooltip-text: _("Choose a file");
+      clicked => $_on_choose();
+
+      styles ["flat"]
+    }
   }
 
   Adw.EntryRow secretservice_collection_row {
@@ -38,6 +53,16 @@ template $BackendSettingsRow : Adw.ExpanderRow {
     title: _("Password Store Directory");
     visible: false;
     changed => $_on_settings_changed();
+
+    [suffix]
+    Button pass_store_button {
+      icon-name: "folder-open-symbolic";
+      valign: center;
+      tooltip-text: _("Choose a folder");
+      clicked => $_on_choose();
+
+      styles ["flat"]
+    }
   }
 
   Adw.SwitchRow pass_git_row {
@@ -51,11 +76,31 @@ template $BackendSettingsRow : Adw.ExpanderRow {
     title: _("Password Store Directory");
     visible: false;
     changed => $_on_settings_changed();
+
+    [suffix]
+    Button direct_store_button {
+      icon-name: "folder-open-symbolic";
+      valign: center;
+      tooltip-text: _("Choose a folder");
+      clicked => $_on_choose();
+
+      styles ["flat"]
+    }
   }
 
   Adw.EntryRow direct_gpg_home_row {
     title: _("GPG Home Directory");
     visible: false;
     changed => $_on_settings_changed();
+
+    [suffix]
+    Button direct_gpg_home_button {
+      icon-name: "folder-open-symbolic";
+      valign: center;
+      tooltip-text: _("Choose a folder");
+      clicked => $_on_choose();
+
+      styles ["flat"]
+    }
   }
 }

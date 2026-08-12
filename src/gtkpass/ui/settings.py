@@ -55,6 +55,10 @@ class BackendSettingsRow(Adw.ExpanderRow):
     direct_store_row = Gtk.Template.Child()
     direct_gpg_home_row = Gtk.Template.Child()
     remove_button = Gtk.Template.Child()
+    demo_path_button = Gtk.Template.Child()
+    pass_store_button = Gtk.Template.Child()
+    direct_store_button = Gtk.Template.Child()
+    direct_gpg_home_button = Gtk.Template.Child()
 
     #: Which of the declared rows belong to which backend type.
     ROWS_BY_TYPE: ClassVar[dict[str, tuple[str, ...]]] = {
@@ -135,6 +139,79 @@ class BackendSettingsRow(Adw.ExpanderRow):
     @Gtk.Template.Callback()
     def _on_remove_clicked(self, *_args) -> None:
         self.emit("remove-backend")
+
+    # -- choosing a path -----------------------------------------------------
+
+    def _chooser_for(self, button) -> tuple[Adw.EntryRow, bool] | None:
+        """Which row a chooser button fills in, and whether it wants a folder.
+
+        One handler for all of them rather than four that differ in a name:
+        Blueprint can point every button at the same callback, and the button
+        that was pressed says the rest.
+        """
+        targets = {
+            self.demo_path_button: (self.demo_path_row, False),
+            self.pass_store_button: (self.pass_store_row, True),
+            self.direct_store_button: (self.direct_store_row, True),
+            self.direct_gpg_home_button: (self.direct_gpg_home_row, True),
+        }
+        return targets.get(button)
+
+    @Gtk.Template.Callback()
+    def _on_choose(self, button) -> None:
+        """Ask for a path with the file chooser rather than by typing.
+
+        Under Flatpak this is not a convenience. Choosing through the chooser
+        goes through the portal, and that is what grants the sandbox access to
+        the directory -- so a store typed in by hand is one the application
+        then cannot open, and says so only later and in terms of GPG.
+        """
+        chooser = self._chooser_for(button)
+        if chooser is None:
+            return
+        row, folder = chooser
+
+        dialog = Gtk.FileDialog(
+            title="Choose a Folder" if folder else "Choose a File",
+            modal=True,
+        )
+        current = _optional_path(row.get_text())
+        if current is not None and current.exists():
+            dialog.set_initial_folder(
+                Gio.File.new_for_path(str(current if folder else current.parent))
+            )
+
+        window = self.get_root()
+        if folder:
+            dialog.select_folder(window, None, self._chosen, (row, True))
+        else:
+            dialog.open(window, None, self._chosen, (row, False))
+
+    def _chosen(self, dialog, result, target) -> None:
+        """Take the answer, or let a cancelled chooser pass in silence."""
+        row, folder = target
+        try:
+            chosen = (
+                dialog.select_folder_finish(result)
+                if folder
+                else dialog.open_finish(result)
+            )
+        except GLib.Error as e:
+            # Dismissing the chooser is not a failure worth reporting.
+            logger.debug("No path was chosen: %s", e)
+            return
+        self.apply_choice(row, chosen)
+
+    def apply_choice(self, row, chosen) -> None:
+        """Put a chosen path in its row, which saves it as typing would.
+
+        Separate from the chooser so that it can be exercised: a GtkFileDialog
+        cannot be driven from a test, and this is the half that has anything to
+        get wrong.
+        """
+        path = chosen.get_path() if chosen is not None else None
+        if path:
+            row.set_text(path)
 
     def get_display_name(self) -> str:
         """Name currently typed in the entry, empty if the user cleared it."""
@@ -280,17 +357,71 @@ class SettingsWindow(Adw.PreferencesDialog):
             )
             stored.set_string("gpg-home", str(settings.gpg_home or ""))
 
+    def _new_backend_id(self, backend_type: str) -> str:
+        """An id no configured instance is already using.
+
+        The wall clock in whole seconds is a readable stem and a poor
+        identifier: two backends of the same type added in the same second were
+        given the same one, which meant one row on screen where two had been
+        asked for, and both instances reading and writing the same relocatable
+        schema path -- one store's settings holding the other's.
+
+        Taken ids are read back from GSettings as well as from the rows, so an
+        instance this dialog could not load does not have its id handed out
+        from underneath it.
+        """
+        taken = set(self.backend_rows)
+        taken.update(
+            backend_id for backend_id, _ in self.settings.get_value("backend-instances")
+        )
+
+        stem = f"{backend_type}_{GLib.get_real_time() // 1_000_000}"
+        if stem not in taken:
+            return stem
+        suffix = 2
+        while f"{stem}_{suffix}" in taken:
+            suffix += 1
+        return f"{stem}_{suffix}"
+
     @Gtk.Template.Callback()
     def _on_add_backend(self, _button) -> None:
         """Add an instance of the type selected in the combo row."""
         backend_type = BACKEND_TYPES[self.backend_combo.get_selected()]
-        backend_id = f"{backend_type}_{GLib.get_real_time() // 1_000_000}"
+        backend_id = self._new_backend_id(backend_type)
 
         row = self._add_row(backend_id, backend_type, None)
         row.set_expanded(True)
         self._save_backend_configs()
 
-    def _on_remove_backend(self, row: BackendSettingsRow) -> None:
+    def _on_remove_backend(self, row: BackendSettingsRow) -> Adw.AlertDialog:
+        """Ask before throwing a backend's configuration away.
+
+        It used to go the moment the button was pressed: the row, the name
+        somebody had typed, the store directory they had chosen through the
+        chooser -- and with it, under Flatpak, the access that choosing had
+        granted. None of it recoverable, and nothing had asked.
+
+        Returns the dialog, so a test can drive it to a response.
+        """
+        builder = Gtk.Builder.new_from_file(str(UI / "confirm_remove_backend.ui"))
+        dialog = builder.get_object("confirm_remove_backend_dialog")
+        # What it does not do matters as much as what it does: nobody should
+        # have to guess whether this is about to delete their passwords.
+        dialog.set_body(
+            f"{row.get_display_name() or row.backend_type}\n\n"
+            f"GTKPass forgets how to reach this store. Nothing in the store "
+            f"itself is changed or deleted."
+        )
+
+        def responded(_dialog, response):
+            if response == "remove":
+                self._remove_backend(row)
+
+        dialog.connect("response", responded)
+        dialog.present(self)
+        return dialog
+
+    def _remove_backend(self, row: BackendSettingsRow) -> None:
         self.backends_group.remove(row)
         self.backend_rows.pop(row.backend_id, None)
         self.backend_instances.pop(row.backend_id, None)

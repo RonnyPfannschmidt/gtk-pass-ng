@@ -21,17 +21,22 @@ install from.
 
 What works today:
 
+- Finding the store you already have: an existing `~/.password-store` is
+  offered on first run as a button rather than a form
 - Configuring several backends at once, each with its own settings
 - Browsing entries as a tree, grouped by backend, folders nested by path
+- Searching, as you type or on Enter, as the preference says
 - Opening an entry: decrypted off the UI thread, and every field it carries
   shown, whether or not GTKPass knows what the field means
 - Copying a field, with the clipboard cleared again after a timeout
+- Adding an entry, with a generated password if you want one
 - Editing an entry and writing it back through its backend
+- Deleting an entry, after being asked about it by name
+- A context menu on the sidebar rows, and a keyboard shortcut for everything
 - Syncing a git-backed store: pull with rebase, then push, off the UI thread
 
-What does not exist yet: adding and deleting entries from the UI, and search —
-the box is in the sidebar, and nothing is wired to it. See
-[ROADMAP.md](ROADMAP.md).
+What does not exist yet: renaming and moving entries, OTP codes, and
+re-encrypting a store to a changed recipient set. See [ROADMAP.md](ROADMAP.md).
 
 ## Backends
 
@@ -105,8 +110,8 @@ fit together.
 The Direct GPG and Pass backends use the passwordstore format, so a store stays
 readable by `pass`, qtpass, and Android Password Store via git sync. Extensions
 are not supported yet — `pass-otp` and `pass-update` are the two intended, and
-until they land an OTP secret is shown as the text it is rather than turned into
-a code.
+until they land an OTP secret is shown as the secret it is, masked with the
+other fields that are secrets, rather than turned into a code.
 
 ## Security
 

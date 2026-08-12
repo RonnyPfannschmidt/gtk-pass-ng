@@ -6,9 +6,33 @@ template $GTKPassWindow : Adw.ApplicationWindow {
   default-width: 1000;
   default-height: 700;
 
+  // The AppStream metadata says this runs at 360 points wide and answers to
+  // touch. It did neither: the split view was fixed open, so below about 650
+  // points the sidebar squeezed the detail pane into nothing and there was no
+  // way to put it away. Collapsed, the sidebar becomes an overlay the button
+  // below opens, which is the libadwaita pattern for exactly this.
+  Adw.Breakpoint {
+    condition ("max-width: 650sp")
+
+    setters {
+      split_view.collapsed: true;
+      sidebar_button.visible: true;
+    }
+  }
+
   Adw.ToolbarView {
     [top]
     Adw.HeaderBar header_bar {
+      // Hidden until the breakpoint reveals it: at full width the sidebar is
+      // always there, and a button to show what is already shown is noise.
+      [start]
+      ToggleButton sidebar_button {
+        icon-name: "sidebar-show-symbolic";
+        tooltip-text: _("Show Passwords");
+        visible: false;
+        active: bind split_view.show-sidebar bidirectional;
+      }
+
       [start]
       Button add_button {
         icon-name: "list-add-symbolic";
@@ -109,13 +133,27 @@ template $GTKPassWindow : Adw.ApplicationWindow {
               vexpand: true;
 
               // Only relevant when no backend is configured; shown on demand.
-              child: Button open_preferences_button {
-                label: _("Open Preferences");
-                action-name: "app.preferences";
+              // Two buttons rather than one because there are two answers:
+              // adopt the store that is already there, or go and describe one.
+              child: Box {
+                orientation: vertical;
+                spacing: 12;
                 halign: center;
-                visible: false;
 
-                styles ["suggested-action", "pill"]
+                Button adopt_store_button {
+                  action-name: "win.adopt-store";
+                  visible: false;
+
+                  styles ["suggested-action", "pill"]
+                }
+
+                Button open_preferences_button {
+                  label: _("Open Preferences");
+                  action-name: "app.preferences";
+                  visible: false;
+
+                  styles ["pill"]
+                }
               };
             };
           }
@@ -134,8 +172,45 @@ template $GTKPassWindow : Adw.ApplicationWindow {
 menu primary_menu {
   section {
     item {
+      label: _("New Password");
+      action: "win.add-password";
+    }
+    item {
+      label: _("Edit Password");
+      action: "win.edit-password";
+    }
+    // No header-bar button of its own: a destructive action next to the one
+    // that opens an entry is a mis-click, and this is the operation that
+    // cannot be taken back.
+    item {
+      label: _("Delete Password");
+      action: "win.delete-password";
+    }
+  }
+  section {
+    // Folders Only shows the shape of a store without showing what is in it.
+    // GTK has no partial expansion of its own; see expand_folders.
+    item {
+      label: _("Show Folders Only");
+      action: "win.expand-folders";
+    }
+    item {
+      label: _("Expand Everything");
+      action: "win.expand-all";
+    }
+    item {
+      label: _("Collapse Everything");
+      action: "win.collapse-all";
+    }
+  }
+  section {
+    item {
       label: _("Sync with Remote");
       action: "win.sync";
+    }
+    item {
+      label: _("Reload Stores");
+      action: "win.reload";
     }
   }
   section {
@@ -145,6 +220,10 @@ menu primary_menu {
     }
   }
   section {
+    item {
+      label: _("Keyboard Shortcuts");
+      action: "win.show-help-overlay";
+    }
     item {
       label: _("About GTKPass");
       action: "app.about";

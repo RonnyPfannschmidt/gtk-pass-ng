@@ -1,0 +1,101 @@
+using Gtk 4.0;
+
+// The keyboard half of the interface, and the window that documents it.
+//
+// Gtk.ShortcutsWindow rather than Adw.ShortcutsDialog: the dialog arrived in
+// libadwaita 1.8 and this application supports 1.4, so the newer widget would
+// mean dropping the two distributions the CI matrix builds for. The older one
+// is deprecated as of GTK 4.18 and still works everywhere in between.
+//
+// The object is called help_overlay because that is the name the window looks
+// it up under; set_help_overlay is what installs win.show-help-overlay.
+Gtk.ShortcutsWindow help_overlay {
+  modal: true;
+
+  Gtk.ShortcutsSection {
+    section-name: "shortcuts";
+    max-height: 10;
+
+    Gtk.ShortcutsGroup {
+      title: C_("shortcut window", "Entries");
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "New Password");
+        accelerator: "<Control>n";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Edit Password");
+        accelerator: "<Control>e";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Delete Password");
+        accelerator: "Delete";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Copy Password");
+        accelerator: "<Control><Shift>c";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Copy Username");
+        accelerator: "<Control><Shift>u";
+      }
+    }
+
+    Gtk.ShortcutsGroup {
+      title: C_("shortcut window", "Stores");
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Search");
+        accelerator: "<Control>f";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Clear the Search");
+        accelerator: "Escape";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Sync with Remote");
+        accelerator: "<Control><Shift>s";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Reload Stores");
+        accelerator: "<Control>r";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Show Folders Only");
+        accelerator: "<Control><Shift>d";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Expand Everything");
+        accelerator: "<Control><Shift>e";
+      }
+    }
+
+    Gtk.ShortcutsGroup {
+      title: C_("shortcut window", "General");
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Preferences");
+        accelerator: "<Control>comma";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Show Shortcuts");
+        accelerator: "<Control>question";
+      }
+
+      Gtk.ShortcutsShortcut {
+        title: C_("shortcut window", "Quit");
+        accelerator: "<Control>q";
+      }
+    }
+  }
+}

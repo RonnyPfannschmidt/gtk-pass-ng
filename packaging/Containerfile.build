@@ -1,0 +1,62 @@
+# The container the RPM and the sysext image are built in, with the toolchain
+# already in it.
+#
+# Without this, every build started from a bare Fedora and installed some sixty
+# packages before it could begin -- downloaded again every time, because the
+# container is removed when it exits and takes the package cache with it. On a
+# developer's machine that is the whole cost of `make rpm`; the build itself is
+# seconds.
+#
+# The layers are ordered so that the expensive ones are reused. Only a change to
+# the spec's BuildRequires invalidates the builddep layer, and only a change to
+# this file invalidates the toolchain above it -- so the ordinary case, a source
+# change, reuses everything and the build starts immediately.
+#
+# `podman build` is the staleness check; there is no stamp to keep in step. A
+# fully cached build of this file takes about a second.
+
+ARG FEDORA_RELEASE=44
+FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE}
+
+# Keep the downloaded packages in the image. dnf5 deletes them after installing
+# by default, which would leave the dynamic build requirements below to be
+# fetched over the network on every build -- the thing this image exists to
+# stop. It costs a few tens of megabytes in a layer nobody ships.
+RUN echo "keepcache=True" >> /etc/dnf/dnf.conf
+
+# The fixed toolchain: what rpmbuild-here.sh installs before it can start, the
+# pip and wheel that pyproject-rpm-macros runs the build through, and the
+# download plugin the sysext build needs to vendor dependencies.
+RUN dnf -y --setopt=install_weak_deps=False install \
+        rpm-build rpmdevtools python3-devel pyproject-rpm-macros \
+        desktop-file-utils libappstream-glib glib2-devel \
+        python3-pip python3-wheel dnf-plugins-core \
+    && dnf clean expire-cache
+
+# The spec's own BuildRequires. Copied in on its own so that a change to the
+# source does not invalidate this layer -- only a change to what the package
+# declares it needs to build does.
+COPY packaging/gtkpass.spec /tmp/gtkpass.spec
+RUN dnf -y builddep --spec /tmp/gtkpass.spec
+
+# What %pyproject_buildrequires will ask for, which it can only report by
+# failing a build and being asked again -- see the loop in rpmbuild-here.sh.
+# There is no build to fail while preparing this image, so the declaration it
+# reads is read directly instead.
+#
+# Derived rather than typed out: a second copy of a dependency list is one that
+# goes stale, quietly, showing up only as a build that installs things again.
+# Every Fedora package shipping a Python distribution provides
+# python3dist(name), so the requirements go to dnf as pyproject writes them and
+# no table of PyPI-name-to-package-name has to be kept either.
+#
+# This is also what makes the COPY worth having: the layer is invalidated by a
+# change to the dependencies and by nothing else.
+COPY pyproject.toml packaging/buildreqs-from-pyproject.py /tmp/
+RUN dnf -y --setopt=install_weak_deps=False install \
+        $(python3 /tmp/buildreqs-from-pyproject.py /tmp/pyproject.toml) \
+    && dnf clean expire-cache
+
+# Nothing is copied into the image to be built: the source is mounted at run
+# time, so one image serves every commit.
+WORKDIR /src
