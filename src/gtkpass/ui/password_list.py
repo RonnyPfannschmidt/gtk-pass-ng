@@ -19,6 +19,10 @@ from gtkpass._gi import Gdk, Gio, GObject, Graphene, Gtk
 ENTRY_ICON = "dialog-password-symbolic"
 FOLDER_ICON = "folder-symbolic"
 
+#: Stands for "the listing does not mention this at all", which None cannot:
+#: None is what a leaf maps to.
+_ABSENT = object()
+
 
 class PasswordNode(GObject.Object):
     """One row in the sidebar: a backend, a folder, or an entry.
@@ -49,8 +53,8 @@ class PasswordNode(GObject.Object):
         super().__init__(name=name, icon_name=icon_name, tooltip=tooltip)
         #: Where this row sits in its backend: ``work/mail`` for a folder of
         #: that name and for the entry inside it, empty for a backend heading.
-        #: A row is thrown away and built again on every re-listing, so this is
-        #: what says it is the same row as the one that was open before.
+        #: What a listing is reconciled against, and what says a row is still
+        #: the same row.
         self.path = path
         #: The backend this row belongs to. Every descendant carries it, so a
         #: selected entry knows its backend without walking back up the tree.
@@ -62,12 +66,14 @@ class PasswordNode(GObject.Object):
 
 
 class BackendEntries:
-    """Everything one backend contributed, whether or not it is on screen.
+    """Everything one backend listed, whether or not it is on screen.
 
-    The sidebar is filtered by rebuilding it from these rather than by laying a
-    ``Gtk.FilterListModel`` over the tree: a ``Gtk.TreeListModel`` materialises
-    a folder's children only once that folder has been expanded, so a filter
-    over the view would have matched whatever happened to be open at the time
+    The whole listing is kept, not just the visible part, because a search
+    narrows the tree to what matches and clearing it has to bring the rest
+    back. Searching is done this way rather than by laying a
+    ``Gtk.FilterListModel`` over the tree because a ``Gtk.TreeListModel``
+    materialises a folder's children only once that folder has been expanded,
+    so a filter over the view would have matched whatever happened to be open
     and missed the rest of the store entirely.
     """
 
@@ -82,6 +88,30 @@ class BackendEntries:
         self.entries: list[str] = []
         #: This backend's row while it is shown, None while it is filtered out.
         self.node: PasswordNode | None = None
+
+
+def _folder_tree(paths: list[str]) -> dict:
+    """The paths as nested dictionaries: a name maps to its children, or None.
+
+    ``None`` is a leaf. A name that is both -- an entry ``work`` beside entries
+    under ``work/`` -- becomes the folder, because the folder is the thing that
+    can hold the rest; the entry of that name is not reachable in the tree
+    either way, and a store that contains both is already ambiguous.
+    """
+    tree: dict = {}
+    for path in paths:
+        parts = [part for part in path.split("/") if part]
+        if not parts:
+            continue
+        here = tree
+        for part in parts[:-1]:
+            below = here.get(part)
+            if not isinstance(below, dict):
+                below = {}
+                here[part] = below
+            here = below
+        here.setdefault(parts[-1], None)
+    return tree
 
 
 def _descendants(widget: Gtk.Widget):
@@ -148,10 +178,12 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         self._backends: list[BackendEntries] = []
         #: The search text the tree is currently narrowed to; empty means all.
         self._filter = ""
-        #: (backend id, path) of the rows that were open when the tree was last
-        #: thrown away. Every write and every sync rebuilds it from nothing.
+        #: (backend id, path) of the rows that were open before a search
+        #: rearranged the tree, so that clearing it puts them back. A listing
+        #: needs none of this: it corrects the tree rather than replacing it,
+        #: and the rows it leaves alone keep what the view knows about them.
         self._expanded: set[tuple[str, str]] = set()
-        #: The entry that was selected then, to be pointed at again.
+        #: The entry that was selected then, which a search may have hidden.
         self._selected: tuple[str, str] | None = None
         #: Set while the selection is being put back, so that doing so does not
         #: read as the user choosing an entry.
@@ -325,6 +357,147 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         self.root.insert(position, record.node)
         return record.node
 
+    # -- reconciling ---------------------------------------------------------
+    #
+    # A listing does not rebuild the tree, it corrects it. Expansion lives on a
+    # GtkTreeListRow and a row belongs to an item, so a tree rebuilt out of new
+    # PasswordNode objects is a tree of new rows with every folder shut -- and
+    # no amount of noting the old state and replaying it puts back what the
+    # view itself knew, because the scroll position goes with it and every row
+    # is re-rendered for the sake of the one entry that changed.
+
+    def sync_backends(
+        self, backends: list[tuple[str, str, str, str]]
+    ) -> list[BackendEntries]:
+        """Bring the backend rows in line with ``(id, name, icon, tooltip)``.
+
+        A backend that is still configured keeps its row, and with it every
+        folder open below it. One that has gone is removed, one that is new is
+        added, and one that was renamed has its row relabelled in place.
+
+        Returns:
+            The records, in the order given, to be filled in as their listings
+            arrive.
+        """
+        wanted = [backend_id for backend_id, _, _, _ in backends]
+        by_id = {record.backend_id: record for record in self._backends}
+
+        for record in list(self._backends):
+            if record.backend_id not in wanted:
+                self._drop(record)
+
+        records: list[BackendEntries] = []
+        for backend_id, name, icon_name, tooltip in backends:
+            existing = by_id.get(backend_id)
+            if existing is None:
+                record = BackendEntries(backend_id, name, icon_name, tooltip)
+                self._backends.append(record)
+            else:
+                record = existing
+                record.name, record.icon_name, record.tooltip = name, icon_name, tooltip
+                if record.node is not None:
+                    # Relabelled rather than replaced: the row template binds
+                    # these, so the sidebar redraws and stays where it is.
+                    record.node.name = name
+                    record.node.icon_name = icon_name
+                    record.node.tooltip = tooltip
+            records.append(record)
+
+        # Kept in the order asked for, so the sidebar reads as the settings do.
+        self._backends.sort(key=lambda record: wanted.index(record.backend_id))
+        if not self._filter:
+            for record in self._backends:
+                self._node_for(record)
+        return records
+
+    def _drop(self, record: BackendEntries) -> None:
+        """Take one backend's row away, if it has one."""
+        if record.node is not None:
+            found, position = self.root.find(record.node)
+            if found:
+                self.root.remove(position)
+        self._backends.remove(record)
+
+    def sync_entries(self, record: BackendEntries, paths: list[str]) -> None:
+        """Bring one backend's subtree in line with ``paths``.
+
+        Everything it lists is remembered, so that clearing a search can bring
+        back what the search hid; what is shown is what passes the filter.
+        """
+        record.entries = list(paths)
+        visible = [path for path in paths if self._matches(path)]
+
+        # Nothing to show from this backend. Under a search that means its row
+        # goes; unfiltered it stays, because an empty store is still a store
+        # and saying so is the whole point of its row.
+        if not visible and self._filter:
+            if record.node is not None:
+                found, position = self.root.find(record.node)
+                if found:
+                    self.root.remove(position)
+                record.node = None
+            return
+
+        node = self._node_for(record)
+        self._reconcile(node, _folder_tree(visible), record.backend_id, "")
+
+    def _reconcile(
+        self, parent: PasswordNode, wanted: dict, backend_id: str, prefix: str
+    ) -> None:
+        """Make ``parent``'s children the ones ``wanted`` describes.
+
+        Rows that are still right are left alone -- the same object in the same
+        place, which is what the view needs to keep them open. Only what
+        actually differs is inserted or removed, so a listing that says what is
+        already there emits nothing at all.
+        """
+        store = parent.children
+
+        index = 0
+        while index < store.get_n_items():
+            child = store.get_item(index)
+            below = wanted.get(child.name, _ABSENT)
+            # A leaf that became a folder, or the other way about, is not the
+            # same row wearing a different hat: it is replaced.
+            if below is _ABSENT or (below is None) != bool(child.password_name):
+                store.remove(index)
+                continue
+            index += 1
+
+        for position, name in enumerate(sorted(wanted)):
+            below = wanted[name]
+            here = f"{prefix}/{name}" if prefix else name
+
+            child = store.get_item(position)
+            if child is None or child.name != name:
+                found = self._find_after(store, name, position)
+                if found is None:
+                    child = PasswordNode(
+                        name=name,
+                        icon_name=ENTRY_ICON if below is None else FOLDER_ICON,
+                        backend_id=backend_id,
+                        password_name=here if below is None else "",
+                        path=here,
+                    )
+                    store.insert(position, child)
+                else:
+                    # Out of order rather than missing. Moving it costs the row
+                    # its expansion, which is why the tree is kept sorted: once
+                    # it is, nothing is ever out of order again.
+                    child = store.get_item(found)
+                    store.remove(found)
+                    store.insert(position, child)
+
+            if below is not None:
+                self._reconcile(child, below, backend_id, here)
+
+    @staticmethod
+    def _find_after(store: Gio.ListStore, name: str, start: int) -> int | None:
+        for index in range(start, store.get_n_items()):
+            if store.get_item(index).name == name:
+                return index
+        return None
+
     def set_filter(self, text: str) -> int:
         """Narrow the tree to the entries whose path contains ``text``.
 
@@ -338,30 +511,31 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             from a search that found nothing.
         """
         wanted = text.strip()
+        # Whether this call is the end of a search, which is the one moment
+        # the remembered shape is put back -- including when that shape was
+        # "nothing was open", which is not the same as having nothing to say.
+        leaving = bool(self._filter) and not wanted
         if not self._filter and wanted:
-            # A search is about to expand everything it matched. Note how the
-            # tree was left first, so clearing the search can put it back.
-            self._remember_expansion()
+            # A search is about to expand everything it matched, and hide the
+            # rest. Note how the tree was left, so clearing it can put it back.
+            self._remember_shape()
         self._filter = wanted
-
-        self.root.remove_all()
-        for record in self._backends:
-            record.node = None
 
         matched = 0
         for record in self._backends:
-            entries = [path for path in record.entries if self._matches(path)]
-            matched += len(entries)
-            if not self._filter:
-                self._node_for(record)
-            for path in entries:
-                self._insert(record, path)
+            matched += sum(1 for path in record.entries if self._matches(path))
+            # Reconciled like a listing, so a row that survives the search
+            # keeps whatever the view knew about it.
+            self.sync_entries(record, record.entries)
 
         if self._filter:
             self.expand_all()
-        elif self._expanded:
-            # Back to the shape the user had before they searched.
+        elif leaving:
+            # Back to the shape the user had before they searched, including
+            # the entry they had picked -- a search that hid it took the
+            # selection with it.
             self.restore_expansion()
+            self.restore_selection()
         else:
             self.expand_first_level()
         return matched
@@ -370,7 +544,13 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         return self._filter.lower() in path.lower()
 
     def add_password(self, backend: BackendEntries, path: str) -> PasswordNode | None:
-        """Add an entry under a backend, creating folder rows as needed.
+        """Add one entry to a backend's listing.
+
+        A convenience over :meth:`sync_entries`, which is where the work
+        happens: adding is listing everything that was there plus one more.
+        There is one way into the tree rather than two, because two of them
+        disagreed about the order rows were kept in, and a reconciliation that
+        cannot find a row it is looking for inserts a second one.
 
         Args:
             backend: Record returned by :meth:`add_backend`
@@ -381,40 +561,28 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             entry does not match it. The entry is remembered either way, so
             clearing the filter brings it back.
         """
-        backend.entries.append(path)
-        if not self._matches(path):
-            return None
-        node = self._insert(backend, path)
+        entries = list(backend.entries)
+        if path not in entries:
+            entries.append(path)
+        self.sync_entries(backend, entries)
         if self._filter:
+            if not self._matches(path):
+                return None
             # It arrived while a search was running -- a listing coming back
             # late, or an entry just saved -- so open the way down to it.
             self.expand_all()
-        return node
+        return self.find(backend.backend_id, path)
 
-    def _insert(self, backend: BackendEntries, path: str) -> PasswordNode:
-        """Put one entry into the visible tree, building its folders."""
-        parent = self._node_for(backend)
-        parts = path.split("/")
-
-        for depth, part in enumerate(parts):
-            existing = self._child_named(parent, part)
-            if existing is not None:
-                parent = existing
+    def find(self, backend_id: str, path: str) -> PasswordNode | None:
+        """The node for one entry, or None when nothing is showing it."""
+        for record in self._backends:
+            if record.backend_id != backend_id or record.node is None:
                 continue
-
-            is_leaf = depth == len(parts) - 1
-            here = "/".join(parts[: depth + 1])
-            node = PasswordNode(
-                name=part,
-                icon_name=ENTRY_ICON if is_leaf else FOLDER_ICON,
-                backend_id=backend.backend_id,
-                password_name=here if is_leaf else "",
-                path=here,
-            )
-            parent.children.append(node)
-            parent = node
-
-        return parent
+            found: PasswordNode | None = record.node
+            for part in path.split("/"):
+                found = self._child_named(found, part) if found is not None else None
+            return found
+        return None
 
     @staticmethod
     def _child_named(parent: PasswordNode, name: str) -> PasswordNode | None:
@@ -432,30 +600,25 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             backend.node.children.remove_all()
 
     def clear_all(self) -> None:
-        """Clear all backends and passwords, filtered out ones included.
+        """Empty the tree completely.
 
-        Which folders were open is remembered on the way out. Every write and
-        every sync re-lists, and a re-listing that came back with the tree shut
-        made the reward for saving an entry three levels down be finding the
-        way back to it.
+        Only for teardown -- a configuration change that replaces every
+        backend. A listing does not come through here: it reconciles, so that
+        the rows it does not change keep everything the view knows about them.
         """
-        self._remember_expansion()
-        self._selected = self.get_selected_password()
         self._backends.clear()
         self.root.remove_all()
 
     # -- expansion -----------------------------------------------------------
 
-    def _remember_expansion(self) -> None:
-        """Note which rows are open, unless a filter is deciding that.
+    def _remember_shape(self) -> None:
+        """Note which rows are open and which entry is selected.
 
-        A search expands everything it matched; that is the search's doing and
-        not the user's, and taking it for their preference would leave the tree
-        wide open once the search was over.
+        For the one transition that genuinely rearranges the tree: a search.
+        Everything else corrects the tree in place and needs none of this.
         """
-        if self._filter:
-            return
         self._expanded = self.expansion_state()
+        self._selected = self.get_selected_password()
 
     def expansion_state(self) -> set[tuple[str, str]]:
         """The (backend, path) of every row that is currently open.
@@ -498,28 +661,23 @@ class PasswordTreeView(Gtk.ScrolledWindow):
                     self._restoring = False
                 return
 
-    def remembers_expansion(self) -> bool:
-        """Whether there is a previous shape to go back to.
-
-        What tells a first listing from a re-listing: the first has nothing to
-        restore and wants its backends opened, and a later one wants exactly
-        what it was given.
-        """
-        return bool(self._expanded)
-
     def restore_expansion(self) -> None:
-        """Open again the rows that were open before the tree was rebuilt.
+        """Put the tree back into the shape noted by _remember_shape.
 
-        Rows that no longer exist are simply not found: a folder emptied by a
-        deletion stays gone rather than coming back shut. A folder that appeared
-        since is left closed, because nobody has opened it.
+        Exactly that shape: rows it names are opened, and rows it does not are
+        closed again. Opening alone would leave a cleared search with every
+        folder the search had opened still hanging open, which is not where the
+        user left the tree.
+
+        Rows that no longer exist are simply not found.
         """
-        if not self._expanded:
-            return
-        self._expand(
-            lambda row: (row.get_item().backend_id, row.get_item().path)
-            in self._expanded
-        )
+        index = 0
+        while index < self.tree_model.get_n_items():
+            row = self.tree_model.get_row(index)
+            if row is not None:
+                node = row.get_item()
+                row.set_expanded((node.backend_id, node.path) in self._expanded)
+            index += 1
 
     def get_selected_password(self) -> tuple[str, str] | None:
         """Get the currently selected password.

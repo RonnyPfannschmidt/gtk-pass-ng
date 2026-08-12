@@ -173,6 +173,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._showing_entry = False
         # The store the first-run screen found, while it is being offered.
         self._offered_store: Path | None = None
+        # Whether a listing has ever filled the sidebar. Only the first one
+        # decides what shape the tree opens in; after that the rows do.
+        self._listed_once = False
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -487,8 +490,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Anything the old manager still has in flight belongs to backends that
         # no longer exist; bumping the listing here drops it on arrival rather
         # than letting it append to the tree the new load is about to build.
+        # The tree itself is left standing: the listing that follows reconciles
+        # it, so backends that are still configured keep their rows open.
         self._listing_request += 1
-        self.password_list.clear_all()
         self._refresh_sync_action()
 
         # Reload backends. The listing follows once they are built.
@@ -664,48 +668,56 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._listing_request += 1
         request = self._listing_request
 
-        # Clear existing tree
-        self.password_list.clear_all()
-
         # Get all backends (loaded and failed)
         loaded_backends = self.backend_manager.get_all_backends()
 
         # Check if we have any backends configured
         if len(loaded_backends) == 0 and len(self.failed_backends) == 0:
             # No backends configured - show configuration prompt
+            self.password_list.clear_all()
             self._show_configuration_prompt()
             return
 
         self._pending_listings = len(loaded_backends)
         self._listed_anything = False
 
-        # Add each loaded backend as a root node
-        for backend_id in loaded_backends:
-            backend_node = self.password_list.add_backend(
-                backend_id=backend_id,
-                backend_name=self._get_backend_display_name(backend_id),
-                # Green checkmark for an available, healthy backend.
-                icon_name="emblem-default-symbolic",
-            )
-            self._list_into(request, backend_id, backend_node)
+        # The rows the sidebar should have, in one go: the loaded backends and
+        # then the ones that would not load, which carry why in their tooltip.
+        # The row said "unavailable" and nothing else, so the reason lived only
+        # in a toast -- for five seconds, once, at startup.
+        #
+        # Reconciled rather than rebuilt. A backend that is still there keeps
+        # its row and everything the view knows about it, which is what stops a
+        # save or a sync from shutting the tree.
+        records = self.password_list.sync_backends(
+            [
+                (
+                    backend_id,
+                    self._get_backend_display_name(backend_id),
+                    # Green checkmark for an available, healthy backend.
+                    "emblem-default-symbolic",
+                    "",
+                )
+                for backend_id in loaded_backends
+            ]
+            + [
+                (
+                    backend_id,
+                    f"{self._get_backend_display_name(backend_id)} (unavailable)",
+                    "dialog-error-symbolic",
+                    f"{backend_type}: {error}",
+                )
+                for backend_id, backend_type, error in self.failed_backends
+            ]
+        )
 
-        # Add failed backends with error icon, carrying why they failed. The
-        # row said "unavailable" and nothing else, so the reason lived only in
-        # a toast -- for five seconds, once, at startup.
-        for backend_id, backend_type, error in self.failed_backends:
-            display_name = self._get_backend_display_name(backend_id)
-            self.password_list.add_backend(
-                backend_id=backend_id,
-                backend_name=f"{display_name} (unavailable)",
-                icon_name="dialog-error-symbolic",
-                tooltip=f"{backend_type}: {error}",
-            )
+        for backend_id, record in zip(loaded_backends, records, strict=False):
+            self._list_into(request, backend_id, record)
 
-        # The backend rows exist; their entries append to a model the tree is
-        # already watching, so expanding does not have to wait for them.
-        # Only on a first listing: after that the tree goes back to the shape
-        # it was left in, which restore_expansion does as each listing arrives.
-        if not self.password_list.remembers_expansion():
+        # Only on a first listing, when there is nothing else to say what shape
+        # the tree should be. After that the rows say it themselves.
+        if not self._listed_once:
+            self._listed_once = True
             self.password_list.expand_first_level()
 
     def _list_into(self, request: int, backend_id: str, node) -> None:
@@ -715,16 +727,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
             if request != self._listing_request:
                 return
             logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
-            for password in sorted(passwords, key=lambda p: p.name):
-                self.password_list.add_password(node, password.name)
-            # This backend's folders exist again, so they can be opened again.
-            # Per listing rather than once at the end: they arrive one backend
-            # at a time, and a tree that unfolds as it fills reads better than
-            # one that sits shut until the slowest store has answered.
-            self.password_list.restore_expansion()
-            # And then the highlight, which needs the folders open to have a
-            # row to sit on.
-            self.password_list.restore_selection()
+            # The whole listing at once, so the tree can be compared with it
+            # rather than emptied and filled. A listing that says what is
+            # already there changes nothing at all -- which is what a sync of
+            # an unchanged store, and a save of one entry among hundreds,
+            # ought to do to the sidebar.
+            self.password_list.sync_entries(
+                node, [password.name for password in passwords]
+            )
             self._listing_answered(request, listed=bool(passwords))
 
         def report(error):
@@ -981,7 +991,6 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.backend_manager.shutdown()
         self.backend_manager = BackendManager()
         self._listing_request += 1
-        self.password_list.clear_all()
         self._load_backends()
 
     # -- syncing -------------------------------------------------------------

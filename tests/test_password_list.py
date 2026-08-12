@@ -103,135 +103,142 @@ class TestExpansion:
         assert visible_rows(view) == ["Demo", "work"]
 
 
-class TestExpansionSurvivesARebuild:
-    """The tree is thrown away and rebuilt after every write and every sync.
+class TestReListingIsReconciledRatherThanRebuilt:
+    """A listing that says what is already there must change nothing.
 
-    Saving an entry, adding one, deleting one and syncing all re-list, and a
-    re-listing used to come back with every folder shut -- so the reward for
-    saving a password three levels down was finding your way back to it.
+    Expansion lives on a GtkTreeListRow, and a row belongs to an item -- so a
+    tree rebuilt out of new PasswordNode objects is a tree of new rows, every
+    one of them collapsed. Nothing saved and replayed can put back what the
+    view knew: the scroll position goes too, and one changed entry re-renders
+    the whole sidebar. So the nodes that are still right are kept.
     """
 
     @pytest.fixture
     def stocked(self, view, backend):
-        for path in ("work/mail/imap", "work/vpn", "personal/bank"):
-            view.add_password(backend, path)
+        view.sync_entries(backend, ["work/mail", "work/vpn", "personal/bank"])
         return backend
 
-    def rebuild(self, view, paths=("work/mail/imap", "work/vpn", "personal/bank")):
-        """What the window does when a listing comes back."""
-        view.clear_all()
-        record = view.add_backend("demo_1", "Demo", "emblem-default-symbolic")
-        for path in paths:
-            view.add_password(record, path)
-        view.restore_expansion()
-        return record
+    def nodes_by_name(self, view):
+        found = {}
 
-    def test_an_expanded_folder_is_still_expanded(self, view, stocked):
+        def walk(store):
+            for index in range(store.get_n_items()):
+                node = store.get_item(index)
+                found[node.path or node.name] = node
+                walk(node.children)
+
+        walk(view.root)
+        return found
+
+    def test_an_unchanged_listing_keeps_every_node(self, view, stocked):
+        before = self.nodes_by_name(view)
+
+        view.sync_entries(stocked, ["work/mail", "work/vpn", "personal/bank"])
+
+        after = self.nodes_by_name(view)
+        assert set(after) == set(before)
+        for path, node in before.items():
+            assert after[path] is node, f"{path} was replaced by a new node"
+
+    def test_an_expanded_folder_stays_expanded_with_no_help(self, view, stocked):
         view.expand_all()
         before = visible_rows(view)
 
-        self.rebuild(view)
+        view.sync_entries(stocked, ["work/mail", "work/vpn", "personal/bank"])
 
         assert visible_rows(view) == before
 
-    def test_a_closed_folder_stays_closed(self, view, stocked):
-        view.expand_first_level()
-        before = visible_rows(view)
+    def test_the_selection_survives_with_no_help(self, view, stocked):
+        view.expand_all()
+        view.selection.set_selected(visible_rows(view).index("vpn"))
 
-        self.rebuild(view)
+        view.sync_entries(stocked, ["work/mail", "work/vpn", "personal/bank"])
 
-        assert visible_rows(view) == before
-        assert "imap" not in visible_rows(view)
+        assert view.get_selected_password() == ("demo_1", "work/vpn")
 
-    def test_one_open_folder_does_not_open_its_neighbour(self, view, stocked):
-        view.expand_first_level()
-        # Open work/, leave personal/ shut.
-        row = next(
-            view.tree_model.get_row(index)
-            for index in range(view.tree_model.get_n_items())
-            if view.tree_model.get_row(index).get_item().name == "work"
+    def test_a_changed_entry_does_not_disturb_its_neighbours(self, view, stocked):
+        """Saving one password re-lists; the other rows are not involved."""
+        view.expand_all()
+        before = self.nodes_by_name(view)
+
+        view.sync_entries(stocked, ["work/mail", "work/vpn", "personal/savings"])
+
+        after = self.nodes_by_name(view)
+        assert after["work/mail"] is before["work/mail"]
+        assert after["work"] is before["work"]
+        assert after["personal"] is before["personal"]
+        assert "personal/bank" not in after
+        assert "personal/savings" in after
+
+    def test_a_new_entry_lands_in_order(self, view, stocked):
+        view.expand_all()
+
+        view.sync_entries(
+            stocked, ["work/aws", "work/mail", "work/vpn", "personal/bank"]
         )
-        row.set_expanded(True)
 
-        self.rebuild(view)
+        assert visible_rows(view) == [
+            "Demo",
+            "personal",
+            "bank",
+            "work",
+            "aws",
+            "mail",
+            "vpn",
+        ]
 
-        assert "mail" in visible_rows(view)
-        assert "bank" not in visible_rows(view)
-
-    def test_a_collapsed_backend_stays_collapsed(self, view, stocked):
-        view.expand_first_level()
-        view.tree_model.get_row(0).set_expanded(False)
-
-        self.rebuild(view)
-
-        assert visible_rows(view) == ["Demo"]
-
-    def test_a_folder_that_is_gone_is_not_missed(self, view, stocked):
-        """Deleting the last entry in a folder takes the folder with it."""
+    def test_an_emptied_folder_goes_away(self, view, stocked):
         view.expand_all()
 
-        self.rebuild(view, paths=("personal/bank",))
+        view.sync_entries(stocked, ["work/mail", "work/vpn"])
 
-        assert visible_rows(view) == ["Demo", "personal", "bank"]
+        assert "personal" not in visible_rows(view)
 
-    def test_a_new_folder_is_not_opened_by_a_neighbour(self, view, stocked):
-        view.expand_first_level()
-
-        self.rebuild(view, paths=("personal/bank", "later/added"))
-
-        assert "added" not in visible_rows(view)
-
-
-class TestSelectionSurvivesARebuild:
-    """The highlight is the other half of keeping your place.
-
-    A rebuilt tree has no selection at all, so a sync left the detail pane
-    showing an entry that nothing in the sidebar pointed at.
-    """
-
-    @pytest.fixture
-    def stocked(self, view, backend):
-        for path in ("work/mail", "personal/bank"):
-            view.add_password(backend, path)
+    def test_a_folder_that_became_an_entry_is_replaced(self, view, stocked):
         view.expand_all()
-        return backend
 
-    def rebuild(self, view, paths=("work/mail", "personal/bank")):
-        view.clear_all()
-        record = view.add_backend("demo_1", "Demo", "emblem-default-symbolic")
-        for path in paths:
-            view.add_password(record, path)
-        view.restore_expansion()
-        view.restore_selection()
-
-    def test_the_selected_entry_is_selected_again(self, view, stocked):
-        view.selection.set_selected(visible_rows(view).index("mail"))
-
-        self.rebuild(view)
-
-        assert view.get_selected_password() == ("demo_1", "work/mail")
-
-    def test_restoring_does_not_re_announce_the_selection(self, view, stocked):
-        """Announcing it would decrypt an entry the pane is already showing."""
-        view.selection.set_selected(visible_rows(view).index("mail"))
-        seen = []
-        view.connect_password_selected(lambda *args: seen.append(args))
-
-        self.rebuild(view)
-
-        assert seen == []
-
-    def test_an_entry_that_is_gone_leaves_nothing_selected(self, view, stocked):
-        view.selection.set_selected(visible_rows(view).index("mail"))
-
-        self.rebuild(view, paths=("personal/bank",))
+        view.sync_entries(stocked, ["work", "personal/bank"])
 
         assert view.get_selected_password() is None
+        names = visible_rows(view)
+        assert names.count("work") == 1
+        assert "mail" not in names
 
-    def test_nothing_selected_stays_nothing_selected(self, view, stocked):
-        self.rebuild(view)
+    def test_a_backend_row_is_kept_across_a_reload(self, view, backend):
+        view.sync_entries(backend, ["work/mail"])
+        node = backend.node
 
-        assert view.get_selected_password() is None
+        (again,) = view.sync_backends(
+            [("demo_1", "Demo", "emblem-default-symbolic", "")]
+        )
+
+        assert again is backend
+        assert again.node is node
+
+    def test_a_backend_that_went_away_is_removed(self, view, backend):
+        view.sync_entries(backend, ["work/mail"])
+        other = view.sync_backends(
+            [
+                ("demo_1", "Demo", "emblem-default-symbolic", ""),
+                ("demo_2", "Other", "", ""),
+            ]
+        )
+        assert len(other) == 2
+
+        view.sync_backends([("demo_2", "Other", "", "")])
+
+        assert [view.root.get_item(i).name for i in range(view.root.get_n_items())] == [
+            "Other"
+        ]
+
+    def test_a_renamed_backend_keeps_its_row(self, view, backend):
+        view.sync_entries(backend, ["work/mail"])
+        node = backend.node
+
+        view.sync_backends([("demo_1", "Team Vault", "emblem-default-symbolic", "")])
+
+        assert backend.node is node
+        assert node.name == "Team Vault"
 
 
 class TestFiltering:
@@ -279,7 +286,7 @@ class TestFiltering:
     def test_matches_in_two_folders_keep_both(self, view, stocked):
         view.set_filter("mail")
 
-        assert list(names(view.root)) == ["Demo", "work", "mail", "personal", "mail"]
+        assert list(names(view.root)) == ["Demo", "personal", "mail", "work", "mail"]
 
     def test_matches_are_visible_without_expanding(self, view, stocked):
         """A match inside a collapsed folder is a match nobody can see."""
@@ -312,20 +319,38 @@ class TestFiltering:
 
         assert list(names(view.root)) == [
             "Demo",
+            "bank",
+            "personal",
+            "mail",
             "work",
             "mail",
             "vpn",
-            "personal",
-            "mail",
-            "bank",
         ]
 
-    def test_folders_are_closed_again_once_the_filter_clears(self, view, stocked):
+    def test_the_tree_goes_back_to_the_shape_it_had_before_the_search(
+        self, view, stocked
+    ):
+        """Exactly that shape, which here is everything shut.
+
+        A search opens what it matched. Clearing it has to close those again,
+        not leave the tree hanging open at whatever the search reached -- and
+        nothing in this fixture was ever opened, so nothing should be open.
+        """
         view.set_filter("vpn")
+        assert "vpn" in visible_rows(view)
 
         view.set_filter("")
 
-        assert visible_rows(view) == ["Demo", "work", "personal", "bank"]
+        assert visible_rows(view) == ["Demo"]
+
+    def test_what_was_open_before_the_search_is_open_after_it(self, view, stocked):
+        view.expand_first_level()
+        before = visible_rows(view)
+
+        view.set_filter("vpn")
+        view.set_filter("")
+
+        assert visible_rows(view) == before
 
     def test_an_entry_arriving_under_a_filter_is_filtered_too(self, view, stocked):
         """Listings arrive per backend, and can land while a search is running."""
@@ -334,7 +359,7 @@ class TestFiltering:
         view.add_password(stocked, "later/vpn-two")
         view.add_password(stocked, "later/unrelated")
 
-        assert list(names(view.root)) == ["Demo", "work", "vpn", "later", "vpn-two"]
+        assert list(names(view.root)) == ["Demo", "later", "vpn-two", "work", "vpn"]
 
     def test_a_backend_added_under_a_filter_waits_for_a_match(self, view, stocked):
         view.set_filter("vpn")
