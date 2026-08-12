@@ -134,6 +134,12 @@ class GTKPassApp(Adw.Application):
         "win.copy-password": ["<Control><Shift>c"],
         "win.copy-username": ["<Control><Shift>u"],
         "win.search": ["<Control>f"],
+        # Shift+D for directories, Shift+E for everything. Collapsing is in the
+        # menu and unbound on purpose: the letters left are ones a text widget
+        # might want, and these reach the window whenever the focused widget
+        # does not consume them.
+        "win.expand-folders": ["<Control><Shift>d"],
+        "win.expand-all": ["<Control><Shift>e"],
         "win.sync": ["<Control><Shift>s"],
         "win.reload": ["<Control>r"],
         # Both spellings: Ctrl+? is the GNOME convention and needs a shift on

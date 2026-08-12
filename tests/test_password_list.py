@@ -241,6 +241,108 @@ class TestReListingIsReconciledRatherThanRebuilt:
         assert node.name == "Team Vault"
 
 
+class TestOrdering:
+    """Folders before entries, each alphabetical.
+
+    A folder is a place to go and an entry is a thing to open, and a list that
+    interleaves them makes the reader sort them by icon on every glance.
+    """
+
+    def test_folders_come_first(self, view, backend):
+        view.sync_entries(backend, ["zebra/one", "alpha", "beta/two", "yak"])
+        view.expand_first_level()
+
+        assert visible_rows(view) == ["Demo", "beta", "zebra", "alpha", "yak"]
+
+    def test_entries_are_alphabetical_among_themselves(self, view, backend):
+        view.sync_entries(backend, ["gamma", "alpha", "beta"])
+        view.expand_first_level()
+
+        assert visible_rows(view) == ["Demo", "alpha", "beta", "gamma"]
+
+    def test_the_rule_holds_at_every_depth(self, view, backend):
+        view.sync_entries(backend, ["work/zzz", "work/nested/deep", "work/aaa"])
+        view.expand_all()
+
+        assert visible_rows(view) == [
+            "Demo",
+            "work",
+            "nested",
+            "deep",
+            "aaa",
+            "zzz",
+        ]
+
+
+class TestShowingTheFoldersOnly:
+    """GTK has no partial expansion: TreeListModel.autoexpand is everything or
+    nothing, and there is no depth limit and no successor to GTK3's
+    expand_row(open_all=FALSE). Per-row set_expanded is the whole toolkit, so
+    which rows to open is the application's to decide.
+    """
+
+    @pytest.fixture
+    def stocked(self, view, backend):
+        view.sync_entries(
+            backend,
+            [
+                "work/mail/imap",
+                "work/mail/smtp",
+                "work/vpn",
+                "personal/bank",
+                "loose",
+            ],
+        )
+        return backend
+
+    def test_the_directories_are_shown(self, view, stocked):
+        view.expand_folders()
+
+        shown = visible_rows(view)
+        assert "work" in shown
+        assert "mail" in shown
+
+    def test_the_passwords_below_them_are_not(self, view, stocked):
+        view.expand_folders()
+
+        shown = visible_rows(view)
+        assert "imap" not in shown
+        assert "smtp" not in shown
+
+    def test_a_folder_of_entries_alone_stays_shut(self, view, stocked):
+        """personal holds only entries, so opening it would show passwords."""
+        view.expand_folders()
+
+        assert "personal" in visible_rows(view)
+        assert "bank" not in visible_rows(view)
+
+    def test_an_entry_beside_a_folder_is_shown_with_it(self, view, stocked):
+        """Siblings: there is no way to show `work` and hide `loose`."""
+        view.expand_folders()
+
+        assert "loose" in visible_rows(view)
+
+    def test_collapse_all_shuts_everything(self, view, stocked):
+        view.expand_all()
+
+        view.collapse_all()
+
+        assert visible_rows(view) == ["Demo"]
+
+    def test_folders_only_is_not_stuck_open(self, view, stocked):
+        """autoexpand would re-open what the user closed. This must not."""
+        view.expand_folders()
+        row = next(
+            view.tree_model.get_row(index)
+            for index in range(view.tree_model.get_n_items())
+            if view.tree_model.get_row(index).get_item().name == "work"
+        )
+
+        row.set_expanded(False)
+
+        assert "mail" not in visible_rows(view)
+
+
 class TestFiltering:
     """The sidebar is filtered by rebuilding it, not by hiding rows.
 
@@ -319,12 +421,12 @@ class TestFiltering:
 
         assert list(names(view.root)) == [
             "Demo",
-            "bank",
             "personal",
             "mail",
             "work",
             "mail",
             "vpn",
+            "bank",
         ]
 
     def test_the_tree_goes_back_to_the_shape_it_had_before_the_search(

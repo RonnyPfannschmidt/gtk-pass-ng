@@ -191,6 +191,20 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     </section>
     <section>
       <item>
+        <attribute name="label" translatable="yes">Show Folders Only</attribute>
+        <attribute name="action">win.expand-folders</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Expand Everything</attribute>
+        <attribute name="action">win.expand-all</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Collapse Everything</attribute>
+        <attribute name="action">win.collapse-all</attribute>
+      </item>
+    </section>
+    <section>
+      <item>
         <attribute name="label" translatable="yes">Sync with Remote</attribute>
         <attribute name="action">win.sync</attribute>
       </item>

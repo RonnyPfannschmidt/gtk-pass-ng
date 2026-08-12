@@ -250,6 +250,18 @@ class GTKPassWindow(Adw.ApplicationWindow):
         adopt_action.connect("activate", self._on_adopt_store)
         self.add_action(adopt_action)
 
+        # Opening and shutting the tree. Folders-only is the interesting one:
+        # it shows the shape of a store without showing what is in it, which
+        # GTK offers no way to ask for -- see PasswordTreeView.expand_folders.
+        for name, method in (
+            ("expand-folders", self.password_list.expand_folders),
+            ("expand-all", self.password_list.expand_all),
+            ("collapse-all", self.password_list.collapse_all),
+        ):
+            tree_action = Gio.SimpleAction.new(name, None)
+            tree_action.connect("activate", lambda _a, _p, run=method: run())
+            self.add_action(tree_action)
+
         # Reaching the search box from the keyboard. Always available: there is
         # nothing to break by focusing an empty one.
         search_action = Gio.SimpleAction.new("search", None)

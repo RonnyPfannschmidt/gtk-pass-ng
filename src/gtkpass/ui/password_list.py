@@ -114,6 +114,15 @@ def _folder_tree(paths: list[str]) -> dict:
     return tree
 
 
+def _holds_a_folder(node: PasswordNode) -> bool:
+    """Whether any of this row's children is a folder rather than an entry."""
+    children = node.children
+    return any(
+        not children.get_item(index).password_name
+        for index in range(children.get_n_items())
+    )
+
+
 def _descendants(widget: Gtk.Widget):
     """Every widget below ``widget``, depth first."""
     child = widget.get_first_child()
@@ -464,7 +473,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
                 continue
             index += 1
 
-        for position, name in enumerate(sorted(wanted)):
+        # Folders first, then entries, each alphabetical. A folder is a place
+        # to go and an entry is a thing to open; interleaving them makes the
+        # reader sort by icon on every glance. The order is also what lets a
+        # reconciliation find the row it is looking for rather than inserting
+        # a second one beside it, so it has to be a property of the tree
+        # rather than of whoever happened to build it.
+        for position, name in enumerate(
+            sorted(wanted, key=lambda name: (wanted[name] is None, name))
+        ):
             below = wanted[name]
             here = f"{prefix}/{name}" if prefix else name
 
@@ -775,6 +792,33 @@ class PasswordTreeView(Gtk.ScrolledWindow):
     def expand_all(self) -> None:
         """Expand all nodes recursively."""
         self._expand(lambda row: True)
+
+    def expand_folders(self) -> None:
+        """Show the shape of the store without showing what is in it.
+
+        GTK offers nothing for this. ``Gtk.TreeListModel:autoexpand`` is
+        everything or nothing -- and it holds rows open, so a row the user
+        closes springs back -- there is no depth limit, and GTK3's
+        ``expand_row(open_all=FALSE)`` has no successor. What there is is
+        ``Gtk.TreeListRow.set_expanded`` per row, which is enough: the
+        application knows which rows are folders and can say so one at a time.
+
+        A folder is opened when it holds another folder, so the directories
+        below it are reachable; one that holds only entries stays shut, because
+        opening it is exactly what this is for avoiding. An entry sitting
+        beside a folder is shown with it -- they are siblings, and there is no
+        opening one without the other.
+        """
+        self._expand(
+            lambda row: row.get_depth() == 0 or _holds_a_folder(row.get_item())
+        )
+
+    def collapse_all(self) -> None:
+        """Shut every row that is open."""
+        for index in range(self.tree_model.get_n_items()):
+            row = self.tree_model.get_row(index)
+            if row is not None:
+                row.set_expanded(False)
 
     def _expand(self, wanted: Callable[[Gtk.TreeListRow], bool]) -> None:
         """Expand matching rows, including any they reveal on the way.

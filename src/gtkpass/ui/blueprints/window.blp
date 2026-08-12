@@ -188,6 +188,22 @@ menu primary_menu {
     }
   }
   section {
+    // Folders Only shows the shape of a store without showing what is in it.
+    // GTK has no partial expansion of its own; see expand_folders.
+    item {
+      label: _("Show Folders Only");
+      action: "win.expand-folders";
+    }
+    item {
+      label: _("Expand Everything");
+      action: "win.expand-all";
+    }
+    item {
+      label: _("Collapse Everything");
+      action: "win.collapse-all";
+    }
+  }
+  section {
     item {
       label: _("Sync with Remote");
       action: "win.sync";
