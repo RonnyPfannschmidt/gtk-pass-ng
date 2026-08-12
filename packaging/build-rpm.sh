@@ -111,14 +111,17 @@ if [ "$USE_CONTAINER" = "0" ]; then
 else
     # shellcheck source=packaging/container-runtime.sh
     . "$(dirname "$0")/container-runtime.sh"
-    echo "==> rpmbuild in ${IMAGE} (${CONTAINER_RUNTIME})"
+    # shellcheck source=packaging/builder-image.sh
+    . "$(dirname "$0")/builder-image.sh"
+    builder=$(builder_image "$FEDORA_RELEASE")
+    echo "==> rpmbuild in ${builder} (${CONTAINER_RUNTIME})"
     "$CONTAINER_RUNTIME" run --rm \
         -v "$PWD:/src:z" \
         -e "VERSION=${VERSION}" \
         -e "RELEASE=${RELEASE}" \
         -e "CHANGELOG_DATE=${CHANGELOG_DATE}" \
         -e "SRC=/src" \
-        "$IMAGE" \
+        "$builder" \
         /src/packaging/rpmbuild-here.sh
 fi
 

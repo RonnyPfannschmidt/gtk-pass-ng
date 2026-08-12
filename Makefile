@@ -298,7 +298,12 @@ flatpak-lint-repo:
 # permanent addition to the image. See docs/PACKAGING.md.
 rpm: $(RPM_STAMP)
 
-$(RPM_STAMP): $(PACKAGE_SOURCES) packaging/build-rpm.sh packaging/gtkpass.spec
+# The container it is built in counts as an input: a change to the toolchain
+# is a change to what comes out of it.
+BUILD_CONTAINER := packaging/Containerfile.build packaging/builder-image.sh
+
+$(RPM_STAMP): $(PACKAGE_SOURCES) packaging/build-rpm.sh packaging/gtkpass.spec \
+	$(BUILD_CONTAINER)
 	./packaging/build-rpm.sh
 	@touch $@
 
@@ -308,7 +313,7 @@ $(RPM_STAMP): $(PACKAGE_SOURCES) packaging/build-rpm.sh packaging/gtkpass.spec
 # it however old it had become.
 sysext: $(SYSEXT_IMAGE)
 
-$(SYSEXT_IMAGE): $(RPM_STAMP) packaging/build-sysext.sh
+$(SYSEXT_IMAGE): $(RPM_STAMP) packaging/build-sysext.sh $(BUILD_CONTAINER)
 	./packaging/build-sysext.sh
 
 # Needs root, and says what it changes before it changes it. This is the step CI

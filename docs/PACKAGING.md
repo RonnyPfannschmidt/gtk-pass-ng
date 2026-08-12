@@ -32,6 +32,36 @@ another release, and the default follows `VERSION_ID` from `/etc/os-release` —
 which on the derivatives reports Fedora's release even though `ID` reports their
 own name.
 
+### The container has the toolchain in it already
+
+`packaging/Containerfile.build` prepares that container, and
+`packaging/builder-image.sh` builds it on demand as `gtkpass-build:fc<release>`.
+
+It exists because the container is removed when it exits and takes its package
+cache with it, so every build used to start from a bare Fedora and install some
+eighty packages — downloaded again each time — before it could begin. The build
+itself is seconds. On this machine that was 49 seconds for `make sysext`, of
+which about 40 was `dnf`.
+
+The layers are ordered by how often their inputs change: the fixed toolchain,
+then the spec's `BuildRequires`, then what `%pyproject_buildrequires` will ask
+for. A source change reuses all of them, so an unchanged toolchain costs about a
+second and installs nothing. `make sysext` is 17 seconds now.
+
+`podman build` is the staleness check — there is no stamp to keep in step — and
+the Makefile treats the Containerfile as an input of the package, so changing
+the toolchain rebuilds what came out of it. To force the image itself:
+
+```bash
+podman rmi localhost/gtkpass-build:fc44     # or: --no-cache, by hand
+```
+
+`GTKPASS_BUILDER_IMAGE=some/image make rpm` uses one that is already prepared
+instead of building anything. CI does not use the image at all: those jobs run
+*inside* a Fedora of the right release already, so they take the `USE_CONTAINER=0`
+path and cache their packages with `actions/cache` over `/var/cache/libdnf5`
+instead — `keepcache=True` is what stops dnf5 deleting them first.
+
 ## Versions
 
 There are no tags, so there is no upstream release to build from.

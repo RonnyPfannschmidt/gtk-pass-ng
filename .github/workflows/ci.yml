@@ -48,6 +48,28 @@ jobs:
     runs-on: ubuntu-latest
     container: registry.fedoraproject.org/fedora:44
     steps:
+      # Every one of these jobs starts from a bare Fedora and installs its
+      # tools before it can do anything, and dnf5 deletes the packages once it
+      # has, so the next run downloads them all again. Keeping them and letting
+      # the cache carry them between runs turns that into a copy.
+      #
+      # The key is unique per run and the restore key is the prefix, which is
+      # the rolling form: every run restores the newest cache there is and
+      # saves an updated one. Keyed on a hash of the package lists would be
+      # tidier, but these steps have to come before the checkout -- the
+      # checkout needs git-core, which is one of the packages -- and hashFiles
+      # over an empty workspace returns the empty string, which would collapse
+      # the key to a constant and never notice a list changing again.
+      - name: keep downloaded packages
+        run: echo "keepcache=True" >> /etc/dnf/dnf.conf
+
+      - name: cache the packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/libdnf5
+          key: dnf-44-${{ github.run_id }}
+          restore-keys: dnf-44-
+
       - name: install dependencies
         run: |
           dnf -y --setopt=install_weak_deps=False install \
@@ -103,6 +125,28 @@ jobs:
         # which is exactly what a single-version run would hide.
         fedora: ['43', '44']
     steps:
+      # Every one of these jobs starts from a bare Fedora and installs its
+      # tools before it can do anything, and dnf5 deletes the packages once it
+      # has, so the next run downloads them all again. Keeping them and letting
+      # the cache carry them between runs turns that into a copy.
+      #
+      # The key is unique per run and the restore key is the prefix, which is
+      # the rolling form: every run restores the newest cache there is and
+      # saves an updated one. Keyed on a hash of the package lists would be
+      # tidier, but these steps have to come before the checkout -- the
+      # checkout needs git-core, which is one of the packages -- and hashFiles
+      # over an empty workspace returns the empty string, which would collapse
+      # the key to a constant and never notice a list changing again.
+      - name: keep downloaded packages
+        run: echo "keepcache=True" >> /etc/dnf/dnf.conf
+
+      - name: cache the packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/libdnf5
+          key: dnf-${{ matrix.fedora }}-${{ github.run_id }}
+          restore-keys: dnf-${{ matrix.fedora }}-
+
       - name: install build dependencies
         run: |
           dnf -y --setopt=install_weak_deps=False install \
@@ -312,6 +356,28 @@ jobs:
       matrix:
         fedora: ['43', '44']
     steps:
+      # Every one of these jobs starts from a bare Fedora and installs its
+      # tools before it can do anything, and dnf5 deletes the packages once it
+      # has, so the next run downloads them all again. Keeping them and letting
+      # the cache carry them between runs turns that into a copy.
+      #
+      # The key is unique per run and the restore key is the prefix, which is
+      # the rolling form: every run restores the newest cache there is and
+      # saves an updated one. Keyed on a hash of the package lists would be
+      # tidier, but these steps have to come before the checkout -- the
+      # checkout needs git-core, which is one of the packages -- and hashFiles
+      # over an empty workspace returns the empty string, which would collapse
+      # the key to a constant and never notice a list changing again.
+      - name: keep downloaded packages
+        run: echo "keepcache=True" >> /etc/dnf/dnf.conf
+
+      - name: cache the packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/libdnf5
+          key: dnf-${{ matrix.fedora }}-${{ github.run_id }}
+          restore-keys: dnf-${{ matrix.fedora }}-
+
       # selinux-policy-targeted and libselinux-utils are not here to enforce
       # anything -- this runner has no SELinux to enforce it. They are the
       # file_contexts and the lookup tool build-sysext.sh needs to work out what

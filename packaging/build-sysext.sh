@@ -138,14 +138,19 @@ download_package() {
     if [ "${USE_CONTAINER:-1}" = "0" ]; then
         ( cd dist/sysext && dnf download "$capability" >/dev/null )
     else
+        # The prepared image, which already has the download plugin. This used
+        # to start a bare Fedora per capability and install dnf-plugins-core in
+        # each of them -- some thirty packages, downloaded again every time,
+        # for one file.
         # shellcheck source=packaging/container-runtime.sh
         . "$(dirname "$0")/container-runtime.sh"
+        # shellcheck source=packaging/builder-image.sh
+        . "$(dirname "$0")/builder-image.sh"
+        local builder
+        builder=$(builder_image "$FEDORA_RELEASE")
         "$CONTAINER_RUNTIME" run --rm -v "$PWD/dist/sysext:/out:z" \
-            "registry.fedoraproject.org/fedora:${FEDORA_RELEASE}" \
-            bash -euo pipefail -c "
-                dnf -y install dnf-plugins-core >/dev/null
-                cd /out && dnf download '${capability}' >/dev/null
-            "
+            "$builder" \
+            bash -euo pipefail -c "cd /out && dnf download '${capability}' >/dev/null"
     fi
 }
 

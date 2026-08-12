@@ -1,0 +1,57 @@
+# The container the RPM and the sysext image are built in, with the toolchain
+# already in it.
+#
+# Without this, every build started from a bare Fedora and installed some sixty
+# packages before it could begin -- downloaded again every time, because the
+# container is removed when it exits and takes the package cache with it. On a
+# developer's machine that is the whole cost of `make rpm`; the build itself is
+# seconds.
+#
+# The layers are ordered so that the expensive ones are reused. Only a change to
+# the spec's BuildRequires invalidates the builddep layer, and only a change to
+# this file invalidates the toolchain above it -- so the ordinary case, a source
+# change, reuses everything and the build starts immediately.
+#
+# `podman build` is the staleness check; there is no stamp to keep in step. A
+# fully cached build of this file takes about a second.
+
+ARG FEDORA_RELEASE=44
+FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE}
+
+# Keep the downloaded packages in the image. dnf5 deletes them after installing
+# by default, which would leave the dynamic build requirements below to be
+# fetched over the network on every build -- the thing this image exists to
+# stop. It costs a few tens of megabytes in a layer nobody ships.
+RUN echo "keepcache=True" >> /etc/dnf/dnf.conf
+
+# The fixed toolchain: what rpmbuild-here.sh installs before it can start, plus
+# the download plugin that the sysext build needs to vendor dependencies.
+RUN dnf -y --setopt=install_weak_deps=False install \
+        rpm-build rpmdevtools python3-devel pyproject-rpm-macros \
+        desktop-file-utils libappstream-glib glib2-devel \
+        dnf-plugins-core \
+    && dnf clean expire-cache
+
+# The spec's own BuildRequires. Copied in on its own so that a change to the
+# source does not invalidate this layer -- only a change to what the package
+# declares it needs to build does.
+COPY packaging/gtkpass.spec /tmp/gtkpass.spec
+RUN dnf -y builddep --spec /tmp/gtkpass.spec
+
+# What %pyproject_buildrequires will ask for, which it can only report by
+# failing a build and being asked again -- see the loop in rpmbuild-here.sh.
+# Installed here from the same declaration it reads, so that the loop finds
+# everything present and goes round once instead of twice.
+#
+# A drift between this and pyproject.toml costs a slower build and nothing else:
+# the loop still installs whatever is missing. It cannot produce a wrong
+# package, only a less quick one.
+COPY pyproject.toml /tmp/pyproject.toml
+RUN dnf -y --setopt=install_weak_deps=False install \
+        python3-pip python3-wheel python3-setuptools python3-setuptools_scm \
+        python3-gobject python3-secretstorage python3-gnupg \
+    && dnf clean expire-cache
+
+# Nothing is copied into the image to be built: the source is mounted at run
+# time, so one image serves every commit.
+WORKDIR /src
