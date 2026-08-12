@@ -47,6 +47,14 @@ SELECT_PYTHON := ./scripts/system-python.sh $(SYSTEM_PYTHON)
 # wins, that being the spelling above.
 PYTHON := uv run python
 
+# Whether the suite about to run is the one that reads the working copy. Only
+# the default does; every override above names an interpreter with the package
+# installed into it. See UI_PREREQUISITES below, which is the one thing that
+# turns on the difference.
+ifeq ($(PYTHON),uv run python)
+TESTS_THE_WORKING_COPY := yes
+endif
+
 # Every target below reuses the environment as-is rather than re-resolving it;
 # without this `uv run` re-syncs and tries to build the excluded packages again.
 export UV_NO_SYNC := 1
@@ -178,13 +186,27 @@ $(COMPILED_SCHEMAS): $(SCHEMA_SOURCES)
 check:
 	uv run pre-commit run --all-files
 
-# Both depend on the generated files rather than assuming they are current. A
-# suite run against a stale .ui tests the widgets somebody had an hour ago, and
+# The generated files rather than an assumption that they are current: a suite
+# run against a stale .ui tests the widgets somebody had an hour ago, and
 # passes.
-test: $(COMPILED_SCHEMAS) $(UI_FILES)
+#
+# The .ui files only when the suite reads them, though, which is when it runs
+# against the working copy. Against an installed wheel or RPM the widgets come
+# out of the installed copy, compiled when the package was built -- the files
+# here are not opened at all. And asking for them there does not merely do
+# nothing: those jobs in CI deliberately have no development environment, so the
+# recipe below reaches for a uv that is not installed and the suite never runs.
+#
+# It would reach for it every time, too. A checkout writes files in path order,
+# so window.blp lands after about.ui, and the grouped rule makes every .ui
+# depend on every .blp -- which leaves a freshly checked-out .ui older than a
+# prerequisite that was never edited.
+UI_PREREQUISITES := $(if $(TESTS_THE_WORKING_COPY),$(UI_FILES))
+
+test: $(COMPILED_SCHEMAS) $(UI_PREREQUISITES)
 	$(HEADLESS) $(PYTHON) -m pytest
 
-test-gui: $(COMPILED_SCHEMAS) $(UI_FILES)
+test-gui: $(COMPILED_SCHEMAS) $(UI_PREREQUISITES)
 	$(HEADLESS) $(PYTHON) -m pytest -m gui
 
 build: $(UI_FILES)
@@ -201,7 +223,11 @@ build: $(UI_FILES)
 # as everywhere else, and the system interpreter for the same reason.
 WHEEL_VENV := build/wheel-venv
 
-test-wheel: $(COMPILED_SCHEMAS) $(UI_FILES)
+# No generated files among the prerequisites: what is tested here is the wheel
+# in dist/, which carries the .ui files it was built with, and the delegated
+# `test` below brings up the schema. `make build` is what compiles a .blp into
+# the wheel, and this target says so when dist/ holds nothing.
+test-wheel:
 	@wheels=$$(ls -1 dist/*.whl 2>/dev/null | wc -l); \
 	if [ "$$wheels" != 1 ]; then \
 		echo "make test-wheel: expected one wheel in dist/, found $$wheels."; \
