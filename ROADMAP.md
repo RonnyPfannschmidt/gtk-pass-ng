@@ -74,6 +74,8 @@ application; none of its dates survived contact with the work.
 - An RPM for Fedora, and a systemd-sysext image for the ostree desktops, both
   built in a container so packaging costs the developer no layered packages;
   see [docs/PACKAGING.md](docs/PACKAGING.md)
+- A .deb for Debian trixie and Ubuntu 26.04, built from the same sdist and
+  tested installed on both; see [docs/DEBIAN.md](docs/DEBIAN.md)
 - No launcher script in any of them: an installed build refuses nothing and
   needs nothing set, because the store guard asks whether it is running from a
   checkout rather than waiting to be told

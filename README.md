@@ -77,11 +77,12 @@ Or build something installable, none of it released or signed:
 ```bash
 make flatpak   # see docs/FLATPAK.md
 make rpm       # an RPM for Fedora
+make deb       # a .deb for Debian trixie and Ubuntu 26.04
 make sysext    # a systemd-sysext image for Bluefin, Silverblue and the rest
 ```
 
-`make help` lists the rest, and [docs/PACKAGING.md](docs/PACKAGING.md) covers
-the last two. Tagging publishes all of it — see
+`make help` lists the rest; [docs/PACKAGING.md](docs/PACKAGING.md) covers the
+Fedora ones and [docs/DEBIAN.md](docs/DEBIAN.md) the .deb. Tagging publishes all of it — see
 [docs/RELEASING.md](docs/RELEASING.md) — but no release has been made yet.
 
 On Windows there is no `make`, and GTK comes from the bundle rather than from
@@ -132,6 +133,7 @@ other fields that are secrets, rather than turned into a code.
 - [SECURITY.md](SECURITY.md) — threat model and reporting
 - [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidelines
 - [docs/PACKAGING.md](docs/PACKAGING.md) — the RPM and the sysext image
+- [docs/DEBIAN.md](docs/DEBIAN.md) — the .deb, and which releases it targets
 - [docs/WINDOWS.md](docs/WINDOWS.md) — the Windows build, and what works there
 - [docs/RELEASING.md](docs/RELEASING.md) — what tagging does, and PyPI setup
 - [docs/FLATPAK.md](docs/FLATPAK.md) — the Flatpak, and its sandbox permissions

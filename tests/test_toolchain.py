@@ -57,19 +57,32 @@ def split_jobs(workflow: str) -> dict[str, str]:
     return jobs
 
 
+def is_install_line(line: str) -> bool:
+    """Whether a line starts a package installation.
+
+    Both package managers, because the Linux jobs are no longer all Fedora:
+    the Debian and Ubuntu ones say apt-get. Reading only dnf did not report a
+    job's packages as missing -- it reported the job as having none at all,
+    which the checks below then passed silently.
+    """
+    return (" install" in line) and ("dnf " in line or "apt-get " in line)
+
+
 def installed_packages(job: str) -> set[str]:
-    """What a job's `dnf install` lines name, continuations included."""
+    """What a job's install lines name, continuations included."""
     packages: set[str] = set()
     collecting = False
     for line in job.splitlines():
-        if "dnf " in line and " install" in line:
+        if is_install_line(line):
             collecting = True
             line = line.split(" install", 1)[1]
         elif not collecting:
             continue
         packages.update(word for word in line.split() if not word.startswith("-"))
         collecting = line.rstrip().endswith("\\")
-    return {package.rstrip("\\") for package in packages}
+    # The trailing backslash of a continued line is a word of its own, and
+    # rstripping it leaves an empty one behind.
+    return {stripped for package in packages if (stripped := package.rstrip("\\"))}
 
 
 class TestChoosingTheInterpreter:
@@ -178,6 +191,33 @@ class TestOneDefinitionOfRunningTheSuite:
     def test_the_target_is_declared_phony(self, makefile, target):
         phony = makefile.split(".PHONY:", 1)[1].split("\n\n", 1)[0]
         assert target in phony.split()
+
+
+class TestReadingWhatAJobInstalls:
+    """The checks below are only as good as this, and it fails open.
+
+    A job whose install line it cannot read has no packages as far as it is
+    concerned, and every assertion about what a job installs then passes.
+    """
+
+    def test_a_dnf_line_with_continuations(self):
+        job = """
+      - name: install dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \\
+            make git-core python3-pytest
+"""
+        assert installed_packages(job) == {"make", "git-core", "python3-pytest"}
+
+    def test_an_apt_line_too(self):
+        """Debian and Ubuntu are Linux jobs the same as the Fedora ones."""
+        job = """
+      - name: install dependencies
+        run: |
+          apt-get install -y --no-install-recommends \\
+            make git python3-pytest
+"""
+        assert installed_packages(job) == {"make", "git", "python3-pytest"}
 
 
 class TestCIRunsTheseTargets:

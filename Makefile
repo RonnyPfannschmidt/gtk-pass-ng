@@ -109,6 +109,10 @@ PACKAGE_SOURCES := $(PYTHON_SOURCES) $(UI_FILES) $(DATA_SOURCES) $(GIT_STATE) \
 # before it starts, so nothing older survives beside what it produces.
 RPM_STAMP := dist/rpm/.built
 
+# The same arrangement for the .deb, whose name carries the version too.
+# build-deb.sh empties dist/deb before it starts.
+DEB_STAMP := dist/deb/.built
+
 # An extension names the system it was built for and systemd refuses it
 # anywhere else, so the image for *this* machine is what these targets mean.
 OS_ID := $(shell . /etc/os-release && echo $$ID)
@@ -117,7 +121,7 @@ SYSEXT_IMAGE := dist/sysext/gtkpass-$(OS_ID)-$(OS_VERSION_ID).raw
 
 .PHONY: help venv sync hooks ui schemas check test test-gui test-wheel build \
 	run run-dev devstore flatpak flatpak-run flatpak-lint flatpak-lint-repo \
-	rpm sysext sysext-test sysext-install clean
+	rpm deb sysext sysext-test sysext-install clean
 
 help:
 	@echo "sync     create the environment, install dependencies and git hooks"
@@ -137,6 +141,7 @@ help:
 	@echo "flatpak-lint  check the manifest against Flathub's rules"
 	@echo "flatpak-lint-repo  build to a repo and run Flathub's repo checks"
 	@echo "rpm      build the RPM in a Fedora container"
+	@echo "deb      build the .deb in a Debian container (DEB_TARGET=ubuntu:26.04)"
 	@echo "sysext   build a systemd-sysext image for Bluefin/Silverblue"
 	@echo "sysext-test  merge that image onto this machine, test it, unmerge"
 	@echo "sysext-install  install that image on this machine and merge it, for keeps"
@@ -331,6 +336,28 @@ BUILD_CONTAINER := packaging/Containerfile.build packaging/builder-image.sh
 $(RPM_STAMP): $(PACKAGE_SOURCES) packaging/build-rpm.sh packaging/gtkpass.spec \
 	$(BUILD_CONTAINER)
 	./packaging/build-rpm.sh
+	@touch $@
+
+# The .deb, in a container of the target for the same reason. Debian trixie
+# unless another target is named, and the name of the target is not decoration:
+# it decides the Python the wheel is installed under and the GTK it is built
+# against.
+#
+#   make deb
+#   DEB_TARGET=ubuntu:26.04 make deb
+#
+# The stamp stands in for the package, whose name carries the version and so
+# cannot be written down here; build-deb.sh empties dist/deb before it starts.
+DEB_CONTAINER := packaging/Containerfile.build.deb packaging/builder-image.sh \
+	packaging/deb-builddeps.sh
+DEBIAN_SOURCES := $(wildcard packaging/debian/*) packaging/debian/source/format
+
+deb: $(DEB_STAMP)
+
+$(DEB_STAMP): $(PACKAGE_SOURCES) packaging/build-deb.sh \
+	packaging/debuild-here.sh packaging/deb-version.sh $(DEBIAN_SOURCES) \
+	$(DEB_CONTAINER)
+	./packaging/build-deb.sh
 	@touch $@
 
 # The image is built from the RPM, so it is out of date whenever that is. This

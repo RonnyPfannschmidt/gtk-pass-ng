@@ -1,0 +1,38 @@
+# The container the .deb is built in, with the toolchain already in it.
+#
+# The Debian counterpart of Containerfile.build, and there for the same reason:
+# the container is removed when it exits and takes its package cache with it,
+# so without this every build starts from a bare image and installs the whole
+# toolchain over the network before it can begin.
+#
+# One file for both targets. BASE_IMAGE names which:
+#
+#   podman build --build-arg BASE_IMAGE=docker.io/library/ubuntu:24.04 ...
+#
+# `podman build` is the staleness check; there is no stamp to keep in step.
+
+ARG BASE_IMAGE=docker.io/library/debian:trixie
+FROM ${BASE_IMAGE}
+
+# apt deletes the downloaded archives after installing, which would leave every
+# build fetching them again -- the thing this image exists to stop.
+RUN printf 'Binary::apt::APT::Keep-Downloaded-Packages "true";\n' \
+        > /etc/apt/apt.conf.d/99keep-downloads
+
+# The fixed toolchain: what dpkg-buildpackage needs to run at all.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential dpkg-dev fakeroot
+
+# What debian/control declares, derived rather than typed out a second time --
+# see deb-builddeps.sh. Copied in on its own so that a change to the source does
+# not invalidate this layer; only a change to what the package needs to build
+# does.
+COPY packaging/debian/control /tmp/control
+COPY packaging/deb-builddeps.sh /tmp/deb-builddeps.sh
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        $(/tmp/deb-builddeps.sh /tmp/control)
+
+# Nothing is copied into the image to be built: the source is mounted at run
+# time, so one image serves every commit.
+WORKDIR /src

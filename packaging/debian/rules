@@ -1,0 +1,55 @@
+#!/usr/bin/make -f
+# How the .deb is built, and the counterpart of the spec's %build and %install.
+#
+# pybuild builds the wheel through the project's own backend and dh_python3
+# installs it into /usr/lib/python3/dist-packages, which is the one place a
+# Debian package differs from the RPM in a way anything can see -- Fedora calls
+# that directory site-packages, and packaging/smoke-test-install.sh had to learn
+# both spellings.
+
+export PYBUILD_NAME = gtkpass
+
+# The version the wheel is built as, which is the release this is a snapshot
+# *of* rather than the snapshot itself: dpkg's version carries the commit in a
+# form PEP 440 has no room for, and setuptools-scm would refuse it. The RPM
+# does the same thing by keeping the commit in Release. The sdist being built
+# from was pinned to this same version by build-deb.sh.
+include /usr/share/dpkg/pkg-info.mk
+export SETUPTOOLS_SCM_PRETEND_VERSION = \
+	$(firstword $(subst ~, ,$(subst +, ,$(DEB_VERSION_UPSTREAM))))
+
+# Every one of these is named after the application id, and
+# tests/test_desktop_integration.py holds them to it.
+APP := io.github.RonnyPfannschmidt.GTKPass
+DEST := debian/gtkpass
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+# Deliberately empty. The suite needs a display, a private session bus and a
+# GPG key, which a package build has none of; `make test` against the installed
+# package is that gate, and CI runs it here exactly as it does for the RPM.
+override_dh_auto_test:
+
+override_dh_auto_install:
+	dh_auto_install
+	install -Dpm 0644 data/$(APP).desktop \
+		$(DEST)/usr/share/applications/$(APP).desktop
+	install -Dpm 0644 data/$(APP).metainfo.xml \
+		$(DEST)/usr/share/metainfo/$(APP).metainfo.xml
+	install -Dpm 0644 data/icons/hicolor/scalable/apps/$(APP).svg \
+		$(DEST)/usr/share/icons/hicolor/scalable/apps/$(APP).svg
+	# Installed uncompiled, as in the RPM: libglib2.0's dpkg trigger
+	# recompiles the system cache when a package adds a schema. That cache
+	# holds every application's schemas, so shipping one would overwrite the
+	# lot.
+	install -Dpm 0644 data/$(APP).gschema.xml \
+		$(DEST)/usr/share/glib-2.0/schemas/$(APP).gschema.xml
+	# The spec's %check, on the files as installed. The last one earns its
+	# line: Gio.Settings calls g_error() on a schema it cannot parse, which
+	# kills the application at startup with no traceback.
+	desktop-file-validate $(DEST)/usr/share/applications/$(APP).desktop
+	appstream-util validate-relax --nonet \
+		$(DEST)/usr/share/metainfo/$(APP).metainfo.xml
+	glib-compile-schemas --strict --dry-run \
+		$(DEST)/usr/share/glib-2.0/schemas

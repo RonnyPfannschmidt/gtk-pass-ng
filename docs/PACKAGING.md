@@ -4,7 +4,10 @@ Two artefacts from the same spec: an RPM for a package-based Fedora, and a
 systemd-sysext image for the ostree desktops — Bluefin, Silverblue, Bazzite —
 where installing a package means rebuilding the deployment and rebooting.
 
-The Flatpak is a third route with a different story; it lives in
+Debian and Ubuntu are the same two artefacts' worth of work again, from the
+same sdist; that one lives in [DEBIAN.md](DEBIAN.md).
+
+The Flatpak is a further route with a different story; it lives in
 [FLATPAK.md](FLATPAK.md). Windows is a fourth, and the story there is that
 nothing can be taken from a distribution at all — the bundle carries GTK,
 libadwaita and the interpreter with it. See [WINDOWS.md](WINDOWS.md).
