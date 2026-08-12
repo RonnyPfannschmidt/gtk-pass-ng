@@ -10,8 +10,10 @@ make deb                            # dist/deb/gtkpass_*_all.deb, for Debian tri
 DEB_TARGET=ubuntu:26.04 make deb    # ... or for the current Ubuntu LTS
 ```
 
-Nothing is released anywhere. This is `make deb` on a checkout, not a
-distribution channel: no repository, no signature, and no upload to Debian.
+A release attaches both targets' packages to its GitHub release, beside the RPMs
+and the sysext images, and that is the whole of the distribution: no apt
+repository to add, no signature, and no upload to Debian or to a PPA. Downloading
+the file and `apt install ./gtkpass_….deb` is how it is installed.
 
 ## Which targets, and why not the others
 
@@ -106,6 +108,29 @@ builds each of these in a throwaway repository and asks `dpkg
 
 The date is the commit's, not today's, so building the same commit twice gives
 the same package.
+
+### And which target it was built for
+
+A build names its target, and the target goes into the revision:
+
+```
+$ packaging/deb-version.sh debian:trixie
+0.2.1 0.2.1+git20260812.72ddf59-1~debian.trixie
+```
+
+so `make deb` produces `gtkpass_0.2.1+git20260812.72ddf59-1~debian.trixie_all.deb`
+and the Ubuntu build produces a file with a different name. Both are
+`Architecture: all` and both are built from the same sdist, but they are not the
+same package: `dh_python3` writes the interpreter's dependencies out of whatever
+apt hands the build, so trixie's are not Ubuntu's. Without the target in the
+version they are two different files with one name — which nothing notices while
+each has a CI artefact to itself, and which loses one of them the moment a
+release collects every artefact into one directory. The RPM has carried its
+`%{dist}` tag from the start; this is the same fact in dpkg's spelling.
+
+`~` again, so a package out of a real archive supersedes one of these. That is
+the convention for a build made outside the archive, and it is true here:
+nothing this produces comes from one.
 
 ## What the package installs
 

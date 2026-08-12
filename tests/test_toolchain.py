@@ -240,6 +240,27 @@ class TestCIRunsTheseTargets:
     def test_the_rpm_is_tested_through_the_target(self, workflow):
         assert "make test PYTHON=python3" in workflow
 
+    def test_every_package_ci_builds_reaches_the_release(self, workflow):
+        """A package built here and not collected there is one the release
+        goes out without, quietly.
+
+        Nothing says so at the time: the jobs are green, the release exists,
+        and the file is simply not among its assets. It is the person who
+        goes looking for it weeks later who finds out.
+        """
+        kinds = set(re.findall(r"dist/[\w/*.-]*\*[\w.-]*\.(\w+)", workflow))
+        assert kinds, "no artefact paths found; this check would pass on nothing"
+
+        release = (WORKFLOW.parent / "release.yml").read_text()
+        collected = release.split("collect what to publish", 1)[1].split(
+            "- name: write the notes", 1
+        )[0]
+
+        for kind in sorted(kinds):
+            assert f".{kind}" in collected, (
+                f"CI builds a .{kind} and the release does not collect it"
+            )
+
     def test_the_jobs_that_call_make_install_it(self, workflow):
         """A container image that has no make cannot run a Makefile target.
 

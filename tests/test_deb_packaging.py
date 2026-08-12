@@ -204,11 +204,14 @@ class TestTheVersionSortsAgainstTheRelease:
         subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "one"], check=True)
         return tmp_path
 
-    def version(self, repository: Path) -> tuple[str, str]:
+    def version(self, repository: Path, target: str | None = None) -> tuple[str, str]:
         """The upstream and Debian versions the script derives, as it prints
-        them: one line, two words."""
+        them: one line, two words.
+
+        With a target, the version it produces for a build of that release.
+        """
         result = subprocess.run(
-            [str(DEB_VERSION)],
+            [str(DEB_VERSION), *([target] if target else [])],
             cwd=repository,
             capture_output=True,
             text=True,
@@ -252,6 +255,52 @@ class TestTheVersionSortsAgainstTheRelease:
 
         assert version != "0.1.0-1"
         assert sorts_before("0.1.0-1", version), version
+
+    def test_the_target_is_in_the_version_when_one_is_named(self, repository):
+        """Two targets, two packages, and both are ``Architecture: all``.
+
+        dh_python3 derives the interpreter's dependencies from whatever apt
+        hands the build, so the trixie package is not the Ubuntu one -- but
+        their filenames are the same unless the version says which is which,
+        and a release collects every artefact into one directory.
+        """
+        self.tag(repository, "v0.1.0")
+
+        trixie = self.version(repository, "debian:trixie")[1]
+        ubuntu = self.version(repository, "ubuntu:26.04")[1]
+
+        assert trixie != ubuntu
+        assert trixie == "0.1.0-1~debian.trixie", trixie
+        # A colon is the epoch separator, so a version carrying one is not a
+        # version at all -- and dpkg is what says so, rather than this test.
+        assert ":" not in ubuntu, ubuntu
+
+    def test_a_target_build_is_superseded_by_the_archive_it_is_not_from(
+        self, repository
+    ):
+        """`~` sorts before nothing at all. These are built outside any
+        archive, so a package from a real one has to win.
+        """
+        self.tag(repository, "v0.1.0")
+
+        _, targeted = self.version(repository, "debian:trixie")
+
+        assert sorts_before(targeted, "0.1.0-1"), targeted
+
+    def test_the_target_does_not_disturb_the_ordering_it_carries(self, repository):
+        """The commit still decides which of two snapshots is newer."""
+        _, older = self.version(repository, "debian:trixie")
+        (repository / "b").write_text("b\n")
+        subprocess.run(["git", "-C", str(repository), "add", "b"], check=True)
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-qm", "two"], check=True
+        )
+        _, newer = self.version(repository, "debian:trixie")
+
+        assert older != newer
+        assert sorts_before(older, newer) or sorts_before(newer, older), (
+            f"{older} and {newer} do not sort against each other at all"
+        )
 
     def test_after_a_tag_it_sorts_after_that_release(self, repository):
         """A snapshot of work since a release, so an upgrade must not go

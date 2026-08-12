@@ -3,10 +3,12 @@
 #
 #   $ packaging/deb-version.sh
 #   0.1.0 0.1.0~git20260812.3d35ac9-1
+#   $ packaging/deb-version.sh debian:trixie
+#   0.1.0 0.1.0~git20260812.3d35ac9-1~debian.trixie
 #
 # Two words: the upstream version -- the release this is, or is a snapshot of,
 # and the version the sdist and the wheel inside are built as -- and the Debian
-# version, which carries the commit.
+# version, which carries the commit, and the target when it is given one.
 #
 # Its own script rather than a paragraph inside build-deb.sh, because the thing
 # worth checking here is an ordering, and an ordering can only be checked by
@@ -64,4 +66,25 @@ else
 fi
 
 # -1 throughout: there is one packaging of each of these, and it is this one.
-echo "${upstream} ${version}-1"
+#
+# Followed by the target, when a build names one. Two targets produce two
+# different packages -- dh_python3 writes the interpreter's dependencies out of
+# whatever apt hands it, so trixie's are not Ubuntu's -- and both are
+# Architecture: all, so without this they are two files with the same name. In
+# a job each has an artefact to itself and nothing notices; a release collects
+# every artefact into one directory, and there the second replaces the first
+# without a word. The RPM has carried its %{dist} tag from the start, and this
+# is that fact in dpkg's spelling.
+#
+# `~` again, so a package out of a real archive supersedes one of these. That is
+# the convention for a build made outside the archive, and here it is also true:
+# nothing this produces comes from one.
+#
+# A colon cannot appear in a Debian version -- that is the epoch separator -- so
+# debian:trixie is spelled debian.trixie.
+target="${1:-}"
+if [ -n "$target" ]; then
+    echo "${upstream} ${version}-1~${target//:/.}"
+else
+    echo "${upstream} ${version}-1"
+fi

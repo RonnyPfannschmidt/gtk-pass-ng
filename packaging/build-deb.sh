@@ -31,8 +31,14 @@ DEB_TARGET="${DEB_TARGET:-debian:trixie}"
 # so this is a label rather than a destination.
 DEB_SUITE="${DEB_SUITE:-unstable}"
 
-read -r UPSTREAM_VERSION DEB_VERSION < <(./packaging/deb-version.sh)
-# The upstream part, which is what the orig tarball has to be named after.
+# Named the target, so the version says which release the package was built
+# for and the two targets stop producing the same filename. deb-version.sh has
+# the reasoning.
+read -r UPSTREAM_VERSION DEB_VERSION < <(./packaging/deb-version.sh "$DEB_TARGET")
+# The upstream part, which is what the orig tarball has to be named after. The
+# revision is everything from the last `-`, target and all: an orig tarball
+# belongs to the upstream release, not to the packaging of it, and one named
+# after the target would be a different tarball per target for identical bytes.
 ORIG_VERSION="${DEB_VERSION%-*}"
 
 case "$DEB_VERSION" in

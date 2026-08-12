@@ -1,8 +1,8 @@
 # Cutting a release.
 #
 # Pushing a v* tag builds everything, checks it, publishes the wheel and sdist
-# to PyPI, and attaches the RPMs, the sysext images and the Windows zip and
-# installer to a GitHub release. See
+# to PyPI, and attaches the RPMs, the .debs, the sysext images and the Windows
+# zip and installer to a GitHub release. See
 # docs/RELEASING.md, which also covers the one-time PyPI setup this needs.
 #
 # Running it by hand (workflow_dispatch) builds and checks everything and
@@ -95,9 +95,25 @@ jobs:
         run: |
           mkdir -p upload
           find artefacts -name '*.rpm' -exec cp {} upload/ \;
+          find artefacts -name '*.deb' -exec cp {} upload/ \;
           find artefacts -name '*.raw' -exec cp {} upload/ \;
           find artefacts -name '*.tar.gz' -o -name '*.whl' \
             | xargs -r -I{} cp {} upload/
+
+          # Everything lands in one directory here, and two files of the same
+          # name would leave one of them silently unpublished. Every package
+          # names what it was built for -- the RPM in its %{dist} tag, the .deb
+          # in its version, the sysext image in its filename -- so a collision
+          # means one of those stopped being true, and this says so rather than
+          # letting a release go out short of a package nobody thinks to count.
+          duplicates=$(find artefacts -type f \
+            \( -name '*.rpm' -o -name '*.deb' -o -name '*.raw' \) \
+            -printf '%f\n' | sort | uniq -d)
+          if [ -n "$duplicates" ]; then
+            echo "::error::two artefacts share a name, so one would replace the other:"
+            echo "$duplicates"
+            exit 1
+          fi
 
           # The Windows build is non-blocking, so this is the one place that
           # has to cope with an artefact simply not being there. `find` matching
@@ -132,6 +148,7 @@ jobs:
             echo
             echo 'Installing: [README](https://github.com/'"${GITHUB_REPOSITORY}"'#running-it) ·' \
                  '[RPM and systemd-sysext](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/PACKAGING.md) ·' \
+                 '[Debian and Ubuntu](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/DEBIAN.md) ·' \
                  '[Flatpak](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/FLATPAK.md) ·' \
                  '[Windows](https://github.com/'"${GITHUB_REPOSITORY}"'/blob/'"$tag"'/docs/WINDOWS.md)'
             echo
