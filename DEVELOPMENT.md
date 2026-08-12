@@ -78,6 +78,7 @@ The Makefile exports it for you.
 | `make schemas` | compile the GSettings schema |
 | `make hooks` | install the pre-commit hook into `.git` |
 | `make rpm` | build the RPM in a Fedora container |
+| `make deb` | build the .deb in a Debian or Ubuntu container |
 | `make sysext` | build a systemd-sysext image for the ostree desktops |
 
 ## Never test against your own passwords

@@ -1,0 +1,5 @@
+gtk-pass-ng (@VERSION@) @SUITE@; urgency=medium
+
+  * Built from git; see the release notes.
+
+ -- Ronny Pfannschmidt <opensource@ronnypfannschmidt.de>  @DATE@

@@ -1,0 +1,50 @@
+# The Debian source package, and what it produces.
+#
+# The counterpart of packaging/gtkpass.spec, and the same package: built from
+# the same sdist, installing the same files. Source is gtk-pass-ng, the name
+# this is distributed under, and the binary package is gtkpass -- exactly as
+# the RPM is, and for the reason pyproject.toml gives.
+#
+# Almost nothing here is written twice. dh_python3 reads the wheel's own
+# metadata and turns it into ${python3:Depends}, so PyGObject, python-gnupg and
+# secretstorage arrive as python3-gi, python3-gnupg and python3-secretstorage
+# without a mapping table to keep. What it cannot know is below: the versions
+# of GTK and libadwaita the application needs, which no Python metadata
+# expresses, and which tests/test_deb_packaging.py holds to the same floors the
+# spec names.
+Source: gtk-pass-ng
+Section: utils
+Priority: optional
+Maintainer: Ronny Pfannschmidt <opensource@ronnypfannschmidt.de>
+Build-Depends: debhelper-compat (= 13),
+               dh-python,
+               pybuild-plugin-pyproject,
+               python3-all,
+               python3-setuptools,
+               python3-setuptools-scm,
+               desktop-file-utils,
+               appstream-util,
+               libglib2.0-bin
+Standards-Version: 4.7.0
+Homepage: https://github.com/RonnyPfannschmidt/gtk-pass-ng
+Rules-Requires-Root: no
+
+Package: gtkpass
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         gir1.2-gtk-4.0 (>= 4.10),
+         gir1.2-adw-1 (>= 1.4),
+         gnupg
+# Per backend rather than per application: the Pass backend shells out to
+# pass(1) and syncing a store needs git, while a user with only the Direct GPG
+# backend configured needs neither.
+Recommends: pass, git
+Description: GTK4 frontend for password stores
+ GTKPass is a GTK4/Libadwaita frontend for password stores on GNOME/Linux, in
+ the spirit of qtpass. It is not a password manager of its own: it stores
+ nothing and owns no format.
+ .
+ It presents pluggable backends, one of which reads and writes the standard
+ passwordstore layout, so an existing store stays usable from pass(1) and every
+ other tool that speaks it.

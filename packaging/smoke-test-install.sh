@@ -30,7 +30,11 @@ import gtkpass.safety as safety
 
 location = Path(gtkpass.__file__).resolve()
 print(f"    {location}")
-assert "site-packages" in location.parts, f"not an installed copy: {location}"
+# Both spellings of the same directory. Debian calls it dist-packages and puts
+# it at /usr/lib/python3/dist-packages, so a .deb that was correct in every
+# other respect failed here on the name alone.
+installed = {"site-packages", "dist-packages"} & set(location.parts)
+assert installed, f"not an installed copy: {location}"
 
 # The no-wrapper design in one assertion. If this is false, an installed build
 # refuses its owner's store and every backend fails to load -- which is exactly

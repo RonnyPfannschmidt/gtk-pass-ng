@@ -7,7 +7,8 @@ git push origin v0.3.0
 
 That is the whole of it, and it is the only step. `.github/workflows/release.yml`
 does the rest: runs all of CI, publishes the wheel and sdist to PyPI, and
-attaches the RPMs and sysext images to a GitHub release it creates.
+attaches the RPMs, the `.deb`s and the sysext images to a GitHub release it
+creates.
 
 **Do not create the release on GitHub first.** Pushing the tag is what starts
 the workflow, and the workflow makes the release. Creating one by hand

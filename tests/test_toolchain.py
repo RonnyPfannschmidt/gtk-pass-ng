@@ -57,19 +57,32 @@ def split_jobs(workflow: str) -> dict[str, str]:
     return jobs
 
 
+def is_install_line(line: str) -> bool:
+    """Whether a line starts a package installation.
+
+    Both package managers, because the Linux jobs are no longer all Fedora:
+    the Debian and Ubuntu ones say apt-get. Reading only dnf did not report a
+    job's packages as missing -- it reported the job as having none at all,
+    which the checks below then passed silently.
+    """
+    return (" install" in line) and ("dnf " in line or "apt-get " in line)
+
+
 def installed_packages(job: str) -> set[str]:
-    """What a job's `dnf install` lines name, continuations included."""
+    """What a job's install lines name, continuations included."""
     packages: set[str] = set()
     collecting = False
     for line in job.splitlines():
-        if "dnf " in line and " install" in line:
+        if is_install_line(line):
             collecting = True
             line = line.split(" install", 1)[1]
         elif not collecting:
             continue
         packages.update(word for word in line.split() if not word.startswith("-"))
         collecting = line.rstrip().endswith("\\")
-    return {package.rstrip("\\") for package in packages}
+    # The trailing backslash of a continued line is a word of its own, and
+    # rstripping it leaves an empty one behind.
+    return {stripped for package in packages if (stripped := package.rstrip("\\"))}
 
 
 class TestChoosingTheInterpreter:
@@ -180,6 +193,33 @@ class TestOneDefinitionOfRunningTheSuite:
         assert target in phony.split()
 
 
+class TestReadingWhatAJobInstalls:
+    """The checks below are only as good as this, and it fails open.
+
+    A job whose install line it cannot read has no packages as far as it is
+    concerned, and every assertion about what a job installs then passes.
+    """
+
+    def test_a_dnf_line_with_continuations(self):
+        job = """
+      - name: install dependencies
+        run: |
+          dnf -y --setopt=install_weak_deps=False install \\
+            make git-core python3-pytest
+"""
+        assert installed_packages(job) == {"make", "git-core", "python3-pytest"}
+
+    def test_an_apt_line_too(self):
+        """Debian and Ubuntu are Linux jobs the same as the Fedora ones."""
+        job = """
+      - name: install dependencies
+        run: |
+          apt-get install -y --no-install-recommends \\
+            make git python3-pytest
+"""
+        assert installed_packages(job) == {"make", "git", "python3-pytest"}
+
+
 class TestCIRunsTheseTargets:
     @pytest.fixture
     def workflow(self) -> str:
@@ -199,6 +239,27 @@ class TestCIRunsTheseTargets:
 
     def test_the_rpm_is_tested_through_the_target(self, workflow):
         assert "make test PYTHON=python3" in workflow
+
+    def test_every_package_ci_builds_reaches_the_release(self, workflow):
+        """A package built here and not collected there is one the release
+        goes out without, quietly.
+
+        Nothing says so at the time: the jobs are green, the release exists,
+        and the file is simply not among its assets. It is the person who
+        goes looking for it weeks later who finds out.
+        """
+        kinds = set(re.findall(r"dist/[\w/*.-]*\*[\w.-]*\.(\w+)", workflow))
+        assert kinds, "no artefact paths found; this check would pass on nothing"
+
+        release = (WORKFLOW.parent / "release.yml").read_text()
+        collected = release.split("collect what to publish", 1)[1].split(
+            "- name: write the notes", 1
+        )[0]
+
+        for kind in sorted(kinds):
+            assert f".{kind}" in collected, (
+                f"CI builds a .{kind} and the release does not collect it"
+            )
 
     def test_the_jobs_that_call_make_install_it(self, workflow):
         """A container image that has no make cannot run a Makefile target.
