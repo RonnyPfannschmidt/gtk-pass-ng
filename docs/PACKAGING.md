@@ -46,7 +46,15 @@ which about 40 was `dnf`.
 The layers are ordered by how often their inputs change: the fixed toolchain,
 then the spec's `BuildRequires`, then what `%pyproject_buildrequires` will ask
 for. A source change reuses all of them, so an unchanged toolchain costs about a
-second and installs nothing. `make sysext` is 17 seconds now.
+second and installs nothing. `make sysext` is 13 seconds now.
+
+That last layer is derived rather than written down.
+`packaging/buildreqs-from-pyproject.py` reads `pyproject.toml` and prints
+`python3dist(...)` for each requirement — every Fedora package that ships a
+Python distribution provides that, so no table of PyPI-name-to-package-name has
+to be kept either. A second copy of a dependency list is one that goes stale
+quietly, showing up only as a build that installs things again; this way adding
+a dependency to `pyproject.toml` is the whole of adding it.
 
 `podman build` is the staleness check — there is no stamp to keep in step — and
 the Makefile treats the Containerfile as an input of the package, so changing
