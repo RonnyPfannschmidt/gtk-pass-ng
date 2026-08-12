@@ -37,6 +37,13 @@ def run_in_application(callback):
     def on_activate(app):
         try:
             captured["value"] = callback(app)
+        except BaseException as error:
+            # An exception out of a GObject signal handler is printed and
+            # swallowed: the application carries on, the callback's result never
+            # arrives, and the test fails on the assertion below instead --
+            # "the application never activated", which is both untrue and
+            # useless. Carry it out by hand and raise it where it can be read.
+            captured["error"] = error
         finally:
             app.quit()
 
@@ -46,6 +53,8 @@ def run_in_application(callback):
     app.connect("activate", on_activate)
     app.run([])
 
+    if "error" in captured:
+        raise captured["error"]
     assert "value" in captured, "the application never activated"
     return captured["value"]
 
@@ -621,12 +630,29 @@ class TestNarrowWindows:
         A presented window keeps its GApplication alive, and the next test to
         run one under the same application id becomes a remote instance of it
         -- which never activates, so the test after this one fails instead.
+
+        The width is checked rather than assumed, because asking is not getting.
+        GTK will not give a window more room than the monitor has, so on a small
+        screen a window asked for 1000 points is quietly 640 -- which is under
+        the breakpoint, so the wide case read a narrow layout and asserted the
+        opposite of what it meant, and passed. scripts/headless-session.sh sets
+        a screen big enough now; this is what says so when something else is not.
+
+        Near enough rather than exactly, because get_width() measures the
+        widget's allocation and the client-side decorations draw a shadow
+        outside it: a window presented at 400 points measures 390, always and
+        everywhere. The allowance is loose on purpose. What it has to catch is a
+        request that was truncated, and the one that got through was 1000
+        arriving as 640.
         """
         window = loaded_window(app)
         window.set_default_size(width, 600)
         window.present()
         try:
-            pump_until(lambda: window.get_width() == width)
+            assert pump_until(lambda: window.get_width() >= width - 32), (
+                f"the window never reached {width} points wide: it is "
+                f"{window.get_width()}, so this tests a layout nobody asked for"
+            )
             pump_until(lambda: settled(window))
             return read(window)
         finally:
