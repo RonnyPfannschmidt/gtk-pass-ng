@@ -616,3 +616,85 @@ filesystems=~/.password-store:create;
 
         assert "--filesystem=~/.ssh/known_hosts:ro" in explained
         assert "--filesystem=~/.ssh/config:ro" not in explained
+
+
+class TestAStoreWithNoCommitIdentity:
+    """git refuses to commit without one, and says so in a way nobody acts on.
+
+    The message it prints is about `git config --global`, which inside a
+    sandbox writes somewhere private to the application -- so the advice is
+    not wrong exactly, but it is not the fix either. What is missing is
+    usually an identity for this particular store.
+    """
+
+    IDENTITY_FAILURE = (
+        "Author identity unknown\n\n*** Please tell me who you are.\n\n"
+        "fatal: unable to auto-detect email address (got 'user@host.(none)')"
+    )
+
+    SANDBOXED = """\
+[Application]
+name=io.github.RonnyPfannschmidt.GTKPass
+
+[Context]
+shared=ipc;
+sockets=gpg-agent;
+filesystems=~/.password-store:create;xdg-config/git:ro;
+"""
+
+    @pytest.fixture
+    def unsandboxed(self, tmp_path, monkeypatch):
+        from gtkpass import sandbox
+
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", tmp_path / "absent")
+
+    def sandbox_with(self, tmp_path, monkeypatch, contents):
+        from gtkpass import sandbox
+
+        info = tmp_path / "flatpak-info"
+        info.write_text(contents)
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+    def test_it_says_how_to_give_the_store_one(self, store_repo, unsandboxed):
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert "user.email" in explained
+        assert "git -C" in explained or "config" in explained
+
+    def test_it_names_this_store(self, store_repo, unsandboxed):
+        """Advice about `--global` is what git already said and it did not help."""
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert str(store_repo) in explained
+
+    def test_the_granted_sandbox_is_not_told_to_grant_it_again(
+        self, store_repo, tmp_path, monkeypatch
+    ):
+        """The manifest grants it, so a mounted config is the normal case."""
+        self.sandbox_with(tmp_path, monkeypatch, self.SANDBOXED)
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert "flatpak override" not in explained
+
+    def test_a_revoked_grant_is_named(self, store_repo, tmp_path, monkeypatch):
+        """Someone who took it away with --nofilesystem should learn that."""
+        self.sandbox_with(
+            tmp_path, monkeypatch, self.SANDBOXED.replace("xdg-config/git:ro;", "")
+        )
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert "--filesystem=xdg-config/git:ro" in explained
+        assert "flatpak override --user" in explained
+
+    def test_anything_else_is_still_passed_through(self, store_repo, unsandboxed):
+        store = open_store(store_repo)
+
+        assert store.explain("some other failure") == "some other failure"

@@ -43,6 +43,23 @@ finish-args:
   # The Secret Service backend talks to the session keyring.
   - --talk-name=org.freedesktop.secrets
 
+  # git refuses to commit without an author identity, and inside a sandbox it
+  # has none: flatpak points XDG_CONFIG_HOME at ~/.var/app/$FLATPAK_ID/config,
+  # so the host's ~/.config/git is not what git reads. Without this the store
+  # is committed to on every write by a git that stops at "unable to
+  # auto-detect email address", and a local commit is not an opt-in feature --
+  # it is on for every git-backed store and works everywhere but here.
+  #
+  # xdg-config/git rather than ~/.gitconfig: flatpak mounts this one at both
+  # the host path and the app's redirected XDG directory, so an
+  # `includeIf gitdir:` chain whose paths are written ~/.config/git/... still
+  # resolves. Checked against flatpak 1.18.0 -- the grant on ~/.gitconfig alone
+  # mounts the file but leaves those includes dangling.
+  #
+  # Read-only, and only git's own configuration directory: no keys, no
+  # credentials, nothing outside ~/.config/git.
+  - --filesystem=xdg-config/git:ro
+
   # Deliberately NOT requested here: --socket=ssh-auth and --share=network.
   #
   # Syncing a store with a git remote needs both, but most stores have no

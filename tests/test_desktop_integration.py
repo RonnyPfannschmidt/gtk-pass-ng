@@ -194,6 +194,25 @@ class TestTheFlatpakManifest:
         assert "- --filesystem=~/.ssh:ro" not in manifest
         assert "- --filesystem=~/.ssh\n" not in manifest
 
+    def test_the_git_configuration_directory_is_readable(self, manifest):
+        """Without it git has no author identity and refuses to commit.
+
+        flatpak points XDG_CONFIG_HOME at the app's own directory, so the
+        host's ~/.config/git is not what git reads unless it is mounted, and a
+        local commit is not an opt-in feature -- it is on for every git-backed
+        store.
+        """
+        assert "- --filesystem=xdg-config/git:ro" in manifest
+
+    def test_the_git_configuration_grant_is_read_only(self, manifest):
+        """git never writes it, and the application has no business doing so."""
+        granted = [
+            line.strip()
+            for line in manifest.splitlines()
+            if line.strip().startswith("- --filesystem=xdg-config/git")
+        ]
+        assert granted == ["- --filesystem=xdg-config/git:ro"]
+
     def test_git_is_still_bundled(self, manifest):
         """Local commits need git regardless of whether a remote exists."""
         assert "name: git" in manifest

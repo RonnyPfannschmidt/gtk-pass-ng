@@ -69,6 +69,13 @@ _UNKNOWN_HOST_KEY = "Host key verification failed"
 #: the kind of failure worth translating.
 _UNRESOLVED_HOSTNAME = "Could not resolve hostname"
 
+#: What git says when it cannot work out who is committing. It prints advice of
+#: its own alongside this, about `git config --global` -- which inside a sandbox
+#: writes to a directory private to the application, so it is not the fix even
+#: though it is not wrong. Matched on the one line that is stable: LC_ALL=C is
+#: pinned in _build_env, so the English is not the user's locale's.
+_NO_COMMIT_IDENTITY = "unable to auto-detect email address"
+
 
 def redact(text: str) -> str:
     """Strip credentials out of any URL before the text is shown or logged."""
@@ -162,7 +169,32 @@ class GitStore:
         if _UNRESOLVED_HOSTNAME in detail:
             remedy = self._ssh_config_remedy()
             return f"{detail}\n{remedy}" if remedy else detail
+        if _NO_COMMIT_IDENTITY in detail:
+            return f"{detail}\n{self._commit_identity_remedy()}"
         return detail
+
+    def _commit_identity_remedy(self) -> str:
+        """How to give this store an author, since git's own advice does not.
+
+        git points at `git config --global`, and in a sandbox that writes to a
+        directory only this application can see -- an identity that exists
+        nowhere else and explains nothing to whoever reads the history later.
+        The store's own configuration is the honest place for it, and it is the
+        one git will still find on the next machine the store is cloned to.
+        """
+        remedy = (
+            "git has no author identity here, so it will not commit. Give this "
+            f"store one with:\n"
+            f'git -C {self.store_dir} config user.email "you@example.com"\n'
+            f'git -C {self.store_dir} config user.name "Your Name"'
+        )
+        if sandbox.has_filesystem(sandbox.GIT_CONFIG):
+            return remedy
+        return (
+            f"{remedy}\nThis sandbox also cannot read the host's git "
+            f"configuration, so an identity set there does not reach it:\n"
+            f"{sandbox.override_command([sandbox.GIT_CONFIG_PERMISSION])}"
+        )
 
     def _host_key_remedy(self) -> str:
         """What to do about a host key this machine has not accepted.

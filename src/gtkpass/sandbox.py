@@ -83,6 +83,26 @@ SSH_KNOWN_HOSTS = "~/.ssh/known_hosts"
 SSH_FILES = (SSH_CONFIG, SSH_KNOWN_HOSTS)
 SSH_FILE_PERMISSIONS = tuple(f"--filesystem={path}:ro" for path in SSH_FILES)
 
+#: git's own configuration directory on the host, and the grant that mounts it.
+#:
+#: Unlike the ssh files this one *is* in the manifest, because what it fixes is
+#: not an opt-in feature. git refuses to commit without an author identity, and
+#: inside a sandbox it has none: flatpak points ``$XDG_CONFIG_HOME`` at
+#: ``~/.var/app/$FLATPAK_ID/config``, so the host's ``~/.config/git`` is not
+#: what git reads. Every write to a git-backed store commits, so without this
+#: the application fails on save rather than on some feature nobody turned on.
+#:
+#: ``xdg-config/git`` rather than ``~/.gitconfig``: flatpak mounts this one at
+#: both the host path and the app's redirected XDG directory, so an
+#: ``includeIf gitdir:`` chain whose paths are written ``~/.config/git/...``
+#: still resolves. Checked against flatpak 1.18.0 -- granting ``~/.gitconfig``
+#: alone mounts that file and leaves those includes dangling.
+#:
+#: Still worth checking at runtime, because a manifest grant can be taken away
+#: with ``--nofilesystem`` and the failure then looks identical.
+GIT_CONFIG = "xdg-config/git"
+GIT_CONFIG_PERMISSION = f"--filesystem={GIT_CONFIG}:ro"
+
 #: What flatpak appends to a filesystem entry to say how it is mounted. Stripped
 #: before comparing paths, because the grant and the need are the same file
 #: whether it was mounted :ro or :create.

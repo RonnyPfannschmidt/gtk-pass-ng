@@ -97,6 +97,56 @@ application that manages keys cannot get away with this;
 [Kleopatra](https://flathub.org/apps/org.kde.kleopatra) takes
 `--filesystem=~/.gnupg:create` plus `--filesystem=xdg-run/gnupg:ro` instead.
 
+## git's own configuration, and why it *is* in the manifest
+
+The one grant here that is not opt-in, because what it fixes is not an opt-in
+feature. Every write to a git-backed store commits, and git refuses to commit
+without an author identity. Inside a sandbox it has none:
+
+```
+$ flatpak run --command=sh io.github.RonnyPfannschmidt.GTKPass
+git config --list             → 0 settings visible
+git var GIT_COMMITTER_IDENT   → fatal: unable to auto-detect email address
+git commit                    → rc=128
+```
+
+flatpak points `$XDG_CONFIG_HOME` at `~/.var/app/$FLATPAK_ID/config`, so git's
+second user-specific config file is one private to the application, and the
+host's `~/.config/git` is not what it reads. `~/.gitconfig` is resolved against
+`$HOME`, which still points at the real home — where nothing is mounted. So
+without a grant git sees no configuration at all, and the application fails on
+*save*, not on some feature nobody turned on.
+
+```yaml
+- --filesystem=xdg-config/git:ro
+```
+
+**`xdg-config/git`, not `~/.gitconfig`.** Both mount, and they are not
+equivalent. Measured inside the packaged application against flatpak 1.18.0:
+
+| Grant | Settings git sees | `includeIf` chain resolves |
+| --- | --- | --- |
+| none | 0 | — |
+| `--filesystem=~/.gitconfig:ro` | the file, and only it | no |
+| `--filesystem=xdg-config/git:ro` | the whole directory | **yes** |
+
+flatpak mounts `xdg-config/git` at *both* the host path and the app's
+redirected XDG directory, so an `includeIf gitdir:` chain whose `path` values
+are written `~/.config/git/…` still finds its fragments — those expand against
+`$HOME`, and the host path is there. Granting `~/.gitconfig` alone mounts that
+one file and leaves every include dangling.
+
+Read-only, and only git's own configuration directory: no keys, no credentials,
+nothing outside `~/.config/git`.
+
+It is still checked at runtime, because a manifest grant can be taken away with
+`--nofilesystem` and the failure then looks identical. And the grant is not the
+whole answer: a store that no `includeIf` covers has no identity even on the
+host, so `GitStore.explain()` translates git's failure into the command that
+gives *this store* one. git's own advice — `git config --global` — writes to the
+per-app directory inside a sandbox, an identity that exists nowhere else and
+explains nothing to whoever reads the history later.
+
 ## SSH, and why it is not in the manifest
 
 The sync action pulls and pushes a store that has a git remote. Over ssh that
