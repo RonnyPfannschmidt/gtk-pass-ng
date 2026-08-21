@@ -171,6 +171,29 @@ class TestTheFlatpakManifest:
         """Whoever reads the manifest should find the way to turn sync on."""
         assert "flatpak override --user --socket=ssh-auth --share=network" in manifest
 
+    def test_the_ssh_files_are_not_requested(self, manifest):
+        """An ssh remote needs them; opening a store does not.
+
+        And ~/.ssh/config is an inventory of the machines someone reaches, so
+        it is the user's call rather than the manifest's.
+        """
+        granted = [
+            line
+            for line in manifest.splitlines()
+            if line.strip().startswith("- --filesystem=~/.ssh")
+        ]
+        assert granted == [], f"an ~/.ssh grant is requested statically: {granted}"
+
+    def test_the_ssh_file_override_is_documented(self, manifest):
+        """The failure it fixes reads as DNS, so the cure has to be findable."""
+        assert "--filesystem=~/.ssh/config:ro" in manifest
+        assert "--filesystem=~/.ssh/known_hosts:ro" in manifest
+
+    def test_the_whole_ssh_directory_is_never_granted(self, manifest):
+        """It mixes the private keys in with the two files actually wanted."""
+        assert "- --filesystem=~/.ssh:ro" not in manifest
+        assert "- --filesystem=~/.ssh\n" not in manifest
+
     def test_git_is_still_bundled(self, manifest):
         """Local commits need git regardless of whether a remote exists."""
         assert "name: git" in manifest

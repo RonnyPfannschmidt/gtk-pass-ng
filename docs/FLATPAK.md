@@ -121,6 +121,10 @@ commits locally, which needs neither permission.
 action shows that exact command, copyable, when they have not — raised before
 any git process starts, so nothing blocks on a socket that was never mounted.
 
+That command is necessary but not sufficient for an ssh remote: two files out
+of `~/.ssh` are needed as well, and are granted separately. See
+[`~/.ssh/config` and `known_hosts`](#sshconfig-and-known_hosts) below.
+
 ### An extension cannot carry the permission instead
 
 Worth writing down because it looks like it should. Checked against
@@ -154,13 +158,88 @@ describes it as the effective configuration, so it already accounts for every
 override, and reading it is a file read rather than a subprocess — which matters
 because it decides whether a button is sensitive.
 
-### `known_hosts`
+### `~/.ssh/config` and `known_hosts`
 
-Host verification needs it, which would mean `--filesystem=~/.ssh:ro`. That
-grants every private key in the same breath, since `~/.ssh` mixes both and there
-is no narrower spelling, so it is refused. `GitStore` runs ssh with
-`StrictHostKeyChecking=accept-new` instead, and a host-key failure is reported
-as itself rather than as a bug.
+The agent socket and the network are not enough. An ssh remote needs two files
+out of `~/.ssh` as well, and without them the failure does not look like a
+permissions problem at all — which is the reason this section exists. Both
+symptoms below were reproduced against flatpak 1.18.0 with `--socket=ssh-auth
+--share=network` already granted:
+
+| Missing | What ssh says |
+| --- | --- |
+| `~/.ssh/config` | `ssh: Could not resolve hostname gh: Name or service not known` |
+| `~/.ssh/known_hosts` | `No ED25519 host key is known for github.com and you have requested strict checking` |
+
+`config` is where `Host` aliases are defined, so a remote written as
+`git@gh:me/store.git` is not a hostname at all until that file has been read. A
+sandbox without it hands the alias to the resolver verbatim and gets a DNS
+error for a cause that is a missing permission.
+
+`known_hosts` is the other half. `GitStore._build_env` pins
+`StrictHostKeyChecking=yes` — not `accept-new`, which would take whatever key
+answers the first connection, precisely when somebody in the way cannot be
+detected — so every ssh remote stops at host key verification without it. Worse
+than stopping: the obvious remedy is a trap. `ssh-keyscan host >> ~/.ssh/known_hosts`
+run on the host changes a file the sandbox cannot see, so it appears to do
+nothing.
+
+**Not `--filesystem=~/.ssh:ro`.** That grants every private key in the same
+breath, since `~/.ssh` mixes both and there is no narrower spelling of the
+directory. There does not need to be — `--filesystem` takes a *file* path:
+
+```bash
+flatpak override --user --filesystem=~/.ssh/config:ro \
+    --filesystem=~/.ssh/known_hosts:ro io.github.RonnyPfannschmidt.GTKPass
+```
+
+Verified from inside the resulting sandbox: `ls ~/.ssh` shows exactly those two
+files, and nothing else. No `id_ed25519`, no `id_rsa`. Read-only because ssh
+has no reason to write either — in batch mode with strict checking it never
+appends to `known_hosts`, and it never writes `config` at all.
+
+These are opt-in for the same reason the socket is, and one more: an https
+remote needs neither, and `~/.ssh/config` is an inventory of the machines
+someone reaches — hostnames, ports, usernames, jump hosts. It carries no
+secret, but it is not nothing, and whether GTKPass gets to read it is the
+user's call rather than the manifest's.
+
+`GitStore.explain()` recognises both failures, checks `sandbox.has_filesystem()`
+to confirm the grant is actually the cause, and puts the command above on
+screen. Outside a sandbox, or once the file is mounted, an unresolved name is
+DNS or a typo and the error is passed through unchanged — a permissions story
+told over a real DNS failure sends the user to fix something that is not broken.
+
+#### `IdentitiesOnly yes` needs the `.pub` too
+
+The one case the two files do not cover, and it fails in a way that looks like
+the agent is broken. A `Host` block combining `IdentitiesOnly yes` with
+`IdentityFile ~/.ssh/id_x` restricts ssh to that one key, and ssh has to read
+either `id_x` or `id_x.pub` to work out *which* agent key that is. Inside the
+sandbox neither exists, so:
+
+```
+no such identity: /home/you/.ssh/id_x: No such file or directory
+…: Permission denied (publickey).
+```
+
+Granting the **public** half fixes it — ssh then resolves the explicit identity
+onto the agent key (`Will attempt key: …/id_x ED25519 … explicit agent`):
+
+```bash
+flatpak override --user --filesystem=~/.ssh/id_x.pub:ro io.github.RonnyPfannschmidt.GTKPass
+```
+
+A `.pub` file is public by definition, so this gives away nothing. There is no
+glob spelling in `--filesystem`, so it is one grant per key, and GTKPass does
+not suggest it automatically: guessing which key a `Host` block meant would
+mean parsing `~/.ssh/config`, which is the file it cannot read.
+
+Two smaller ones with no remedy worth automating: an `Include` directive points
+at files that are not mounted, and a `UserKnownHostsFile` pointing somewhere
+other than the default is not covered by the grant above. A `ControlPath` under
+`~/.ssh` is not writable inside the sandbox, but ssh warns and carries on
+without multiplexing.
 
 Keys not loaded into an agent cannot be used at all.
 

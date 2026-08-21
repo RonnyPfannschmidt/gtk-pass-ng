@@ -57,6 +57,21 @@ finish-args:
   # granted, and the sync action shows that exact command when they have not.
   # The bundled git below still commits locally, which needs neither.
   #
+  # An ssh remote needs two files out of ~/.ssh as well, opt-in for the same
+  # reason -- an https remote wants neither, and ~/.ssh/config is an inventory
+  # of the machines someone reaches:
+  #
+  #   flatpak override --user --filesystem=~/.ssh/config:ro \
+  #       --filesystem=~/.ssh/known_hosts:ro io.github.RonnyPfannschmidt.GTKPass
+  #
+  # config is where Host aliases live, so without it a remote written as
+  # git@store:me/store.git fails with "Could not resolve hostname store" -- a
+  # DNS-shaped error with a permissions-shaped cause. known_hosts is the other
+  # half: the sync runs ssh with StrictHostKeyChecking=yes, so without it every
+  # ssh remote stops at host key verification instead, and accepting the key on
+  # the host does not carry in. GitStore.explain() recognises both failures and
+  # puts the command above on screen.
+  #
   # An extension cannot carry these instead: flatpak-metadata(5) gives
   # [Extension NAME] and [ExtensionOf] no [Context] group, so an extension is
   # only content mounted into a sandbox whose permissions were already fixed.
@@ -74,8 +89,11 @@ finish-args:
   #     arbitrary command execution on the host: not a hole in the sandbox but
   #     the end of it. pass is bundled below instead, so it runs inside.
   #   --filesystem=~/.ssh:ro
-  #     would hand over the private keys along with known_hosts. The agent
-  #     socket, once the user grants it, authenticates without them.
+  #     would hand over every private key along with the two files that are
+  #     actually wanted, and there is no narrower spelling of the directory.
+  #     There does not need to be: --filesystem takes a file path, so the two
+  #     are granted one at a time, above. The agent socket, once the user
+  #     grants it, authenticates without any key entering the sandbox.
   #   --filesystem=home, --filesystem=host
   #     a password manager asking for the whole home directory is the thing a
   #     sandbox exists to prevent.

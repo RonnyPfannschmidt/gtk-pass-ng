@@ -7,6 +7,11 @@ chance that someone's store has a remote. The user grants them with ``flatpak
 override`` if and when they want sync, so the application has to know whether it
 has them, and be able to say exactly what to run when it does not.
 
+An ssh remote needs two files out of ``~/.ssh`` on top of those, granted one
+file at a time so that no private key comes with them -- see ``SSH_FILES``. They
+are asked for separately because they are needed by ssh rather than by syncing:
+an https remote wants neither.
+
 The obvious probe is wrong, which is the reason this module exists rather than
 an ``os.environ`` lookup at the call site. ``$SSH_AUTH_SOCK`` survives into a
 sandbox that was denied the socket: checked against flatpak 1.18.0, running the
@@ -34,7 +39,8 @@ condition on system capabilities rather than on anything the user chose.
 
 import configparser
 import logging
-from pathlib import Path
+from collections.abc import Sequence
+from pathlib import Path, PurePosixPath
 
 from gtkpass.config import APP_ID
 
@@ -47,6 +53,44 @@ FLATPAK_INFO = Path("/.flatpak-info")
 #: Permissions sync needs, in the spelling `flatpak override` accepts.
 SYNC_SOCKET = "ssh-auth"
 SYNC_PERMISSIONS = (f"--socket={SYNC_SOCKET}", "--share=network")
+
+#: The two files out of ``~/.ssh`` that an ssh remote cannot do without, and
+#: the only two this ever names.
+#:
+#: ``config`` is where ``Host`` aliases live. A remote written as
+#: ``git@store:me/store.git`` is not a hostname at all until that file has been
+#: read, so a sandbox without it fails with *"Could not resolve hostname
+#: store"* -- a DNS-shaped error with a permissions-shaped cause, which is why
+#: ``GitStore.explain`` translates it rather than passing it on.
+#:
+#: ``known_hosts`` is the other half. ``GitStore`` pins
+#: ``StrictHostKeyChecking=yes``, so without it every ssh remote stops at host
+#: key verification instead, and accepting the key on the *host* changes
+#: nothing inside.
+#:
+#: Granted per file, never as ``--filesystem=~/.ssh:ro``. That directory mixes
+#: the private keys in with these two, there is no narrower spelling of it, and
+#: handing a password manager every key on the machine to resolve a hostname is
+#: not a trade worth making. ``flatpak --filesystem`` takes a file path, so it
+#: does not have to be: checked against flatpak 1.18.0, a sandbox granted these
+#: two sees a ``~/.ssh`` containing exactly them.
+#:
+#: Read-only because ssh has no reason to write either. In batch mode with
+#: strict checking it never appends to ``known_hosts``, and it never writes
+#: ``config`` at all.
+SSH_CONFIG = "~/.ssh/config"
+SSH_KNOWN_HOSTS = "~/.ssh/known_hosts"
+SSH_FILES = (SSH_CONFIG, SSH_KNOWN_HOSTS)
+SSH_FILE_PERMISSIONS = tuple(f"--filesystem={path}:ro" for path in SSH_FILES)
+
+#: What flatpak appends to a filesystem entry to say how it is mounted. Stripped
+#: before comparing paths, because the grant and the need are the same file
+#: whether it was mounted :ro or :create.
+_FILESYSTEM_MODES = frozenset({"ro", "rw", "create"})
+
+#: Grants that cover everything underneath them, so nothing narrower needs
+#: asking for. ``host`` is the whole filesystem; ``home`` is all of ``~``.
+_BLANKET_FILESYSTEMS = frozenset({"host", "home"})
 
 
 def is_sandboxed() -> bool:
@@ -94,6 +138,45 @@ def has_network() -> bool:
     return "network" in _context().get("shared", set())
 
 
+def has_filesystem(path: str) -> bool:
+    """Whether the sandbox can read a path, directly or through a wider grant.
+
+    True outside a sandbox: nothing is being withheld there.
+
+    A grant on a parent counts. Somebody who already opened all of ``~/.ssh``,
+    or all of ``home``, has answered the question, and telling them to grant
+    something they have would send them looking for a fault that is not there.
+    Compared as paths rather than as strings, because a prefix test on the text
+    reads ``~/.ssh-backup`` as covering ``~/.ssh``.
+    """
+    if not is_sandboxed():
+        return True
+
+    wanted = PurePosixPath(path)
+    for entry in _context().get("filesystems", set()):
+        if entry.startswith("!"):
+            # A revocation. flatpak writes these for --nofilesystem, and
+            # reading one as a grant would invert its meaning.
+            continue
+        head, separator, mode = entry.rpartition(":")
+        granted = head if separator and mode in _FILESYSTEM_MODES else entry
+        if granted in _BLANKET_FILESYSTEMS:
+            return True
+        granted_path = PurePosixPath(granted)
+        if granted_path == wanted or granted_path in wanted.parents:
+            return True
+    return False
+
+
+def missing_ssh_file_permissions() -> list[str]:
+    """Which of the ``~/.ssh`` files an ssh remote needs are not readable.
+
+    In manifest order, so the command built out of it is stable: advice that
+    reshuffles itself between two runs looks like different advice.
+    """
+    return [f"--filesystem={path}:ro" for path in SSH_FILES if not has_filesystem(path)]
+
+
 def missing_sync_permissions() -> list[str]:
     """Which of the permissions sync needs have not been granted."""
     missing = []
@@ -104,10 +187,14 @@ def missing_sync_permissions() -> list[str]:
     return missing
 
 
-def override_command() -> str:
-    """The command that grants sync the permissions it needs.
+def override_command(permissions: "Sequence[str]" = SYNC_PERMISSIONS) -> str:
+    """The command that grants this application a set of permissions.
+
+    Defaults to what sync needs, which is the case it was written for; the
+    ``~/.ssh`` files are asked for separately, because they are needed by an
+    ssh remote rather than by syncing as such and an https one wants neither.
 
     ``--user`` deliberately: the system-wide form needs root and would apply to
     every user on the machine.
     """
-    return f"flatpak override --user {' '.join(SYNC_PERMISSIONS)} {APP_ID}"
+    return f"flatpak override --user {' '.join(permissions)} {APP_ID}"

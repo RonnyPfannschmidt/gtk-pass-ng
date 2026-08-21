@@ -117,6 +117,13 @@ and an agent socket for a feature a minority use is the wrong default, and the
 override costs those users one command — which the application shows them,
 copyable, the first time a sync finds the permission missing.
 
+The same argument covers the two files an ssh remote needs out of `~/.ssh` —
+`config`, for `Host` aliases, and `known_hosts`, for strict host key checking.
+They are granted per file rather than as `--filesystem=~/.ssh:ro`, which would
+hand over every private key on the machine, and they are opt-in for the same
+reason the socket is. See
+[FLATPAK.md](FLATPAK.md#sshconfig-and-known_hosts).
+
 A Flatpak extension cannot carry the permission instead; that was checked rather
 than assumed, and the reasoning is in
 [FLATPAK.md](FLATPAK.md#an-extension-cannot-carry-the-permission-instead).
