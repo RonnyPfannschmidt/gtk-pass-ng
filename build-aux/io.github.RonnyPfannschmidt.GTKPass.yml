@@ -1,11 +1,7 @@
-# Flatpak manifest for GTKPass.
+# Flatpak manifest for GTKPass. `make flatpak` builds and installs it.
 #
-# Build and install locally:
-#   make flatpak
-#   make flatpak-run
-#
-# Every permission below is deliberate; docs/FLATPAK.md explains the reasoning
-# and what was rejected. A password manager should be able to justify each one.
+# docs/FLATPAK.md justifies every permission below, and records what was
+# rejected and why.
 app-id: io.github.RonnyPfannschmidt.GTKPass
 runtime: org.gnome.Platform
 runtime-version: '50'
@@ -19,23 +15,16 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
 
-  # The store. Its whole purpose is this directory, so it is granted by
-  # default; :create because adding an entry may have to make it first. A store
-  # kept elsewhere needs an override:
-  #   flatpak override --user --filesystem=/path/to/store io.github.RonnyPfannschmidt.GTKPass
+  # The store. :create because adding the first entry has to make it.
+  # A store kept elsewhere needs --filesystem=/path/to/store.
   - --filesystem=~/.password-store:create
 
-  # Decryption happens in the host's gpg-agent, reached over this socket. No
-  # private key ever enters the sandbox, and the passphrase prompt is the
-  # host's own pinentry. Requires a running agent; systemd socket activation
-  # normally sees to that.
+  # Decryption runs in the host's gpg-agent, so no private key and no
+  # passphrase ever enters the sandbox.
   - --socket=gpg-agent
 
-  # gpg still has to read the public keyring to resolve recipients by name.
-  # Read-only, and only the files that answer that question -- not the whole of
-  # ~/.gnupg, which holds the private keys the agent is there to keep away.
-  # Writing is not needed: the backend encrypts with always_trust, so gpg never
-  # updates the trust database.
+  # gpg resolves recipients by name from the public keyring. Only these three
+  # files, read-only -- not ~/.gnupg, which is where the private keys are.
   - --filesystem=~/.gnupg/pubring.kbx:ro
   - --filesystem=~/.gnupg/public-keys.d/pubring.db:ro
   - --filesystem=~/.gnupg/common.conf:ro
@@ -43,77 +32,31 @@ finish-args:
   # The Secret Service backend talks to the session keyring.
   - --talk-name=org.freedesktop.secrets
 
-  # git refuses to commit without an author identity, and inside a sandbox it
-  # has none: flatpak points XDG_CONFIG_HOME at ~/.var/app/$FLATPAK_ID/config,
-  # so the host's ~/.config/git is not what git reads. Without this the store
-  # is committed to on every write by a git that stops at "unable to
-  # auto-detect email address", and a local commit is not an opt-in feature --
-  # it is on for every git-backed store and works everywhere but here.
-  #
-  # xdg-config/git rather than ~/.gitconfig: flatpak mounts this one at both
-  # the host path and the app's redirected XDG directory, so an
-  # `includeIf gitdir:` chain whose paths are written ~/.config/git/... still
-  # resolves. Checked against flatpak 1.18.0 -- the grant on ~/.gitconfig alone
-  # mounts the file but leaves those includes dangling.
-  #
-  # Read-only, and only git's own configuration directory: no keys, no
-  # credentials, nothing outside ~/.config/git.
+  # Without it git has no author identity and refuses to commit, which every
+  # write to a git-backed store does. xdg-config/git rather than ~/.gitconfig:
+  # only this one leaves an `includeIf gitdir:` chain able to find its files.
   - --filesystem=xdg-config/git:ro
 
-  # Deliberately NOT requested here: --socket=ssh-auth and --share=network.
-  #
-  # Syncing a store with a git remote needs both, but most stores have no
-  # remote, and a password manager holding network access and an agent socket
-  # on the chance that one does is exactly the request a reviewer should
-  # question. So they are opt-in, per user:
+  # A packaged build is the application actually being used, so it opts in to
+  # the store guard in src/gtkpass/safety.py.
+  - --env=GTKPASS_ALLOW_REAL_STORE=1
+
+  # Sync is opt-in, per user: most stores have no remote, and network access
+  # plus an agent socket is not a default a password manager should hold.
+  # sandbox.py checks for these and the sync action shows the command:
   #
   #   flatpak override --user --socket=ssh-auth --share=network \
   #       io.github.RonnyPfannschmidt.GTKPass
   #
-  # src/gtkpass/sandbox.py reads /.flatpak-info to see whether they have been
-  # granted, and the sync action shows that exact command when they have not.
-  # The bundled git below still commits locally, which needs neither.
-  #
-  # An ssh remote needs two files out of ~/.ssh as well, opt-in for the same
-  # reason -- an https remote wants neither, and ~/.ssh/config is an inventory
-  # of the machines someone reaches:
+  # An ssh remote needs its Host aliases and host keys as well, or it fails
+  # with "Could not resolve hostname" and host key verification respectively:
   #
   #   flatpak override --user --filesystem=~/.ssh/config:ro \
   #       --filesystem=~/.ssh/known_hosts:ro io.github.RonnyPfannschmidt.GTKPass
   #
-  # config is where Host aliases live, so without it a remote written as
-  # git@store:me/store.git fails with "Could not resolve hostname store" -- a
-  # DNS-shaped error with a permissions-shaped cause. known_hosts is the other
-  # half: the sync runs ssh with StrictHostKeyChecking=yes, so without it every
-  # ssh remote stops at host key verification instead, and accepting the key on
-  # the host does not carry in. GitStore.explain() recognises both failures and
-  # puts the command above on screen.
-  #
-  # An extension cannot carry these instead: flatpak-metadata(5) gives
-  # [Extension NAME] and [ExtensionOf] no [Context] group, so an extension is
-  # only content mounted into a sandbox whose permissions were already fixed.
-
-  # A packaged build is the application actually being used, so it opts in to
-  # the guard in src/gtkpass/safety.py. That guard now refuses only when it can
-  # see it is running out of a checkout, so this is no longer load-bearing --
-  # it is kept because a sandbox manifest saying outright which side of that
-  # guard it is on is worth more than one line saved.
-  - --env=GTKPASS_ALLOW_REAL_STORE=1
-
-  # Deliberately NOT granted:
-  #   --talk-name=org.freedesktop.Flatpak
-  #     would let the Pass backend run `flatpak-spawn --host pass`, which is
-  #     arbitrary command execution on the host: not a hole in the sandbox but
-  #     the end of it. pass is bundled below instead, so it runs inside.
-  #   --filesystem=~/.ssh:ro
-  #     would hand over every private key along with the two files that are
-  #     actually wanted, and there is no narrower spelling of the directory.
-  #     There does not need to be: --filesystem takes a file path, so the two
-  #     are granted one at a time, above. The agent socket, once the user
-  #     grants it, authenticates without any key entering the sandbox.
-  #   --filesystem=home, --filesystem=host
-  #     a password manager asking for the whole home directory is the thing a
-  #     sandbox exists to prevent.
+  # Never granted: --talk-name=org.freedesktop.Flatpak, which is arbitrary
+  # command execution on the host; the whole of ~/.ssh, which is the private
+  # keys; --filesystem=home or host.
 
 cleanup:
   - /include
@@ -123,8 +66,7 @@ cleanup:
   - '*.a'
 
 modules:
-  # Pure Python, built from the sdist. The only runtime dependency that is not
-  # already in the runtime: PyGObject and pycairo ship with org.gnome.Platform.
+  # The only runtime dependency the GNOME runtime does not already carry.
   - name: python3-gnupg
     buildsystem: simple
     build-commands:
@@ -137,13 +79,10 @@ modules:
           type: pypi
           name: python-gnupg
 
-  # secretstorage is not bundled: it needs cryptography, which is a Rust build
-  # and would pull an SDK extension in for one optional backend. Without it the
-  # Secret Service backend reports itself unavailable, which it already handles.
-  # See docs/FLATPAK.md.
+  # secretstorage is deliberately not bundled; the Secret Service backend
+  # reports itself unavailable instead. See docs/FLATPAK.md.
 
-  # `pass ls` runs `tree`, which the runtime does not have. Without this the
-  # Pass backend cannot list anything, which is its most basic operation.
+  # `pass ls` runs `tree`, which the runtime does not have.
   - name: tree
     buildsystem: simple
     build-commands:
@@ -153,17 +92,9 @@ modules:
         url: https://gitlab.com/OldManProgrammer/unix-tree/-/archive/2.3.2/unix-tree-2.3.2.tar.gz
         sha256: 513a53cbc42ca1f4ea06af2bab1f5283524a3848266b1d162416f8033afc4985
 
-  # git is not in the runtime either. pass commits to the store's repository by
-  # itself whenever one is present, so without git those writes fail on any
-  # git-backed store.
-  #
-  # NO_RUST is required, not an optimisation: git 2.55 builds libgitcore with
-  # cargo, and the GNOME SDK has no Rust toolchain. Without it the build stops
-  # at "cargo: command not found".
-  #
-  # The rest is trimming. pass drives only core git -- init, add, commit, rm,
-  # mv, push, pull -- so git-svn, git-p4, git-send-email and gitk are dead
-  # weight in the bundle.
+  # Not in the runtime, and a git-backed store commits on every write.
+  # NO_RUST is required: git 2.55 builds libgitcore with cargo and the GNOME
+  # SDK has no Rust toolchain. The other NO_ flags only trim the bundle.
   - name: git
     buildsystem: simple
     build-commands:
@@ -182,8 +113,8 @@ modules:
           url: https://www.kernel.org/pub/software/scm/git/
           version-pattern: git-([0-9.]+)\.tar\.xz
 
-  # pass itself: a bash script. It uses the gpg and the ssh in the runtime, and
-  # the tree and git above, so it runs entirely inside the sandbox.
+  # A bash script over the runtime's gpg and ssh and the two modules above,
+  # so it runs entirely inside the sandbox.
   - name: pass
     buildsystem: simple
     build-commands:
@@ -198,8 +129,7 @@ modules:
     buildsystem: simple
     build-options:
       env:
-        # setuptools-scm reads the version from git tags, and the build sandbox
-        # has no repository to read.
+        # setuptools-scm reads git tags; the build sandbox has no repository.
         SETUPTOOLS_SCM_PRETEND_VERSION: '0.1.0'
     build-commands:
       - pip3 install --verbose --no-deps --no-build-isolation --prefix=${FLATPAK_DEST} .
@@ -211,8 +141,8 @@ modules:
         ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
       - install -Dm644 data/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
         ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
-      # GLib reads the compiled blob and ignores the XML, so the schema has to
-      # be installed and compiled or every settings lookup aborts the process.
+      # GLib reads the compiled blob, and an uncompiled schema aborts the
+      # process on the first settings lookup.
       - install -Dm644 data/${FLATPAK_ID}.gschema.xml
         ${FLATPAK_DEST}/share/glib-2.0/schemas/${FLATPAK_ID}.gschema.xml
       - glib-compile-schemas ${FLATPAK_DEST}/share/glib-2.0/schemas
