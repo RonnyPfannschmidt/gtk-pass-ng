@@ -220,6 +220,44 @@ class TestReadingWhatAJobInstalls:
         assert installed_packages(job) == {"make", "git", "python3-pytest"}
 
 
+class TestAContainerJobCanReachGitHub:
+    """`actions/checkout` fetches over HTTPS, and the Debian images ship no CA
+    bundle.
+
+    Without ca-certificates git stops at "Problem with the SSL CA cert (path?
+    access rights?)" during checkout -- before a single step of the job's own
+    work has run. The job then fails for a reason that has nothing to do with
+    what it tests, which is how `tests, installed deb` ran red from the day it
+    was added without ever having executed a test. The Fedora images carry the
+    bundle already, so this is only about the apt ones.
+    """
+
+    @pytest.fixture
+    def jobs(self) -> dict[str, str]:
+        return split_jobs(WORKFLOW.read_text())
+
+    def test_every_apt_job_that_checks_out_installs_ca_certificates(self, jobs):
+        missing = sorted(
+            name
+            for name, body in jobs.items()
+            if "apt-get" in body
+            and "actions/checkout" in body
+            and "ca-certificates" not in installed_packages(body)
+        )
+        assert missing == [], (
+            f"these jobs check out over HTTPS with no CA bundle: {missing}"
+        )
+
+    def test_the_check_would_notice(self, jobs):
+        """The assertion above passes vacuously if the jobs stop being found."""
+        candidates = [
+            name
+            for name, body in jobs.items()
+            if "apt-get" in body and "actions/checkout" in body
+        ]
+        assert len(candidates) >= 2, f"expected the apt jobs, found {candidates}"
+
+
 class TestCIRunsTheseTargets:
     @pytest.fixture
     def workflow(self) -> str:

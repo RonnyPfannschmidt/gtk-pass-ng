@@ -265,15 +265,23 @@ jobs:
             image: docker.io/library/ubuntu:26.04
             id: ubuntu-26.04
     steps:
-      # xauth is the one that is not obvious. Fedora's Xvfb package pulls it
-      # in and Debian's does not, so without it xvfb-run stops with `xauth
-      # command not found` before a single test has run.
+      # Two that are not obvious, and both stop the job before a test runs.
+      #
+      # ca-certificates: the checkout below fetches over HTTPS and these images
+      # ship no CA bundle, so git fails with "Problem with the SSL CA cert
+      # (path? access rights?)". That is what kept this job red from the day it
+      # was added -- it had never once reached a test. The build job above
+      # installs it for the same reason.
+      #
+      # xauth: Fedora's Xvfb package pulls it in and Debian's does not, so
+      # without it xvfb-run stops with `xauth command not found`.
       - name: install dependencies
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             --no-install-recommends \
-            make git python3-pytest xvfb xauth dbus-daemon dbus-bin \
+            ca-certificates make git python3-pytest xvfb xauth \
+            dbus-daemon dbus-bin \
             gnupg pass desktop-file-utils appstream-util libglib2.0-bin
 
       - uses: actions/checkout@v5
