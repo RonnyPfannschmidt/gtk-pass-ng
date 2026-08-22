@@ -128,13 +128,17 @@ class TestTheFlatpakManifest:
     def test_the_manifest_is_named_after_the_application(self, manifest):
         assert f"app-id: {APP_ID}" in manifest
 
-    def test_the_guard_is_opted_into(self, manifest):
-        """A packaged build is the application actually being used.
+    def test_the_guard_is_not_opted_into(self, manifest):
+        """The guard already defaults open for an installed build.
 
-        It does not go through run_app.sh, so without this the installed
-        application refuses its own store and every backend fails to load.
+        safety.opted_in() falls back to `not running_from_checkout()`, and a
+        packaged application is not a checkout -- checked inside the installed
+        Flatpak with the variable unset, which reports opted_in() True. So
+        setting it was a no-op that read as load-bearing, and it is exactly the
+        wrapper-to-undo-the-guard that safety.py says no package should need.
+        The rpm and the deb set nothing either.
         """
-        assert "--env=GTKPASS_ALLOW_REAL_STORE=1" in manifest
+        assert "GTKPASS_ALLOW_REAL_STORE" not in manifest
 
     def test_the_password_store_is_reachable(self, manifest):
         assert "--filesystem=~/.password-store:create" in manifest

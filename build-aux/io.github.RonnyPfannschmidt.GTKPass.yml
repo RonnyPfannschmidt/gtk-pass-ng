@@ -37,10 +37,6 @@ finish-args:
   # only this one leaves an `includeIf gitdir:` chain able to find its files.
   - --filesystem=xdg-config/git:ro
 
-  # A packaged build is the application actually being used, so it opts in to
-  # the store guard in src/gtkpass/safety.py.
-  - --env=GTKPASS_ALLOW_REAL_STORE=1
-
   # Sync is opt-in, per user: most stores have no remote, and network access
   # plus an agent socket is not a default a password manager should hold.
   # sandbox.py checks for these and the sync action shows the command:

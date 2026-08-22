@@ -405,13 +405,23 @@ a `try`, so the backend reports itself unavailable and the sidebar says so.
 
 ## The safety guard and packaged builds
 
-`src/gtkpass/safety.py` refuses the real store and the keyring unless
-`GTKPASS_ALLOW_REAL_STORE` is set. In a checkout only `run_app.sh` sets it; a
-packaged application does not go through that script, so the manifest sets it
-with `--env=GTKPASS_ALLOW_REAL_STORE=1`.
+`src/gtkpass/safety.py` refuses the real store and the keyring when it can see
+it is running out of a checkout. **The manifest sets nothing.** `opted_in()`
+falls back to `not running_from_checkout()`, and a packaged application is not
+a checkout, so the guard is already open here — measured inside the installed
+Flatpak with the variable unset:
 
-Without that line the installed application refuses its own password store and
-every backend fails to load. A test asserts the manifest contains it.
+```
+running_from_checkout(): False
+opted_in()            : True
+```
+
+The manifest used to carry `--env=GTKPASS_ALLOW_REAL_STORE=1` anyway. It was a
+no-op that read as load-bearing, and it was the one thing `safety.py` says no
+package should ship — a wrapper whose purpose is to undo a safety check. The
+rpm and the deb set nothing either, and an installed build has to work with
+nothing set in its environment. A test now asserts the manifest does *not*
+mention the variable.
 
 The guard protects developers from their own scratch code. It is not what
 protects the user's data in a packaged build — the sandbox is.
