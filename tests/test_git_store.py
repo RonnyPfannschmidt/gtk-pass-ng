@@ -488,3 +488,213 @@ class TestSyncingRefusesToLeaveAMess:
 
         with pytest.raises(GitError):
             open_store(store_repo).sync()
+
+
+class TestASandboxThatCannotReadSshConfig:
+    """The failure this whole arrangement exists to make legible.
+
+    `~/.ssh/config` is not in the Flatpak manifest, so a remote written against
+    a `Host` alias resolves to nothing and ssh reports a hostname that does not
+    exist. The remedy is a `flatpak override` the user has to run outside the
+    application, which means it has to appear inside it.
+    """
+
+    SANDBOXED = """\
+[Application]
+name=io.github.RonnyPfannschmidt.GTKPass
+
+[Context]
+shared=ipc;network;
+sockets=gpg-agent;ssh-auth;
+filesystems=~/.password-store:create;
+"""
+
+    @pytest.fixture
+    def sandboxed(self, tmp_path, monkeypatch):
+        from gtkpass import sandbox
+
+        info = tmp_path / "flatpak-info"
+        info.write_text(self.SANDBOXED)
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+        return info
+
+    @pytest.fixture
+    def unsandboxed(self, tmp_path, monkeypatch):
+        from gtkpass import sandbox
+
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", tmp_path / "absent")
+
+    def test_an_unresolved_alias_says_which_override_to_run(
+        self, store_repo, sandboxed
+    ):
+        store = open_store(store_repo)
+        store.remote_url = "git@store-host:me/store.git"
+
+        explained = store.explain(
+            "ssh: Could not resolve hostname store-host: Name or service not known"
+        )
+
+        assert "~/.ssh/config" in explained
+        assert "flatpak override --user" in explained
+        assert "--filesystem=~/.ssh/config:ro" in explained
+
+    def test_it_says_the_grant_carries_no_key(self, store_repo, sandboxed):
+        """Otherwise the advice reads as 'hand your private keys to a sandbox'."""
+        store = open_store(store_repo)
+        store.remote_url = "git@store-host:me/store.git"
+
+        explained = store.explain("ssh: Could not resolve hostname store-host")
+
+        assert "private key" in explained or "no key" in explained
+
+    def test_outside_a_sandbox_the_advice_is_not_offered(self, store_repo, unsandboxed):
+        """There it is a typo or DNS, and GTKPass has nothing to add."""
+        store = open_store(store_repo)
+        store.remote_url = "git@store-host:me/store.git"
+        detail = "ssh: Could not resolve hostname store-host"
+
+        assert store.explain(detail) == detail
+
+    def test_a_granted_config_is_not_advised_again(
+        self, store_repo, tmp_path, monkeypatch
+    ):
+        """Once it is mounted, an unresolved name is the user's own DNS."""
+        from gtkpass import sandbox
+
+        info = tmp_path / "flatpak-info"
+        info.write_text(
+            self.SANDBOXED.replace("filesystems=", "filesystems=~/.ssh/config:ro;")
+        )
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+        store = open_store(store_repo)
+        detail = "ssh: Could not resolve hostname store-host"
+
+        assert store.explain(detail) == detail
+
+    def test_a_rejected_host_key_in_a_sandbox_says_to_grant_known_hosts(
+        self, store_repo, sandboxed
+    ):
+        """ssh-keyscan on the host cannot help a sandbox that cannot read it.
+
+        The unsandboxed advice is actively misleading here: the user runs it,
+        the file changes, and nothing inside the sandbox is any different.
+        """
+        store = open_store(store_repo)
+        store.remote_url = "git@example.org:me/store.git"
+
+        explained = store.explain("Host key verification failed.")
+
+        assert "--filesystem=~/.ssh/known_hosts:ro" in explained
+
+    def test_outside_a_sandbox_the_keyscan_advice_is_unchanged(
+        self, store_repo, unsandboxed
+    ):
+        store = open_store(store_repo)
+        store.remote_url = "git@example.org:me/store.git"
+
+        explained = store.explain("Host key verification failed.")
+
+        assert "ssh-keyscan" in explained
+        assert "flatpak override" not in explained
+
+    def test_only_the_missing_grant_is_asked_for(
+        self, store_repo, tmp_path, monkeypatch
+    ):
+        """Asking again for something already granted reads as advice that
+        did not work."""
+        from gtkpass import sandbox
+
+        info = tmp_path / "flatpak-info"
+        info.write_text(
+            self.SANDBOXED.replace("filesystems=", "filesystems=~/.ssh/config:ro;")
+        )
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+        store = open_store(store_repo)
+        store.remote_url = "git@example.org:me/store.git"
+
+        explained = store.explain("Host key verification failed.")
+
+        assert "--filesystem=~/.ssh/known_hosts:ro" in explained
+        assert "--filesystem=~/.ssh/config:ro" not in explained
+
+
+class TestAStoreWithNoCommitIdentity:
+    """git refuses to commit without one, and says so in a way nobody acts on.
+
+    The message it prints is about `git config --global`, which inside a
+    sandbox writes somewhere private to the application -- so the advice is
+    not wrong exactly, but it is not the fix either. What is missing is
+    usually an identity for this particular store.
+    """
+
+    IDENTITY_FAILURE = (
+        "Author identity unknown\n\n*** Please tell me who you are.\n\n"
+        "fatal: unable to auto-detect email address (got 'user@host.(none)')"
+    )
+
+    SANDBOXED = """\
+[Application]
+name=io.github.RonnyPfannschmidt.GTKPass
+
+[Context]
+shared=ipc;
+sockets=gpg-agent;
+filesystems=~/.password-store:create;xdg-config/git:ro;
+"""
+
+    @pytest.fixture
+    def unsandboxed(self, tmp_path, monkeypatch):
+        from gtkpass import sandbox
+
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", tmp_path / "absent")
+
+    def sandbox_with(self, tmp_path, monkeypatch, contents):
+        from gtkpass import sandbox
+
+        info = tmp_path / "flatpak-info"
+        info.write_text(contents)
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+    def test_it_says_how_to_give_the_store_one(self, store_repo, unsandboxed):
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert "user.email" in explained
+        assert "git -C" in explained or "config" in explained
+
+    def test_it_names_this_store(self, store_repo, unsandboxed):
+        """Advice about `--global` is what git already said and it did not help."""
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert str(store_repo) in explained
+
+    def test_the_granted_sandbox_is_not_told_to_grant_it_again(
+        self, store_repo, tmp_path, monkeypatch
+    ):
+        """The manifest grants it, so a mounted config is the normal case."""
+        self.sandbox_with(tmp_path, monkeypatch, self.SANDBOXED)
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert "flatpak override" not in explained
+
+    def test_a_revoked_grant_is_named(self, store_repo, tmp_path, monkeypatch):
+        """Someone who took it away with --nofilesystem should learn that."""
+        self.sandbox_with(
+            tmp_path, monkeypatch, self.SANDBOXED.replace("xdg-config/git:ro;", "")
+        )
+        store = open_store(store_repo)
+
+        explained = store.explain(self.IDENTITY_FAILURE)
+
+        assert "--filesystem=xdg-config/git:ro" in explained
+        assert "flatpak override --user" in explained
+
+    def test_anything_else_is_still_passed_through(self, store_repo, unsandboxed):
+        store = open_store(store_repo)
+
+        assert store.explain("some other failure") == "some other failure"

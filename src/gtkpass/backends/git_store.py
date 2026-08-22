@@ -61,6 +61,21 @@ _CONFIG = ("-c", "commit.gpgsign=false")
 #: remedy the user has to carry out somewhere else.
 _UNKNOWN_HOST_KEY = "Host key verification failed"
 
+#: What ssh says when a name did not resolve. Outside a sandbox that is DNS or
+#: a typo and nothing here can help, but inside one it is very often neither:
+#: the remote names a `Host` alias, and `~/.ssh/config` -- where aliases are
+#: defined -- is not mounted, so ssh sees the alias as a literal hostname. The
+#: error names DNS for a cause that is a missing permission, which is exactly
+#: the kind of failure worth translating.
+_UNRESOLVED_HOSTNAME = "Could not resolve hostname"
+
+#: What git says when it cannot work out who is committing. It prints advice of
+#: its own alongside this, about `git config --global` -- which inside a sandbox
+#: writes to a directory private to the application, so it is not the fix even
+#: though it is not wrong. Matched on the one line that is stable: LC_ALL=C is
+#: pinned in _build_env, so the English is not the user's locale's.
+_NO_COMMIT_IDENTITY = "unable to auto-detect email address"
+
 
 def redact(text: str) -> str:
     """Strip credentials out of any URL before the text is shown or logged."""
@@ -142,24 +157,93 @@ class GitStore:
     def explain(self, detail: str) -> str:
         """Add the remedy to a failure that has one somewhere else.
 
-        Only the unknown host key: it is the one thing GTKPass refuses that the
-        user is expected to go and resolve, and being strict about it is only
-        defensible if what to do about it is on screen.
+        Two of them, and both are failures the user has to resolve outside the
+        application: a host key this machine has not accepted, and -- inside a
+        sandbox -- an ssh name that did not resolve because the file defining
+        it was never mounted. Everything else is passed through as git said it,
+        because inventing an explanation for a failure not understood here is
+        worse than showing the one that came back.
         """
-        if _UNKNOWN_HOST_KEY not in detail:
-            return detail
+        if _UNKNOWN_HOST_KEY in detail:
+            return f"{detail}\n{self._host_key_remedy()}"
+        if _UNRESOLVED_HOSTNAME in detail:
+            remedy = self._ssh_config_remedy()
+            return f"{detail}\n{remedy}" if remedy else detail
+        if _NO_COMMIT_IDENTITY in detail:
+            return f"{detail}\n{self._commit_identity_remedy()}"
+        return detail
+
+    def _commit_identity_remedy(self) -> str:
+        """How to give this store an author, since git's own advice does not.
+
+        git points at `git config --global`, and in a sandbox that writes to a
+        directory only this application can see -- an identity that exists
+        nowhere else and explains nothing to whoever reads the history later.
+        The store's own configuration is the honest place for it, and it is the
+        one git will still find on the next machine the store is cloned to.
+        """
+        remedy = (
+            "git has no author identity here, so it will not commit. Give this "
+            f"store one with:\n"
+            f'git -C {self.store_dir} config user.email "you@example.com"\n'
+            f'git -C {self.store_dir} config user.name "Your Name"'
+        )
+        if sandbox.has_filesystem(sandbox.GIT_CONFIG):
+            return remedy
+        return (
+            f"{remedy}\nThis sandbox also cannot read the host's git "
+            f"configuration, so an identity set there does not reach it:\n"
+            f"{sandbox.override_command([sandbox.GIT_CONFIG_PERMISSION])}"
+        )
+
+    def _host_key_remedy(self) -> str:
+        """What to do about a host key this machine has not accepted.
+
+        Being strict about the key is only defensible if the way past it is on
+        screen, and in a sandbox the obvious way past it is a trap: appending
+        to `~/.ssh/known_hosts` on the host changes nothing inside one that
+        cannot read the file. So the grant is named first, and the keyscan only
+        once it would take effect.
+        """
+        host = self.ssh_host(self.remote_url or "")
+        named = f"The host key for {host}" if host else "The remote's host key"
+        opening = f"{named} is not one this machine has accepted before."
+
+        if not sandbox.has_filesystem(sandbox.SSH_KNOWN_HOSTS):
+            return (
+                f"{opening} This sandbox cannot read {sandbox.SSH_KNOWN_HOSTS}, "
+                f"so accepting the key outside it will not carry in until the "
+                f"file is granted -- read-only, and it holds no private key:\n"
+                f"{sandbox.override_command(sandbox.missing_ssh_file_permissions())}"
+            )
+
+        if host is None:
+            return opening
+        return (
+            f"{opening} Check its fingerprint against the server, then connect "
+            f"once with 'ssh {host}' in a terminal, or add it with "
+            f"'ssh-keyscan {host} >> ~/.ssh/known_hosts'."
+        )
+
+    def _ssh_config_remedy(self) -> str | None:
+        """What to do about a name that did not resolve, when there is anything.
+
+        None outside a sandbox, and none once the config is already mounted: in
+        both cases the name really did fail to resolve, and a permissions story
+        told over a DNS failure sends the user to fix something that is not
+        broken.
+        """
+        if sandbox.has_filesystem(sandbox.SSH_CONFIG):
+            return None
 
         host = self.ssh_host(self.remote_url or "")
-        if host is None:
-            return (
-                f"{detail}\nThe remote's host key is not one this machine has "
-                f"accepted before."
-            )
+        named = f"'{host}' is probably" if host else "That is probably"
         return (
-            f"{detail}\nThe host key for {host} is not one this machine has "
-            f"accepted before. Check its fingerprint against the server, then "
-            f"connect once with 'ssh {host}' in a terminal, or add it with "
-            f"'ssh-keyscan {host} >> ~/.ssh/known_hosts'."
+            f"{named} a Host alias from {sandbox.SSH_CONFIG}, which this "
+            f"sandbox cannot read, so ssh took it for a hostname. Granting the "
+            f"file read-only fixes it, and carries no private key -- the keys "
+            f"stay with the agent:\n"
+            f"{sandbox.override_command(sandbox.missing_ssh_file_permissions())}"
         )
 
     @staticmethod

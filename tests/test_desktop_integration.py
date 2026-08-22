@@ -128,13 +128,17 @@ class TestTheFlatpakManifest:
     def test_the_manifest_is_named_after_the_application(self, manifest):
         assert f"app-id: {APP_ID}" in manifest
 
-    def test_the_guard_is_opted_into(self, manifest):
-        """A packaged build is the application actually being used.
+    def test_the_guard_is_not_opted_into(self, manifest):
+        """The guard already defaults open for an installed build.
 
-        It does not go through run_app.sh, so without this the installed
-        application refuses its own store and every backend fails to load.
+        safety.opted_in() falls back to `not running_from_checkout()`, and a
+        packaged application is not a checkout -- checked inside the installed
+        Flatpak with the variable unset, which reports opted_in() True. So
+        setting it was a no-op that read as load-bearing, and it is exactly the
+        wrapper-to-undo-the-guard that safety.py says no package should need.
+        The rpm and the deb set nothing either.
         """
-        assert "--env=GTKPASS_ALLOW_REAL_STORE=1" in manifest
+        assert "GTKPASS_ALLOW_REAL_STORE" not in manifest
 
     def test_the_password_store_is_reachable(self, manifest):
         assert "--filesystem=~/.password-store:create" in manifest
@@ -170,6 +174,48 @@ class TestTheFlatpakManifest:
     def test_the_override_command_is_documented(self, manifest):
         """Whoever reads the manifest should find the way to turn sync on."""
         assert "flatpak override --user --socket=ssh-auth --share=network" in manifest
+
+    def test_the_ssh_files_are_not_requested(self, manifest):
+        """An ssh remote needs them; opening a store does not.
+
+        And ~/.ssh/config is an inventory of the machines someone reaches, so
+        it is the user's call rather than the manifest's.
+        """
+        granted = [
+            line
+            for line in manifest.splitlines()
+            if line.strip().startswith("- --filesystem=~/.ssh")
+        ]
+        assert granted == [], f"an ~/.ssh grant is requested statically: {granted}"
+
+    def test_the_ssh_file_override_is_documented(self, manifest):
+        """The failure it fixes reads as DNS, so the cure has to be findable."""
+        assert "--filesystem=~/.ssh/config:ro" in manifest
+        assert "--filesystem=~/.ssh/known_hosts:ro" in manifest
+
+    def test_the_whole_ssh_directory_is_never_granted(self, manifest):
+        """It mixes the private keys in with the two files actually wanted."""
+        assert "- --filesystem=~/.ssh:ro" not in manifest
+        assert "- --filesystem=~/.ssh\n" not in manifest
+
+    def test_the_git_configuration_directory_is_readable(self, manifest):
+        """Without it git has no author identity and refuses to commit.
+
+        flatpak points XDG_CONFIG_HOME at the app's own directory, so the
+        host's ~/.config/git is not what git reads unless it is mounted, and a
+        local commit is not an opt-in feature -- it is on for every git-backed
+        store.
+        """
+        assert "- --filesystem=xdg-config/git:ro" in manifest
+
+    def test_the_git_configuration_grant_is_read_only(self, manifest):
+        """git never writes it, and the application has no business doing so."""
+        granted = [
+            line.strip()
+            for line in manifest.splitlines()
+            if line.strip().startswith("- --filesystem=xdg-config/git")
+        ]
+        assert granted == ["- --filesystem=xdg-config/git:ro"]
 
     def test_git_is_still_bundled(self, manifest):
         """Local commits need git regardless of whether a remote exists."""

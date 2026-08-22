@@ -144,3 +144,126 @@ class TestTheOverrideCommand:
     def test_it_is_a_per_user_override(self):
         """--system would need root and would apply to every user on the box."""
         assert "--user" in sandbox.override_command()
+
+
+# The same sandbox after the user granted sync everything it needs, including
+# the two files out of ~/.ssh that an aliased remote cannot do without.
+SSH_FILES_GRANTED = """\
+[Application]
+name=io.github.RonnyPfannschmidt.GTKPass
+
+[Context]
+shared=ipc;network;
+sockets=fallback-x11;gpg-agent;inherit-wayland-socket;ssh-auth;wayland;
+devices=dri;
+filesystems=~/.password-store:create;~/.ssh/config:ro;~/.ssh/known_hosts:ro;
+"""
+
+
+class TestReadingTheGrantedFilesystems:
+    """`~/.ssh/config` is why a push fails with a hostname that does not exist.
+
+    A `Host` alias is resolved out of that file, and a sandbox that cannot read
+    it sees the alias as a literal hostname. `known_hosts` is the second half:
+    GitStore pins StrictHostKeyChecking=yes, so without it every ssh remote
+    fails host key verification instead. Neither is in the manifest -- both are
+    granted per file, per user, and neither exposes a private key.
+    """
+
+    def test_a_granted_file_is_seen(self, tmp_path, monkeypatch):
+        info = write_info(tmp_path, SSH_FILES_GRANTED)
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+        assert sandbox.has_filesystem(sandbox.SSH_CONFIG)
+        assert sandbox.has_filesystem(sandbox.SSH_KNOWN_HOSTS)
+
+    def test_a_withheld_file_is_seen(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", write_info(tmp_path, GRANTED))
+
+        assert not sandbox.has_filesystem(sandbox.SSH_CONFIG)
+        assert not sandbox.has_filesystem(sandbox.SSH_KNOWN_HOSTS)
+
+    def test_the_store_grant_is_not_read_as_covering_ssh(self, tmp_path, monkeypatch):
+        """A prefix test done wrong would read any grant as every grant."""
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", write_info(tmp_path, GRANTED))
+
+        assert sandbox.has_filesystem("~/.password-store")
+        assert not sandbox.has_filesystem("~/.ssh/config")
+
+    def test_a_grant_on_the_directory_covers_the_files_in_it(
+        self, tmp_path, monkeypatch
+    ):
+        """Somebody who granted all of ~/.ssh must not be told to grant more."""
+        info = write_info(
+            tmp_path, GRANTED.replace("filesystems=", "filesystems=~/.ssh:ro;")
+        )
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+        assert sandbox.has_filesystem(sandbox.SSH_CONFIG)
+
+    def test_home_covers_everything_under_it(self, tmp_path, monkeypatch):
+        info = write_info(
+            tmp_path, GRANTED.replace("filesystems=", "filesystems=home;")
+        )
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+        assert sandbox.has_filesystem(sandbox.SSH_CONFIG)
+
+    def test_everything_is_permitted_outside_a_sandbox(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", tmp_path / "absent")
+
+        assert sandbox.has_filesystem(sandbox.SSH_CONFIG)
+
+
+class TestWhichSshFilesAreMissing:
+    def test_both_are_reported_when_neither_is_granted(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", write_info(tmp_path, GRANTED))
+
+        assert sandbox.missing_ssh_file_permissions() == [
+            "--filesystem=~/.ssh/config:ro",
+            "--filesystem=~/.ssh/known_hosts:ro",
+        ]
+
+    def test_nothing_is_reported_when_both_are_granted(self, tmp_path, monkeypatch):
+        info = write_info(tmp_path, SSH_FILES_GRANTED)
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+        assert sandbox.missing_ssh_file_permissions() == []
+
+    def test_only_the_missing_one_is_reported(self, tmp_path, monkeypatch):
+        info = write_info(
+            tmp_path, GRANTED.replace("filesystems=", "filesystems=~/.ssh/config:ro;")
+        )
+        monkeypatch.setattr(sandbox, "FLATPAK_INFO", info)
+
+        assert sandbox.missing_ssh_file_permissions() == [
+            "--filesystem=~/.ssh/known_hosts:ro",
+        ]
+
+    def test_they_are_read_only(self):
+        """ssh has no reason to write either, and one of them sits next to keys."""
+        for permission in sandbox.SSH_FILE_PERMISSIONS:
+            assert permission.endswith(":ro")
+
+    def test_no_grant_reaches_a_private_key(self):
+        """The whole point: ~/.ssh:ro would hand over every key in the same breath."""
+        for permission in sandbox.SSH_FILE_PERMISSIONS:
+            path = permission.removeprefix("--filesystem=").removesuffix(":ro")
+            assert path in {"~/.ssh/config", "~/.ssh/known_hosts"}
+
+
+class TestTheOverrideCommandForOtherPermissions:
+    def test_it_asks_for_the_permissions_it_was_given(self):
+        command = sandbox.override_command(sandbox.SSH_FILE_PERMISSIONS)
+
+        assert "--filesystem=~/.ssh/config:ro" in command
+        assert "--filesystem=~/.ssh/known_hosts:ro" in command
+        assert "--socket=ssh-auth" not in command
+
+    def test_it_still_names_this_application(self):
+        assert sandbox.override_command(sandbox.SSH_FILE_PERMISSIONS).endswith(APP_ID)
+
+    def test_it_still_defaults_to_what_sync_needs(self):
+        assert sandbox.override_command() == sandbox.override_command(
+            sandbox.SYNC_PERMISSIONS
+        )
