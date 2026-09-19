@@ -3131,6 +3131,33 @@ class TestSyncing:
 
         assert run_in_application(check) is False
 
+    def test_what_is_still_to_push_is_shown_on_the_store_row(
+        self, demo_backend_configured
+    ):
+        def check(app):
+            window = self.window_with_sync(app, self.ready())
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.unpushed_commits = lambda: 2  # type: ignore[method-assign]
+
+            window._load_passwords()
+            pump_until(
+                lambda: window.password_list.root.get_n_items() > 0
+                and window.password_list.root.get_item(0).badge != ""
+            )
+            return window.password_list.root.get_item(0).badge
+
+        assert run_in_application(check) == "2 to push"
+
+    def test_a_pushed_store_carries_no_badge(self, demo_backend_configured):
+        def check(app):
+            window = self.window_with_sync(app, self.ready())
+            window._load_passwords()
+            pump_until(lambda: window._pending_listings == 0)
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return window.password_list.root.get_item(0).badge
+
+        assert run_in_application(check) == ""
+
     def test_a_missing_permission_offers_the_override_command(
         self, demo_backend_configured
     ):
@@ -3156,3 +3183,75 @@ class TestSyncing:
         shown = run_in_application(check)
 
         assert shown == [command]
+
+
+class TestSyncingOnStart:
+    """Off by default; on, the syncable stores are synced once the backends
+    have loaded, once per launch."""
+
+    @pytest.fixture
+    def syncable_demo(self, demo_backend_configured, monkeypatch):
+        from gtkpass.backends import SyncCapability, SyncResult, SyncUnavailable
+        from gtkpass.backends.demo import DemoBackend
+
+        synced: list[str] = []
+
+        def sync(self) -> SyncResult:
+            synced.append("synced")
+            return SyncResult(0, 0)
+
+        monkeypatch.setattr(
+            DemoBackend,
+            "sync_capability",
+            lambda self: SyncCapability(
+                supported=True,
+                reason=SyncUnavailable.READY,
+                detail="Sync with origin/main",
+                remote="origin",
+                branch="main",
+            ),
+        )
+        monkeypatch.setattr(DemoBackend, "sync", sync)
+        return synced
+
+    @pytest.fixture
+    def sync_on_start(self):
+        settings = get_settings()
+        settings.set_boolean("sync-on-start", True)
+        yield
+        settings.reset("sync-on-start")
+
+    def test_it_is_off_by_default(self, syncable_demo):
+        def check(app):
+            window = listed_window(app)
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return window.sync_stack.get_visible_child_name(), list(syncable_demo)
+
+        state, synced = run_in_application(check)
+
+        assert state == "idle"
+        assert synced == []
+
+    def test_it_syncs_once_the_backends_have_loaded(self, syncable_demo, sync_on_start):
+        def check(app):
+            window = listed_window(app)
+            pump_until(lambda: bool(syncable_demo), timeout_seconds=5.0)
+            return list(syncable_demo), window.settings.get_boolean("sync-on-start")
+
+        synced, enabled = run_in_application(check)
+
+        assert enabled is True
+        assert synced == ["synced"]
+
+    def test_a_reload_does_not_sync_again(self, syncable_demo, sync_on_start):
+        def check(app):
+            window = listed_window(app)
+            pump_until(lambda: bool(syncable_demo), timeout_seconds=5.0)
+            window.lookup_action("reload").activate(None)
+            pump_until(
+                lambda: window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+            )
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return list(syncable_demo)
+
+        assert run_in_application(check) == ["synced"]

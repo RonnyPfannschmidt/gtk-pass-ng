@@ -41,6 +41,9 @@ class PasswordNode(GObject.Object):
     #: row; a backend that would not load carries the reason it gave, which
     #: otherwise lived only in a toast that had five seconds and then went.
     tooltip = GObject.Property(type=str, default="")
+    #: A word or two beside the name: what a store still has to push. Empty
+    #: for every row but a store's, and for a store with nothing to say.
+    badge = GObject.Property(type=str, default="")
 
     def __init__(
         self,
@@ -50,8 +53,9 @@ class PasswordNode(GObject.Object):
         password_name: str = "",
         tooltip: str = "",
         path: str = "",
+        badge: str = "",
     ) -> None:
-        super().__init__(name=name, icon_name=icon_name, tooltip=tooltip)
+        super().__init__(name=name, icon_name=icon_name, tooltip=tooltip, badge=badge)
         #: Where this row sits in its backend: ``work/mail`` for a folder of
         #: that name and for the entry inside it, empty for a backend heading.
         #: What a listing is reconciled against, and what says a row is still
@@ -85,6 +89,9 @@ class BackendEntries:
         self.name = name
         self.icon_name = icon_name
         self.tooltip = tooltip
+        #: What the store's row says beside its name, kept here because a
+        #: search takes the row away and gives it back.
+        self.badge = ""
         #: Full entry paths, in the order they were listed.
         self.entries: list[str] = []
         #: This backend's row while it is shown, None while it is filtered out.
@@ -413,6 +420,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             icon_name=record.icon_name,
             backend_id=record.backend_id,
             tooltip=record.tooltip,
+            badge=record.badge,
         )
         position = sum(
             1
@@ -474,6 +482,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             for record in self._backends:
                 self._node_for(record)
         return records
+
+    def set_badge(self, backend_id: str, badge: str) -> None:
+        """Put a word or two beside a store's name, or take it away with ``""``."""
+        for record in self._backends:
+            if record.backend_id == backend_id:
+                record.badge = badge
+                if record.node is not None:
+                    record.node.badge = badge
+                return
 
     def _drop(self, record: BackendEntries) -> None:
         """Take one backend's row away, if it has one."""

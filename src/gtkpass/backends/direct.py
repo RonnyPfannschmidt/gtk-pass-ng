@@ -369,6 +369,11 @@ class DirectBackend(PasswordBackend):
             raise BackendError(self._sync_capability.detail)
         return self._git.sync()
 
+    def unpushed_commits(self) -> int:
+        if self._git is None or not self._sync_capability.supported:
+            return 0
+        return self._git.commits_ahead()
+
     def _reencrypt_or_rename(
         self, source: Path, destination: Path, keep_source: bool = False
     ) -> None:

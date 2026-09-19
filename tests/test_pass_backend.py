@@ -741,3 +741,20 @@ class TestSyncIsOfferedForAGitBackedStore:
         backend = PassBackend.create(PassBackendSettings(password_store_dir=store))
 
         assert not backend.sync_capability().supported
+
+    def test_it_counts_what_is_still_to_push(self, pass_on_path, git_store):
+        from conftest import git
+
+        backend = PassBackend.create(PassBackendSettings(password_store_dir=git_store))
+        (git_store / "email.gpg").write_bytes(b"\x01ciphertext")
+        git("add", "-A", cwd=git_store)
+        git("commit", "-m", "Add email", cwd=git_store)
+
+        assert backend.unpushed_commits() == 1
+
+    def test_a_store_that_is_not_offered_counts_nothing(self, pass_on_path, git_store):
+        backend = PassBackend.create(
+            PassBackendSettings(password_store_dir=git_store, use_git=False)
+        )
+
+        assert backend.unpushed_commits() == 0

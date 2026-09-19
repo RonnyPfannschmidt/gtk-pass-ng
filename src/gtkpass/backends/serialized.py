@@ -129,3 +129,7 @@ class SerializedBackend(PasswordBackend):
     def sync(self) -> SyncResult:
         with self._lock:
             return self._backend.sync()
+
+    def unpushed_commits(self) -> int:
+        with self._lock:
+            return self._backend.unpushed_commits()

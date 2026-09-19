@@ -438,7 +438,7 @@ class GitStore:
             raise
 
         pulled = self._revision_count() - before
-        pushed = self._commits_ahead()
+        pushed = self.commits_ahead()
 
         if pushed:
             self._run("push")
@@ -480,11 +480,12 @@ class GitStore:
             "the remote yourself if the rewrite was meant."
         )
 
-    def _commits_ahead(self) -> int:
+    def commits_ahead(self) -> int:
         """Local commits the remote does not have yet.
 
         Nothing to push is the common case -- most syncs only pull -- and
-        pushing anyway would reach the network for no reason.
+        pushing anyway would reach the network for no reason. Zero for a
+        store with no upstream, where there is nowhere for them to go.
         """
         ahead = self._try("log", "@{upstream}..HEAD", "--pretty=%H")
         if ahead is None:

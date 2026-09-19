@@ -508,6 +508,15 @@ class PasswordBackend(ABC):
         """
         raise BackendError(f"{self.metadata.name} cannot sync.")
 
+    def unpushed_commits(self) -> int:
+        """How many local commits the remote has not seen.
+
+        Zero for a backend that cannot sync, which is why this is not
+        abstract. May run git, so it is called off the UI thread; the sidebar
+        shows the answer beside the store.
+        """
+        return 0
+
     # -- recipients ----------------------------------------------------------
 
     def recipient_audit(self) -> "RecipientAudit | None":

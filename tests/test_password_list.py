@@ -602,6 +602,45 @@ class TestTheWindowHearsAboutEverySelection:
         assert seen
 
 
+class TestTheStoreBadge:
+    """A store row can carry a word or two beside its name: what is still to
+    push, for a store with a remote. Kept on the record rather than only on
+    the row, because a search takes the row away and gives it back."""
+
+    def test_it_is_shown_on_the_store_row(self, view, backend):
+        view.set_badge("demo_1", "2 to push")
+
+        assert view.root.get_item(0).badge == "2 to push"
+
+    def test_it_can_be_taken_away_again(self, view, backend):
+        view.set_badge("demo_1", "2 to push")
+        view.set_badge("demo_1", "")
+
+        assert view.root.get_item(0).badge == ""
+
+    def test_an_unknown_store_is_ignored(self, view, backend):
+        view.set_badge("nobody", "2 to push")
+
+        assert view.root.get_item(0).badge == ""
+
+    def test_it_survives_a_search(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.set_badge("demo_1", "2 to push")
+
+        view.set_filter("zzz")
+        view.set_filter("")
+
+        assert view.root.get_item(0).badge == "2 to push"
+
+    def test_it_reaches_the_display(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.set_badge("demo_1", "2 to push")
+
+        present(view, lambda v: "2 to push" in TestRendering().labels(v))
+
+        assert "2 to push" in TestRendering().labels(view)
+
+
 class TestActivating:
     """Enter, or a double-click, on a row.
 

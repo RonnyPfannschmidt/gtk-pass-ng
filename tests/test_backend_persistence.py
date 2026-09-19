@@ -381,3 +381,16 @@ class TestSavingWritesOnlyWhatChanged:
             assert stored.get_string("custom-data-path") == "/srv/demo.json"
         finally:
             stored.reset("custom-data-path")
+
+
+class TestSyncOnStart:
+    def test_the_switch_is_bound_to_the_setting(self):
+        from gtkpass.config import get_settings
+        from gtkpass.ui.settings import SettingsWindow
+
+        settings = get_settings()
+        settings.set_boolean("sync-on-start", True)
+        try:
+            assert SettingsWindow().sync_on_start_row.get_active() is True
+        finally:
+            settings.reset("sync-on-start")

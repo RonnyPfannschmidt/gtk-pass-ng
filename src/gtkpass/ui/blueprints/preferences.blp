@@ -67,6 +67,15 @@ template $SettingsWindow : Adw.PreferencesDialog {
     }
 
     Adw.PreferencesGroup {
+      title: _("Sync");
+
+      Adw.SwitchRow sync_on_start_row {
+        title: _("Sync on Start");
+        subtitle: _("Pull and push every store with a remote when GTKPass opens");
+      }
+    }
+
+    Adw.PreferencesGroup {
       title: _("Search");
 
       Adw.SwitchRow search_as_you_type_row {

@@ -392,6 +392,18 @@ class BackendManager:
 
         return self._executor.submit(backend.sync)
 
+    def unpushed_commits_async(self, backend_id: str) -> concurrent.futures.Future:
+        """Count what one backend still has to push, off the UI thread.
+
+        Raises:
+            ValueError: If backend not initialized
+        """
+        backend = self._backends.get(backend_id)
+        if not backend:
+            raise ValueError(f"Backend '{backend_id}' not initialized")
+
+        return self._executor.submit(backend.unpushed_commits)
+
     def search_all_backends(self, query: str) -> dict[str, list[PasswordMetadata]]:
         """Search across all active backends.
 

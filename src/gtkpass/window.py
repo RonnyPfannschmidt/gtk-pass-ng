@@ -188,6 +188,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Backends whose stores have a remote, refreshed whenever they load.
         self._syncable_backends: list[str] = []
         self._pending_syncs: list[str] = []
+        # Whether the sync the preference asks for at startup has been run.
+        # Once per launch: a rebuild after a settings change loads the
+        # backends again, and is not a start.
+        self._synced_on_start = False
         # Bumped per load, so a superseded one cannot deliver into the window
         # it no longer describes. Both run on the pool, and the settings dialog
         # can start a second before the first has come back.
@@ -530,6 +534,21 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._refresh_recipient_banner()
         self._show_backend_errors()
         self._load_passwords()
+        self._sync_on_start()
+
+    def _sync_on_start(self) -> None:
+        """Sync every syncable store, if the preference asks for it.
+
+        After the listing has been started rather than instead of it: the
+        window fills with what is here now, and a pull that brings more in
+        lists again when it lands.
+        """
+        if self._synced_on_start or not self._syncable_backends:
+            return
+        self._synced_on_start = True
+        if self.settings.get_boolean("sync-on-start"):
+            logger.info("Syncing on start, as the preference asks")
+            self._start_sync(list(self._syncable_backends))
 
     def _backends_failed(self, request: int, error: BaseException) -> None:
         """The build itself fell over, rather than one backend in it."""
@@ -917,6 +936,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         for backend_id, record in zip(loaded_backends, records, strict=False):
             self._list_into(request, backend_id, record)
+            self._count_unpushed(request, backend_id)
 
         # Only on a first listing, when there is nothing else to say what shape
         # the tree should be. After that the rows say it themselves.
@@ -955,6 +975,33 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         try:
             future = self.backend_manager.list_passwords_async(backend_id)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, show, report)
+
+    def _count_unpushed(self, request: int, backend_id: str) -> None:
+        """Say beside a store how much it still has to push.
+
+        Only for a store that can sync: anywhere else the count is zero by
+        definition and asking would cost a worker for nothing. Runs git, so it
+        goes to the pool with the listing and lands whenever it lands.
+        """
+        if backend_id not in self._syncable_backends:
+            return
+
+        def show(count: int) -> None:
+            if request != self._listing_request:
+                return
+            self.password_list.set_badge(
+                backend_id, f"{count} to push" if count else ""
+            )
+
+        def report(error) -> None:
+            logger.debug(f"Could not count unpushed commits in {backend_id}: {error}")
+
+        try:
+            future = self.backend_manager.unpushed_commits_async(backend_id)
         except ValueError as e:
             report(e)
             return

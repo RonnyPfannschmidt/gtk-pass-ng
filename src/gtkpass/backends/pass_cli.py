@@ -209,6 +209,11 @@ class PassBackend(PasswordBackend):
             raise BackendError(self._sync_capability.detail)
         return self._git.sync()
 
+    def unpushed_commits(self) -> int:
+        if self._git is None or not self._sync_capability.supported:
+            return 0
+        return self._git.commits_ahead()
+
     # -- paths ---------------------------------------------------------------
 
     def _path_for(self, name: str) -> Path:

@@ -250,6 +250,7 @@ class SettingsWindow(Adw.PreferencesDialog):
     show_hidden_row = Gtk.Template.Child()
     clipboard_timeout_row = Gtk.Template.Child()
     search_as_you_type_row = Gtk.Template.Child()
+    sync_on_start_row = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -276,6 +277,12 @@ class SettingsWindow(Adw.PreferencesDialog):
         self.settings.bind(
             "search-as-you-type",
             self.search_as_you_type_row,
+            "active",
+            Gio.SettingsBindFlags.DEFAULT,
+        )
+        self.settings.bind(
+            "sync-on-start",
+            self.sync_on_start_row,
             "active",
             Gio.SettingsBindFlags.DEFAULT,
         )
