@@ -141,6 +141,9 @@ class GTKPassApp(Adw.Application):
         "win.delete-password": ["Delete"],
         "win.copy-password": ["<Control><Shift>c"],
         "win.copy-username": ["<Control><Shift>u"],
+        # L for link: U and C are taken, and Shift+L is free in every text
+        # widget the window has.
+        "win.copy-url": ["<Control><Shift>l"],
         "win.search": ["<Control>f"],
         # Shift+D for directories, Shift+E for everything. Collapsing is in the
         # menu and unbound on purpose: the letters left are ones a text widget

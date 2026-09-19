@@ -666,23 +666,53 @@ class TestTheContextMenu:
         assert view._menu.get_parent() is view
 
     def test_its_items_are_window_actions(self, view, backend):
-        model = view._menu.get_menu_model()
-        actions = []
-        for section in range(model.get_n_items()):
-            links = model.get_item_link(section, "section")
-            for index in range(links.get_n_items()):
-                actions.append(
-                    links.get_item_attribute_value(index, "action").get_string()
-                )
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
 
-        assert actions == [
+        view._popup_at(10.0, view._row_height() * 1.5)
+
+        assert menu_actions(view._menu.get_menu_model()) == [
             "win.copy-password",
             "win.copy-username",
+            "win.copy-url",
+            "win.add-password",
             "win.edit-password",
             "win.rotate-password",
             "win.rename-password",
             "win.delete-password",
         ]
+        window.destroy()
+
+    def test_a_folder_gets_a_menu_of_its_own(self, view, backend):
+        """Copy, edit and delete are entry actions; a folder was offered them
+        all greyed out, which reads as broken rather than as not applicable."""
+        view.add_password(backend, "work/mail")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
+
+        view._popup_at(10.0, view._row_height() * 1.5)
+
+        assert menu_actions(view._menu.get_menu_model()) == [
+            "win.add-password",
+            "win.rename-password",
+        ]
+        window.destroy()
+
+    def test_a_store_gets_a_menu_of_its_own(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
+
+        view._popup_at(10.0, view._row_height() * 0.5)
+
+        assert menu_actions(view._menu.get_menu_model()) == [
+            "win.add-password",
+            "win.sync-store",
+            "win.reload",
+            "app.preferences",
+        ]
+        window.destroy()
 
     def test_a_click_selects_the_row_under_it(self, view, backend):
         for path in ("alpha", "beta", "gamma"):
@@ -711,6 +741,16 @@ class TestTheContextMenu:
         view._popup_at(10.0, 10.0)
 
         assert not view._menu.is_visible()
+
+
+def menu_actions(model) -> list[str]:
+    """The action behind every item of a menu, section by section."""
+    actions = []
+    for section in range(model.get_n_items()):
+        links = model.get_item_link(section, "section")
+        for index in range(links.get_n_items()):
+            actions.append(links.get_item_attribute_value(index, "action").get_string())
+    return actions
 
 
 def present(view, ready):

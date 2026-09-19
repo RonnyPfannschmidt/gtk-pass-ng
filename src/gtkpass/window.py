@@ -267,6 +267,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         sync_action.set_enabled(False)
         self.add_action(sync_action)
 
+        # One store rather than all of them: what a store row's own menu
+        # offers. Open only while the selected row belongs to a store that
+        # can sync and nothing is syncing already.
+        sync_store_action = Gio.SimpleAction.new("sync-store", None)
+        sync_store_action.connect("activate", self._on_sync_store)
+        sync_store_action.set_enabled(False)
+        self.add_action(sync_store_action)
+
         # Building the backends again from the configuration that is already
         # there. What a failed backend needs once whatever stopped it -- an
         # unmounted store, a locked keyring, an agent that had not started --
@@ -305,6 +313,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         for name, field in (
             ("copy-password", "Password"),
             ("copy-username", "Username"),
+            ("copy-url", "URL"),
         ):
             copy_action = Gio.SimpleAction.new(name, None)
             copy_action.connect(
@@ -696,6 +705,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
             rename_action.set_enabled(
                 folder[0] in writable if folder is not None else writable_entry
             )
+
+        self._refresh_sync_store_action()
 
         if writable:
             self.add_button.set_tooltip_text("Add Password")
@@ -1141,6 +1152,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         action = self.lookup_action("sync")
         if action is not None:
             action.set_enabled(bool(syncable))
+        self._refresh_sync_store_action()
 
         if syncable:
             details = ", ".join(
@@ -1162,17 +1174,39 @@ class GTKPassWindow(Adw.ApplicationWindow):
         else:
             self.sync_button.set_tooltip_text("No backends are configured.")
 
+    def _refresh_sync_store_action(self) -> None:
+        action = self.lookup_action("sync-store")
+        sync_action = self.lookup_action("sync")
+        if action is None or sync_action is None:
+            return
+        selected = self.password_list.selected_backend()
+        action.set_enabled(
+            sync_action.get_enabled() and selected in self._syncable_backends
+        )
+
     def _on_sync(self, action, param):
-        """Pull and push the syncable backends, off the UI thread."""
-        if not self._syncable_backends:
+        """Pull and push every syncable backend, off the UI thread."""
+        self._start_sync(list(self._syncable_backends))
+
+    def _on_sync_store(self, action, param):
+        """Pull and push the store the sidebar is standing in."""
+        selected = self.password_list.selected_backend()
+        if selected in self._syncable_backends:
+            self._start_sync([selected])
+
+    def _start_sync(self, backends: list[str]) -> None:
+        if not backends:
             return
 
-        action.set_enabled(False)
+        for name in ("sync", "sync-store"):
+            action = self.lookup_action(name)
+            if action is not None:
+                action.set_enabled(False)
         self.sync_stack.set_visible_child_name("busy")
 
         # One at a time: they queue on the same four-worker pool anyway, and a
         # single report reads better than one toast per backend.
-        self._pending_syncs = list(self._syncable_backends)
+        self._pending_syncs = backends
         self._sync_next()
 
     def _sync_next(self) -> None:
@@ -1384,7 +1418,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.password_list.get_selected_password() is not None
             or self._shown is not None
         )
-        for name in ("copy-password", "copy-username"):
+        for name in ("copy-password", "copy-username", "copy-url"):
             action = self.lookup_action(name)
             if action is not None:
                 action.set_enabled(selected)

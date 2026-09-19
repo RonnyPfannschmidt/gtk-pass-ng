@@ -578,6 +578,30 @@ class TestKeyboard:
 
         assert said and "Password copied" in said[0]
 
+    def test_copying_the_url_copies_the_one_on_display(self, demo_backend_configured):
+        """The password and the username had shortcuts; the URL did not."""
+        copied = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            with_url = next(
+                entry.name
+                for entry in backend.list_passwords()
+                if "url" in (backend.get_password(entry.name).metadata)
+            )
+            window._on_password_selected(DEMO_BACKEND_ID, with_url)
+            pump_until(lambda: window._shown is not None)
+            window.lookup_action("copy-url").activate(None)
+            return window.password_detail.url_row.get_subtitle()
+
+        url = run_in_application(copy)
+
+        assert copied == [url]
+
     def test_copying_the_password_needs_an_entry(self, demo_backend_configured):
         def enabled(app):
             return listed_window(app).lookup_action("copy-password").get_enabled()
@@ -2981,6 +3005,46 @@ class TestSyncing:
             return window.sync_stack.get_visible_child_name()
 
         assert run_in_application(check) == "idle"
+
+    def test_one_store_can_be_synced_by_itself(self, demo_backend_configured):
+        """From its row's menu, rather than every store at once."""
+        from gtkpass.backends import SyncResult
+
+        def check(app):
+            window = self.window_with_sync(
+                app, self.ready(), sync=lambda: SyncResult(pulled=1, pushed=0)
+            )
+            pump_until(lambda: window._pending_listings == 0)
+            toasts = captured_messages(window)
+            window.password_list.selection.set_selected(0)
+            enabled = window.lookup_action("sync-store").get_enabled()
+
+            window.lookup_action("sync-store").activate(None)
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return enabled, toasts
+
+        enabled, toasts = run_in_application(check)
+
+        assert enabled is True
+        assert toasts and "1 in, 0 out" in toasts[0]
+
+    def test_syncing_one_store_is_closed_where_nothing_syncable_is_selected(
+        self, demo_backend_configured
+    ):
+        from gtkpass.backends import SyncCapability, SyncUnavailable
+
+        def check(app):
+            window = self.window_with_sync(
+                app,
+                SyncCapability.unsupported(
+                    SyncUnavailable.NO_REMOTE, "No remote is configured."
+                ),
+            )
+            pump_until(lambda: window._pending_listings == 0)
+            window.password_list.selection.set_selected(0)
+            return window.lookup_action("sync-store").get_enabled()
+
+        assert run_in_application(check) is False
 
     def test_a_missing_permission_offers_the_override_command(
         self, demo_backend_configured

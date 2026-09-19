@@ -228,6 +228,13 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         )
         self._menu = builder.get_object("password_menu")
         self._menu.set_parent(self)
+        # What each kind of row is offered. A folder given the entry actions
+        # was given them greyed out, which reads as broken.
+        self._menus = {
+            "entry": builder.get_object("entry_actions"),
+            "folder": builder.get_object("folder_actions"),
+            "store": builder.get_object("store_actions"),
+        }
 
         # Right-click on a pointer, and press-and-hold on a touchscreen. The
         # metadata claims touch, and a context menu no finger can reach is one
@@ -257,6 +264,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         if row is None:
             return
         self.selection.set_selected(row)
+        self._menu.set_menu_model(self._menus[self._kind_of(row)])
 
         # Built empty and filled in: passing the fields to the constructor is
         # deprecated for a boxed type, and silently ignored.
@@ -264,6 +272,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         at.x, at.y, at.width, at.height = int(x), int(y), 1, 1
         self._menu.set_pointing_to(at)
         self._menu.popup()
+
+    def _kind_of(self, position: int) -> str:
+        """Whether the row at ``position`` is an entry, a folder or a store."""
+        node = self.tree_model.get_row(position).get_item()
+        if node.password_name:
+            return "entry"
+        if any(record.node is node for record in self._backends):
+            return "store"
+        return "folder"
 
     def _row_at(self, y: float) -> int | None:
         """Which row of the model sits at ``y``, in this widget's coordinates.
