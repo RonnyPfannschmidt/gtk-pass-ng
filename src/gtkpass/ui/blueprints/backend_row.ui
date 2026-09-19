@@ -22,14 +22,16 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
     <child>
       <object class="AdwEntryRow" id="name_row">
         <property name="title" translatable="yes">Name</property>
-        <signal name="changed" handler="_on_settings_changed"/>
+        <property name="show-apply-button">true</property>
+        <signal name="apply" handler="_on_settings_changed"/>
       </object>
     </child>
     <child>
       <object class="AdwEntryRow" id="demo_path_row">
         <property name="title" translatable="yes">Custom demo.json</property>
         <property name="visible">false</property>
-        <signal name="changed" handler="_on_settings_changed"/>
+        <property name="show-apply-button">true</property>
+        <signal name="apply" handler="_on_settings_changed"/>
         <child type="suffix">
           <object class="GtkButton" id="demo_path_button">
             <property name="icon-name">document-open-symbolic</property>
@@ -47,14 +49,16 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
       <object class="AdwEntryRow" id="secretservice_collection_row">
         <property name="title" translatable="yes">Keyring Collection</property>
         <property name="visible">false</property>
-        <signal name="changed" handler="_on_settings_changed"/>
+        <property name="show-apply-button">true</property>
+        <signal name="apply" handler="_on_settings_changed"/>
       </object>
     </child>
     <child>
       <object class="AdwEntryRow" id="pass_store_row">
         <property name="title" translatable="yes">Password Store Directory</property>
         <property name="visible">false</property>
-        <signal name="changed" handler="_on_settings_changed"/>
+        <property name="show-apply-button">true</property>
+        <signal name="apply" handler="_on_settings_changed"/>
         <child type="suffix">
           <object class="GtkButton" id="pass_store_button">
             <property name="icon-name">folder-open-symbolic</property>
@@ -80,7 +84,8 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
       <object class="AdwEntryRow" id="direct_store_row">
         <property name="title" translatable="yes">Password Store Directory</property>
         <property name="visible">false</property>
-        <signal name="changed" handler="_on_settings_changed"/>
+        <property name="show-apply-button">true</property>
+        <signal name="apply" handler="_on_settings_changed"/>
         <child type="suffix">
           <object class="GtkButton" id="direct_store_button">
             <property name="icon-name">folder-open-symbolic</property>
@@ -98,7 +103,8 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
       <object class="AdwEntryRow" id="direct_gpg_home_row">
         <property name="title" translatable="yes">GPG Home Directory</property>
         <property name="visible">false</property>
-        <signal name="changed" handler="_on_settings_changed"/>
+        <property name="show-apply-button">true</property>
+        <signal name="apply" handler="_on_settings_changed"/>
         <child type="suffix">
           <object class="GtkButton" id="direct_gpg_home_button">
             <property name="icon-name">folder-open-symbolic</property>

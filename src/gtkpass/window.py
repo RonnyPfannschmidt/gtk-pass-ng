@@ -4,7 +4,7 @@ import importlib.resources
 import logging
 from pathlib import Path
 
-from gtkpass._gi import Adw, Gio, GLib, Gtk
+from gtkpass._gi import Adw, Gio, GLib, Gtk, Pango
 from gtkpass.backends import (
     BackendError,
     PasswordBackend,
@@ -94,6 +94,11 @@ PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, bool]] = {
 }
 
 
+#: How long the window waits after a settings write before rebuilding the
+#: backends, so that the several keys one save produces cost one rebuild.
+REBUILD_DELAY_MS = 250
+
+
 @Gtk.Template(
     filename=str(importlib.resources.files("gtkpass.ui.blueprints") / "window.ui")
 )
@@ -126,6 +131,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
     sync_button = Gtk.Template.Child()
     sync_stack = Gtk.Template.Child()
     recipient_banner = Gtk.Template.Child()
+    bottom_bar = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -182,6 +188,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Whether a listing has ever filled the sidebar. Only the first one
         # decides what shape the tree opens in; after that the rows do.
         self._listed_once = False
+
+        # A rebuild waiting to run, so that a burst of settings writes -- a
+        # store directory and a switch saved together -- costs one rebuild.
+        self._rebuild_source: int | None = None
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -472,11 +482,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._load_passwords()
 
     def _watch_display_name(self, backend_id: str, backend_type: str) -> None:
-        """Refresh the sidebar when this backend is renamed.
+        """Follow this backend's own settings while it is configured.
 
-        Renaming writes the instance's own display-name key, so it never
-        touches backend-instances and the list would otherwise keep showing
-        the old label until the next restart.
+        A rename writes the instance's display-name key and nothing else, so
+        the sidebar is listed again and relabels the row. Any other key -- the
+        store directory, the keyring collection -- changes what the backend is,
+        so it is built again. Neither touches backend-instances, and watching
+        only that left the old label, and the old store, until a restart.
         """
         if backend_id in self._backend_settings:
             return
@@ -485,10 +497,33 @@ class GTKPassWindow(Adw.ApplicationWindow):
         except Exception as e:
             logger.debug(f"Cannot watch {backend_id} for renames: {e}")
             return
-        backend_gsettings.connect(
-            "changed::display-name", lambda *_: self._load_passwords()
-        )
+        backend_gsettings.connect("changed", self._on_backend_setting_changed)
         self._backend_settings[backend_id] = backend_gsettings
+
+    def _on_backend_setting_changed(self, _settings, key: str) -> None:
+        if key == "display-name":
+            self._load_passwords()
+        else:
+            self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        """Build the backends again once the writes have stopped arriving.
+
+        The settings dialog saves a store as several keys in a row, and each
+        one is a signal. Coalesced rather than answered one by one: a rebuild
+        shuts the thread pool down and starts every backend over, and doing
+        that per key is what made typing a path feel like the application had
+        stopped.
+        """
+        if self._rebuild_source is not None:
+            return
+
+        def rebuild() -> bool:
+            self._rebuild_source = None
+            self._rebuild_backends()
+            return GLib.SOURCE_REMOVE
+
+        self._rebuild_source = GLib.timeout_add(REBUILD_DELAY_MS, rebuild)
 
     def _on_reload(self, _action, _param) -> None:
         """Build every configured backend again, from scratch.
@@ -509,7 +544,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             key: Changed key (backend-instances)
         """
         logger.info("Backend configuration changed, reloading...")
-        self._rebuild_backends()
+        self._schedule_rebuild()
 
     def _rebuild_backends(self) -> None:
         """Throw the manager away and load everything again."""
@@ -850,8 +885,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._show_placeholder("no-backends")
             return
 
-        self._show_placeholder("found-store", str(store))
+        self._show_placeholder("found-store", _tilde(store))
         self.adopt_store_button.set_label(f"Use {_tilde(store)}")
+        # The label is a path, and a path can be longer than a narrow window.
+        # Ellipsized in the middle, so the start and the store's own name --
+        # the parts that identify it -- are what survive.
+        label = self.adopt_store_button.get_child()
+        if isinstance(label, Gtk.Label):
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         self.adopt_store_button.set_visible(True)
 
     def _on_adopt_store(self, _action, _param) -> None:

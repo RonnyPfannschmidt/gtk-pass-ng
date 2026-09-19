@@ -30,6 +30,20 @@ UI = importlib.resources.files("gtkpass.ui.blueprints")
 logger = logging.getLogger(__name__)
 
 
+def _write(stored: Gio.Settings, key: str, value: str | bool) -> None:
+    """Store a value only if it is not the value already stored.
+
+    Every write is a ``changed`` signal under the keyfile backend, and every
+    signal costs the window a rebuild of every backend, so saying what is
+    already there is not free.
+    """
+    if isinstance(value, bool):
+        if stored.get_boolean(key) != value:
+            stored.set_boolean(key, value)
+    elif stored.get_string(key) != value:
+        stored.set_string(key, value)
+
+
 def _optional_path(text: str) -> Path | None:
     """Interpret an entry's contents as a path, treating empty as unset."""
     text = text.strip()
@@ -212,6 +226,9 @@ class BackendSettingsRow(Adw.ExpanderRow):
         path = chosen.get_path() if chosen is not None else None
         if path:
             row.set_text(path)
+            # Chosen, not typed: there is no half-way state to wait out, so
+            # this is applied at once rather than left for the row's button.
+            row.emit("apply")
 
     def get_display_name(self) -> str:
         """Name currently typed in the entry, empty if the user cleared it."""
@@ -333,29 +350,38 @@ class SettingsWindow(Adw.PreferencesDialog):
             self._save_backend_settings(
                 backend_id, row.backend_type, row.get_settings()
             )
-            set_backend_display_name(
-                row.backend_type, backend_id, row.get_display_name()
-            )
-        self.settings.set_value("backend-instances", GLib.Variant("a(ss)", instances))
+            # The row shows the derived name when none was chosen, so saving
+            # what it shows would record that name as chosen -- and record it
+            # every time, as a change. Only a name that differs from the one
+            # in effect is a rename.
+            if row.get_display_name() != get_backend_display_name(
+                row.backend_type, backend_id
+            ):
+                set_backend_display_name(
+                    row.backend_type, backend_id, row.get_display_name()
+                )
+        wanted = GLib.Variant("a(ss)", instances)
+        # Only when it differs. The keyfile backend emits ``changed`` for every
+        # write, equal or not, and the window rebuilds every backend on each
+        # one; the memory backend the tests use does not, which is how a save
+        # per keystroke went unnoticed for as long as it did.
+        if not self.settings.get_value("backend-instances").equal(wanted):
+            self.settings.set_value("backend-instances", wanted)
 
     def _save_backend_settings(
         self, backend_id: str, backend_type: str, settings: BackendSettings
     ) -> None:
         stored = get_backend_settings(backend_type, backend_id)
         if isinstance(settings, DemoBackendSettings):
-            stored.set_string("custom-data-path", str(settings.custom_data_path or ""))
+            _write(stored, "custom-data-path", str(settings.custom_data_path or ""))
         elif isinstance(settings, SecretServiceBackendSettings):
-            stored.set_string("collection-name", settings.collection_name)
+            _write(stored, "collection-name", settings.collection_name)
         elif isinstance(settings, PassBackendSettings):
-            stored.set_string(
-                "password-store-dir", str(settings.password_store_dir or "")
-            )
-            stored.set_boolean("use-git", settings.use_git)
+            _write(stored, "password-store-dir", str(settings.password_store_dir or ""))
+            _write(stored, "use-git", settings.use_git)
         elif isinstance(settings, DirectBackendSettings):
-            stored.set_string(
-                "password-store-dir", str(settings.password_store_dir or "")
-            )
-            stored.set_string("gpg-home", str(settings.gpg_home or ""))
+            _write(stored, "password-store-dir", str(settings.password_store_dir or ""))
+            _write(stored, "gpg-home", str(settings.gpg_home or ""))
 
     def _new_backend_id(self, backend_type: str) -> str:
         """An id no configured instance is already using.

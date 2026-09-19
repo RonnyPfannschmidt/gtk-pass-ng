@@ -15,6 +15,9 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
         <condition>max-width: 650sp</condition>
         <setter object="split_view" property="collapsed">true</setter>
         <setter object="sidebar_button" property="visible">true</setter>
+        <setter object="add_button" property="visible">false</setter>
+        <setter object="edit_button" property="visible">false</setter>
+        <setter object="bottom_bar" property="revealed">true</setter>
       </object>
     </child>
     <child>
@@ -85,6 +88,25 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
             <property name="revealed">false</property>
             <property name="button-label" translatable="yes">Review</property>
             <signal name="button-clicked" handler="_on_review_recipients"/>
+          </object>
+        </child>
+        <child type="bottom">
+          <object class="GtkActionBar" id="bottom_bar">
+            <property name="revealed">false</property>
+            <child type="start">
+              <object class="GtkButton">
+                <property name="icon-name">list-add-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Add Password</property>
+                <property name="action-name">win.add-password</property>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton">
+                <property name="icon-name">document-edit-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Edit Password</property>
+                <property name="action-name">win.edit-password</property>
+              </object>
+            </child>
           </object>
         </child>
         <property name="content">

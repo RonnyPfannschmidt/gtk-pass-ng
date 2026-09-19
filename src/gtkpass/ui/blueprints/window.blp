@@ -17,6 +17,14 @@ template $GTKPassWindow : Adw.ApplicationWindow {
     setters {
       split_view.collapsed: true;
       sidebar_button.visible: true;
+      // The header has no room for them at this width: with the toggle, the
+      // title, sync, the menu and three window controls it asked for 392
+      // points, and GTK gives a window its minimum whatever it was asked
+      // for, so at 360 the close button sat off the edge of the screen. The
+      // bottom bar is also where a thumb reaches.
+      add_button.visible: false;
+      edit_button.visible: false;
+      bottom_bar.revealed: true;
     }
   }
 
@@ -93,6 +101,27 @@ template $GTKPassWindow : Adw.ApplicationWindow {
       revealed: false;
       button-label: _("Review");
       button-clicked => $_on_review_recipients();
+    }
+
+    // The entry buttons, for the widths at which the header cannot hold
+    // them. Hidden otherwise: two ways to reach one action is one too many.
+    [bottom]
+    ActionBar bottom_bar {
+      revealed: false;
+
+      [start]
+      Button {
+        icon-name: "list-add-symbolic";
+        tooltip-text: _("Add Password");
+        action-name: "win.add-password";
+      }
+
+      [start]
+      Button {
+        icon-name: "document-edit-symbolic";
+        tooltip-text: _("Edit Password");
+        action-name: "win.edit-password";
+      }
     }
 
     // Wraps the split view so toasts appear over the whole window, which is

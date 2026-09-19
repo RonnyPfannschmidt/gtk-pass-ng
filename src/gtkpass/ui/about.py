@@ -11,10 +11,16 @@ from gtkpass._gi import Adw, Gtk
 
 UI = importlib.resources.files("gtkpass.ui.blueprints")
 
+#: What pip and the RPM know this project as; see pyproject.toml.
+DISTRIBUTION_NAME = "gtk-pass-ng"
+
 
 def _version() -> str:
     try:
-        return importlib.metadata.version("gtkpass")
+        # The distribution, not the import name: PyPI holds ``gtkpass`` for an
+        # unrelated project, so this one ships as gtk-pass-ng. Asked for by
+        # the wrong name it answered "unknown" in every build there was.
+        return importlib.metadata.version(DISTRIBUTION_NAME)
     except importlib.metadata.PackageNotFoundError:
         # Running from a source tree that was never installed.
         return "unknown"

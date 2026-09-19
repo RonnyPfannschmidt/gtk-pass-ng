@@ -135,4 +135,7 @@ def get_backend_display_name(backend_type: str, backend_id: str) -> str:
 def set_backend_display_name(backend_type: str, backend_id: str, name: str) -> None:
     """Store a user-chosen name; an empty one restores the derived default."""
     settings = get_backend_settings(backend_type, backend_id)
-    settings.set_string("display-name", name.strip())
+    # Not rewritten when unchanged: the window re-lists the sidebar on every
+    # write of this key, and the keyfile backend reports every write.
+    if settings.get_string("display-name") != name.strip():
+        settings.set_string("display-name", name.strip())

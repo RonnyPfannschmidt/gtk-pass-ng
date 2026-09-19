@@ -749,6 +749,72 @@ class TestNarrowWindows:
 
         assert run_in_application(select) is False
 
+    def test_the_window_fits_at_the_width_the_metadata_claims(
+        self, demo_backend_configured
+    ):
+        """360 points, as the AppStream component promises.
+
+        The header bar packed the sidebar toggle, add, edit, the title, sync,
+        the menu and three window controls, and asked for 392 points to do it.
+        GTK gives a window its minimum whatever was asked for, so at 360 the
+        close button sat past the right edge of the screen.
+        """
+        from gtkpass._gi import Gtk
+
+        def minimum_width(window):
+            minimum, _natural, _, _ = window.get_content().measure(
+                Gtk.Orientation.HORIZONTAL, -1
+            )
+            return minimum
+
+        needed = run_in_application(
+            lambda app: self.at_width(
+                app,
+                360,
+                lambda window: window.split_view.get_collapsed(),
+                minimum_width,
+            )
+        )
+
+        assert needed <= 360, f"the window cannot be narrower than {needed} points"
+
+    def test_the_entry_buttons_move_to_the_bottom_when_narrow(
+        self, demo_backend_configured
+    ):
+        """Where a thumb can reach them, and out of a header that has no room."""
+        in_header, at_bottom = run_in_application(
+            lambda app: self.at_width(
+                app,
+                360,
+                lambda window: window.split_view.get_collapsed(),
+                lambda window: (
+                    window.add_button.get_visible(),
+                    window.bottom_bar.get_revealed(),
+                ),
+            )
+        )
+
+        assert in_header is False
+        assert at_bottom is True
+
+    def test_the_entry_buttons_stay_in_the_header_when_wide(
+        self, demo_backend_configured
+    ):
+        in_header, at_bottom = run_in_application(
+            lambda app: self.at_width(
+                app,
+                1000,
+                lambda window: True,
+                lambda window: (
+                    window.add_button.get_visible(),
+                    window.bottom_bar.get_revealed(),
+                ),
+            )
+        )
+
+        assert in_header is True
+        assert at_bottom is False
+
     def test_the_sidebar_stays_put_at_full_width(self, demo_backend_configured):
         def select(app):
             window = listed_window(app)
@@ -1137,6 +1203,77 @@ class TestRenaming:
                 set_backend_display_name("demo", DEMO_BACKEND_ID, "")
 
         assert "Renamed Live" in run_in_application(rename_while_open)
+
+
+class TestSettingsEditsReachAnOpenWindow:
+    """A store's own keys have to be watched, not only the instance list.
+
+    The window only ever heard about the instance list, and heard about it
+    because the settings dialog rewrote that list on every keystroke whether
+    or not it had changed. Once an unchanged list is left alone, a store
+    directory edited in the dialog has to reach the window some other way --
+    and it has to reach it once, not once per key that was written.
+    """
+
+    @pytest.fixture
+    def demo_data_path(self):
+        import importlib.resources
+
+        return str(importlib.resources.files("gtkpass.backends.data") / "demo.json")
+
+    @pytest.fixture
+    def restore_demo_path(self):
+        from gtkpass.config import get_backend_settings
+
+        yield
+        get_backend_settings("demo", DEMO_BACKEND_ID).reset("custom-data-path")
+
+    def test_a_changed_store_setting_rebuilds_the_backend(
+        self, demo_backend_configured, demo_data_path, restore_demo_path
+    ):
+        from gtkpass.config import get_backend_settings
+
+        def edit(app):
+            window = listed_window(app)
+            before = window.backend_manager
+
+            get_backend_settings("demo", DEMO_BACKEND_ID).set_string(
+                "custom-data-path", demo_data_path
+            )
+            rebuilt = pump_until(
+                lambda: window.backend_manager is not before
+                and window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+            )
+            return rebuilt
+
+        assert run_in_application(edit) is True
+
+    def test_a_burst_of_writes_rebuilds_once(
+        self, demo_backend_configured, demo_data_path, restore_demo_path
+    ):
+        from gtkpass.config import get_backend_settings
+
+        def edit(app):
+            window = listed_window(app)
+            rebuilds: list[int] = []
+            original = window._rebuild_backends
+
+            def counted() -> None:
+                rebuilds.append(1)
+                original()
+
+            window._rebuild_backends = counted  # type: ignore[method-assign]
+
+            stored = get_backend_settings("demo", DEMO_BACKEND_ID)
+            stored.set_string("custom-data-path", demo_data_path)
+            stored.set_string("custom-data-path", "")
+            stored.set_string("custom-data-path", demo_data_path)
+            pump_until(lambda: bool(rebuilds))
+            # Long enough for a second one to have been scheduled and fired.
+            pump_until(lambda: False, timeout_seconds=1.0)
+            return len(rebuilds)
+
+        assert run_in_application(edit) == 1
 
 
 class TestShowingDetails:
