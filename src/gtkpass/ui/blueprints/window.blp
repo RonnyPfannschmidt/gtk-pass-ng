@@ -78,8 +78,11 @@ template $GTKPassWindow : Adw.ApplicationWindow {
           StackPage {
             name: "idle";
 
+            // view-refresh rather than emblem-synchronizing, which left
+            // adwaita-icon-theme and drew as a broken-image glyph. A test
+            // now checks every icon a blueprint names against the theme.
             child: Image {
-              icon-name: "emblem-synchronizing-symbolic";
+              icon-name: "view-refresh-symbolic";
             };
           }
 

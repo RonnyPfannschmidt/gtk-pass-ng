@@ -64,7 +64,7 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                         <property name="name">idle</property>
                         <property name="child">
                           <object class="GtkImage">
-                            <property name="icon-name">emblem-synchronizing-symbolic</property>
+                            <property name="icon-name">view-refresh-symbolic</property>
                           </object>
                         </property>
                       </object>

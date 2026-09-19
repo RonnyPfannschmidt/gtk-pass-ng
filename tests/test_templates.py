@@ -165,3 +165,32 @@ class TestTheErrorDetailDialog:
         assert scroller.get_propagate_natural_height(), (
             "a short error would otherwise sit in a box the height of a long one"
         )
+
+
+def icons_named_in_blueprints() -> list[str]:
+    """Every icon-name literal in the .blp files, once each."""
+    import re
+    from pathlib import Path
+
+    blueprints = Path(__file__).resolve().parent.parent / "src/gtkpass/ui/blueprints"
+    found = set()
+    for source in blueprints.glob("*.blp"):
+        found.update(re.findall(r'icon-name:\s*"([^"]+)"', source.read_text()))
+    return sorted(found)
+
+
+class TestEveryIconExists:
+    """An icon the theme does not have is drawn as a broken-image glyph.
+
+    external-link-symbolic went out of adwaita-icon-theme, and the Open
+    button in the rotation wizard has been a grey smudge since. Nothing said
+    so: GTK draws a placeholder and moves on.
+    """
+
+    @pytest.mark.parametrize("icon_name", icons_named_in_blueprints())
+    def test_the_theme_has_it(self, icon_name):
+        from gtkpass._gi import Gdk, Gtk
+
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+
+        assert theme.has_icon(icon_name), f"no icon named {icon_name!r}"
