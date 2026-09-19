@@ -4,7 +4,7 @@ import importlib.resources
 from typing import ClassVar
 from urllib.parse import urlparse
 
-from gtkpass._gi import Adw, Gio, GObject, Gtk
+from gtkpass._gi import Adw, Gio, GLib, GObject, Gtk
 from gtkpass.backends import PasswordEntry, metadata_pair
 
 #: Schemes an Open button will hand to the desktop.
@@ -173,6 +173,8 @@ class PasswordDetailView(Gtk.Box):
     spinner_label: Gtk.Label = Gtk.Template.Child()
     title_label: Gtk.Label = Gtk.Template.Child()
     path_label: Gtk.Label = Gtk.Template.Child()
+    store_label: Gtk.Label = Gtk.Template.Child()
+    modified_row: Adw.ActionRow = Gtk.Template.Child()
     username_row: Adw.ActionRow = Gtk.Template.Child()
     password_row: Adw.PasswordEntryRow = Gtk.Template.Child()
     url_row: Adw.ActionRow = Gtk.Template.Child()
@@ -213,12 +215,27 @@ class PasswordDetailView(Gtk.Box):
         self.spinner.set_spinning(True)
         self.stack.set_visible_child_name("loading")
 
-    def show_entry(self, entry: PasswordEntry) -> None:
-        """Display a decrypted entry."""
+    def show_entry(
+        self,
+        entry: PasswordEntry,
+        store_name: str = "",
+        modified: float | None = None,
+    ) -> None:
+        """Display a decrypted entry.
+
+        Args:
+            entry: The entry, with its content loaded.
+            store_name: The backend it came from, named under the heading.
+            modified: When its file last changed, as a Unix time; zero or
+                None for a store that does not say.
+        """
         self._replace_entry(entry)
 
         metadata = entry.metadata
         self._show_heading(entry.name)
+        self.store_label.set_text(f"in {store_name}" if store_name else "")
+        self.store_label.set_visible(bool(store_name))
+        self._show_modified(modified)
         self.username_row.set_subtitle(_first(metadata, USERNAME_KEYS) or PLACEHOLDER)
         self.password_row.set_text(entry.password or "")
         # Re-applied per entry: setting the text can reset the delegate.
@@ -247,6 +264,16 @@ class PasswordDetailView(Gtk.Box):
         self.title_label.set_text(leaf)
         self.path_label.set_text(folder + separator)
         self.path_label.set_visible(bool(folder))
+
+    def _show_modified(self, modified: float | None) -> None:
+        """Say when the entry last changed, in the local time and format."""
+        if not modified:
+            self.modified_row.set_subtitle("")
+            self.modified_row.set_visible(False)
+            return
+        when = GLib.DateTime.new_from_unix_local(int(modified))
+        self.modified_row.set_subtitle(when.format("%x %H:%M") if when else "")
+        self.modified_row.set_visible(when is not None)
 
     def _show_extra_fields(self, metadata: dict[str, str]) -> None:
         """List every field that has no row of its own, as the store wrote it.
@@ -285,6 +312,9 @@ class PasswordDetailView(Gtk.Box):
         """Forget the entry and blank the rows."""
         self._replace_entry(None)
         self._show_heading("")
+        self.store_label.set_text("")
+        self.store_label.set_visible(False)
+        self._show_modified(None)
         self.username_row.set_subtitle(PLACEHOLDER)
         self.password_row.set_text("")
         self.url_row.set_subtitle(PLACEHOLDER)

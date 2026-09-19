@@ -134,7 +134,7 @@ def captured_messages(window) -> list[str]:
     separately, in TestAFailureCanBeRead.
     """
     said: list[str] = []
-    window._toast = said.append
+    window._toast = lambda message, *_, **__: said.append(message)
     window._report_failure = lambda summary, error: said.append(f"{summary}: {error}")
     return said
 
@@ -340,7 +340,8 @@ class TestThePlaceholderSaysWhichStateItIsIn:
         monkeypatch.setattr(DemoBackend, "list_passwords", lambda self, prefix="": [])
 
         def state(app):
-            return listed_window(app)._placeholder_state
+            window = listed_window(app)
+            return window._placeholder_state, window.add_password_button.get_visible()
 
         settings = get_settings()
         previous = settings.get_value("backend-instances")
@@ -348,9 +349,37 @@ class TestThePlaceholderSaysWhichStateItIsIn:
             "backend-instances", GLib.Variant("a(ss)", [(DEMO_BACKEND_ID, "demo")])
         )
         try:
-            assert run_in_application(state) == "empty"
+            state_name, offers_adding = run_in_application(state)
         finally:
             settings.set_value("backend-instances", previous)
+
+        assert state_name == "empty"
+        assert offers_adding, "it says to add a password and offers no way to"
+
+    def test_a_failed_open_offers_to_try_again(self, demo_backend_configured):
+        """A store on a mount that was not up, a passphrase prompt dismissed:
+        the second attempt is the one that works, and it wanted a button."""
+
+        def retry(app):
+            window = listed_window(app)
+            window._on_password_selected(DEMO_BACKEND_ID, "no/such/entry")
+            pump_until(lambda: window._placeholder_state == "failed")
+            offered = window.retry_open_button.get_visible()
+            attempts = window._detail_request
+
+            window.activate_action("win.retry-open", None)
+            return offered, window._detail_request - attempts
+
+        offered, attempts = run_in_application(retry)
+
+        assert offered is True
+        assert attempts == 1
+
+    def test_the_retry_button_is_not_offered_elsewhere(self, demo_backend_configured):
+        def visible(app):
+            return listed_window(app).retry_open_button.get_visible()
+
+        assert run_in_application(visible) is False
 
 
 class TestTheWindowOpensWhereItWasLeft:
@@ -1055,6 +1084,26 @@ class TestABackendThatWouldNotLoad:
 
         assert "unavailable" in run_in_application(name)
 
+    def test_choosing_the_row_says_why_and_offers_a_way_out(self, broken):
+        """Clicking the row did nothing, and the reason lived in a tooltip."""
+
+        def choose(app):
+            window = self.failed_window(app)
+            pump_until(lambda: window.password_list.root.get_n_items() > 0)
+            window.password_list.selection.set_selected(0)
+            return (
+                window._placeholder_state,
+                window.placeholder_page.get_description(),
+                window.reload_button.get_visible(),
+                window.open_preferences_button.get_visible(),
+            )
+
+        state, description, retry, preferences = run_in_application(choose)
+
+        assert state == "unavailable"
+        assert "not mounted" in description
+        assert retry and preferences
+
     def test_the_toast_offers_a_retry(self, broken):
         from gtkpass._gi import Adw as _Adw
 
@@ -1384,6 +1433,13 @@ class TestShowingDetails:
 
         assert displayed_name(window) == name
         assert window.password_detail.password_row.get_text()
+
+    def test_the_pane_names_the_store(self, demo_backend_configured):
+        def store(app):
+            window, _ = self.open_first_password(app)
+            return window.password_detail.store_label.get_text()
+
+        assert run_in_application(store) == "in Demo"
 
     def test_a_missing_entry_reports_instead_of_crashing(self, demo_backend_configured):
         def select_nonsense(app):
@@ -2662,6 +2718,35 @@ class TestACopiedSecretIsTakenBack:
         )
         window._on_copy_requested(None, "Password", "hunter2")
         return window, name, cleared
+
+    def test_the_toast_offers_to_clear_it_now(self, demo_backend_configured):
+        """It promised a clear in forty-five seconds and offered no say in it."""
+
+        def check(app):
+            window, _ = TestShowingDetails().open_first_password(app)
+            toasts: list[tuple[str, str | None, str | None]] = []
+            window._toast = lambda message, button=None, action=None: toasts.append(
+                (message, button, action)
+            )
+            window._on_copy_requested(None, "Password", "hunter2")
+            return toasts
+
+        toasts = run_in_application(check)
+
+        assert toasts == [
+            ("Password copied, clearing in 45s", "Clear Now", "win.clear-clipboard")
+        ]
+
+    def test_clearing_now_takes_it_back(self, demo_backend_configured):
+        def check(app):
+            window, _, cleared = self.copy_from_first_entry(app)
+            window.activate_action("win.clear-clipboard", None)
+            return cleared, window._copied_from
+
+        cleared, remembered = run_in_application(check)
+
+        assert cleared == ["taken back"]
+        assert remembered is None
 
     def test_opening_another_entry_takes_it_back(self, demo_backend_configured):
         def check(app):

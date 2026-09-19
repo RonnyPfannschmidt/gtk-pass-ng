@@ -164,6 +164,39 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                                   </object>
                                 </child>
                                 <child>
+                                  <object class="GtkButton" id="add_password_button">
+                                    <property name="label" translatable="yes">Add Password</property>
+                                    <property name="action-name">win.add-password</property>
+                                    <property name="visible">false</property>
+                                    <style>
+                                      <class name="suggested-action"/>
+                                      <class name="pill"/>
+                                    </style>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="retry_open_button">
+                                    <property name="label" translatable="yes">Try Again</property>
+                                    <property name="action-name">win.retry-open</property>
+                                    <property name="visible">false</property>
+                                    <style>
+                                      <class name="suggested-action"/>
+                                      <class name="pill"/>
+                                    </style>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="reload_button">
+                                    <property name="label" translatable="yes">Try Again</property>
+                                    <property name="action-name">win.reload</property>
+                                    <property name="visible">false</property>
+                                    <style>
+                                      <class name="suggested-action"/>
+                                      <class name="pill"/>
+                                    </style>
+                                  </object>
+                                </child>
+                                <child>
                                   <object class="GtkButton" id="open_preferences_button">
                                     <property name="label" translatable="yes">Open Preferences</property>
                                     <property name="action-name">app.preferences</property>

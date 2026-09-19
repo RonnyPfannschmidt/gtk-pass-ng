@@ -460,3 +460,59 @@ class TestOpeningTheSite:
         view._on_open_url(None)
 
         assert launched == ["https://mail.example.invalid"]
+
+
+class TestTheStoreIsNamed:
+    """With two stores configured, only the sidebar said which one an entry
+    was in, and the sidebar is an overlay at narrow widths."""
+
+    def test_the_store_is_named_under_the_heading(self, view):
+        view.show_entry(entry("s3cret"), store_name="Work Vault")
+
+        assert view.store_label.get_visible()
+        assert view.store_label.get_text() == "in Work Vault"
+
+    def test_an_entry_shown_without_a_store_has_no_line_for_it(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert not view.store_label.get_visible()
+
+    def test_clear_takes_it_away(self, view):
+        view.show_entry(entry("s3cret"), store_name="Work Vault")
+        view.clear()
+
+        assert not view.store_label.get_visible()
+
+
+class TestLastChanged:
+    """Every backend lists a modification time, and nothing showed it.
+
+    "How old is this password" is the question behind most rotations, and
+    the answer was in hand all along.
+    """
+
+    def test_the_time_is_shown_as_a_row(self, view):
+        from gtkpass._gi import GLib
+
+        view.show_entry(entry("s3cret"), modified=1_700_000_000.0)
+
+        expected = GLib.DateTime.new_from_unix_local(1_700_000_000).format("%x %H:%M")
+        assert view.modified_row.get_visible()
+        assert view.modified_row.get_subtitle() == expected
+
+    def test_a_store_that_keeps_no_time_shows_no_row(self, view):
+        """The demo data says 0, the interface says nothing."""
+        view.show_entry(entry("s3cret"), modified=0.0)
+
+        assert not view.modified_row.get_visible()
+
+    def test_an_entry_shown_without_one_shows_no_row(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert not view.modified_row.get_visible()
+
+    def test_clear_takes_it_away(self, view):
+        view.show_entry(entry("s3cret"), modified=1_700_000_000.0)
+        view.clear()
+
+        assert not view.modified_row.get_visible()

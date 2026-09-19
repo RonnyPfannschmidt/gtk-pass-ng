@@ -161,9 +161,10 @@ template $GTKPassWindow : Adw.ApplicationWindow {
               icon-name: "dialog-password-symbolic";
               vexpand: true;
 
-              // Only relevant when no backend is configured; shown on demand.
-              // Two buttons rather than one because there are two answers:
-              // adopt the store that is already there, or go and describe one.
+              // One button per way out of a state, each shown only by the
+              // states it answers: PLACEHOLDER_STATES in window.py says which.
+              // A page that says "add a password to get started" and offers
+              // no way to is a page that stops one step short.
               child: Box {
                 orientation: vertical;
                 spacing: 12;
@@ -171,6 +172,30 @@ template $GTKPassWindow : Adw.ApplicationWindow {
 
                 Button adopt_store_button {
                   action-name: "win.adopt-store";
+                  visible: false;
+
+                  styles ["suggested-action", "pill"]
+                }
+
+                Button add_password_button {
+                  label: _("Add Password");
+                  action-name: "win.add-password";
+                  visible: false;
+
+                  styles ["suggested-action", "pill"]
+                }
+
+                Button retry_open_button {
+                  label: _("Try Again");
+                  action-name: "win.retry-open";
+                  visible: false;
+
+                  styles ["suggested-action", "pill"]
+                }
+
+                Button reload_button {
+                  label: _("Try Again");
+                  action-name: "win.reload";
                   visible: false;
 
                   styles ["suggested-action", "pill"]

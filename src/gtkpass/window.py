@@ -54,44 +54,69 @@ logger = logging.getLogger(__name__)
 #: entry that would not decrypt dropped the user onto "No Passwords Found"
 #: while its store sat listed beside it.
 #:
-#: Each entry is (title, description, icon, whether to offer Preferences). A
+#: Each entry is (title, description, icon, the buttons to offer). A
 #: description of None is filled in by the caller, which is how the failure
-#: state carries what went wrong.
-PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, bool]] = {
-    "loading": ("GTKPass", "Loading...", "dialog-password-symbolic", False),
+#: states carry what went wrong. The buttons are template children of the
+#: status page, and a state that offers none says so with an empty tuple.
+PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, tuple[str, ...]]] = {
+    "loading": ("GTKPass", "Loading...", "dialog-password-symbolic", ()),
     "no-backends": (
         "No Backends Configured",
         "GTKPass needs a password backend to work.\n"
         "Choose a backend in Preferences to get started.",
         "preferences-system-symbolic",
-        True,
+        ("open_preferences_button",),
     ),
     "empty": (
         "No Passwords Found",
         "Your password store is empty.\nAdd a password to get started.",
         "dialog-password-symbolic",
-        False,
+        ("add_password_button",),
     ),
     "ready": (
         "Nothing Selected",
         "Choose an entry in the sidebar to see it here.",
         "dialog-password-symbolic",
-        False,
+        (),
     ),
     "found-store": (
         "Use Your Password Store?",
         None,
         "folder-symbolic",
-        True,
+        ("adopt_store_button", "open_preferences_button"),
     ),
     "no-matches": (
         "No Matches",
         "No entry's path contains what you searched for.",
         "system-search-symbolic",
-        False,
+        (),
     ),
-    "failed": ("Could Not Open This Entry", None, "dialog-warning-symbolic", False),
+    "failed": (
+        "Could Not Open This Entry",
+        None,
+        "dialog-warning-symbolic",
+        ("retry_open_button",),
+    ),
+    # A store that would not load, chosen in the sidebar. What stops one is
+    # almost always outside the application -- a mount, a keyring, an agent
+    # -- and fixed there, after which it wants trying again.
+    "unavailable": (
+        "This Store Did Not Load",
+        None,
+        "dialog-error-symbolic",
+        ("reload_button", "open_preferences_button"),
+    ),
 }
+
+#: Every button the status page has, so a state can hide the ones it does
+#: not offer.
+PLACEHOLDER_BUTTONS = (
+    "adopt_store_button",
+    "add_password_button",
+    "retry_open_button",
+    "reload_button",
+    "open_preferences_button",
+)
 
 
 #: How long the window waits after a settings write before rebuilding the
@@ -126,6 +151,9 @@ class GTKPassWindow(Adw.ApplicationWindow):
     content_stack = Gtk.Template.Child()
     password_detail = Gtk.Template.Child()
     adopt_store_button = Gtk.Template.Child()
+    add_password_button = Gtk.Template.Child()
+    retry_open_button = Gtk.Template.Child()
+    reload_button = Gtk.Template.Child()
     sidebar_button = Gtk.Template.Child()
     add_button = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
@@ -185,6 +213,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._showing_entry = False
         # The store the first-run screen found, while it is being offered.
         self._offered_store: Path | None = None
+        # The entry that last refused to open, for the Try Again button.
+        self._failed_open: tuple[str, str] | None = None
+        # When each listed entry last changed, by (backend id, name), so the
+        # pane can say so: the listing knows and the decrypted entry does not.
+        self._modified: dict[tuple[str, str], float] = {}
         # Whether a listing has ever filled the sidebar. Only the first one
         # decides what shape the tree opens in; after that the rows do.
         self._listed_once = False
@@ -301,6 +334,18 @@ class GTKPassWindow(Adw.ApplicationWindow):
             tree_action = Gio.SimpleAction.new(name, None)
             tree_action.connect("activate", lambda _a, _p, run=method: run())
             self.add_action(tree_action)
+
+        # Opening again the entry that last refused to. The button that
+        # reaches it is only shown on the page that says one did.
+        retry_action = Gio.SimpleAction.new("retry-open", None)
+        retry_action.connect("activate", self._on_retry_open)
+        self.add_action(retry_action)
+
+        # Taking a copied secret back before the timeout does. The button on
+        # the copied toast is what reaches it.
+        clear_action = Gio.SimpleAction.new("clear-clipboard", None)
+        clear_action.connect("activate", self._on_clear_clipboard)
+        self.add_action(clear_action)
 
         # Reaching the search box from the keyboard. Always available: there is
         # nothing to break by focusing an empty one.
@@ -643,9 +688,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Every selection, not only the ones that are entries: standing on a
         # folder changes which actions have a target, and nothing else would
         # say so.
-        self.password_list.connect(
-            "selection-changed", lambda *_: self._refresh_write_actions()
-        )
+        self.password_list.connect("selection-changed", self._on_selection_changed)
         # Enter or a double-click on an entry copies its password: the one
         # thing somebody who has found the row they wanted does next.
         self.password_list.connect(
@@ -663,6 +706,33 @@ class GTKPassWindow(Adw.ApplicationWindow):
             "changed::show-hidden-passwords", self._apply_reveal_preference
         )
         self._apply_reveal_preference()
+
+    def _on_selection_changed(self, _tree) -> None:
+        self._refresh_write_actions()
+        self._show_selected_store_state()
+
+    def _show_selected_store_state(self) -> None:
+        """Say why a store did not load, when its row is what was chosen.
+
+        The row said "(unavailable)" and kept the reason in its tooltip, and
+        clicking it did nothing. Chosen, it now takes the pane, with the
+        reason and the two ways out; choosing anything else gives it back.
+        """
+        selected = self.password_list.selected_backend()
+        failed = {
+            backend_id: (backend_type, error)
+            for backend_id, backend_type, error in self.failed_backends
+        }
+        if (
+            selected in failed
+            and self.password_list.get_selected_password() is None
+            and self.password_list.get_selected_folder() is None
+        ):
+            backend_type, error = failed[selected]
+            name = self._get_backend_display_name(selected)
+            self._show_placeholder("unavailable", f"{name} ({backend_type})\n\n{error}")
+        elif self._placeholder_state == "unavailable":
+            self._refresh_placeholder(reapply=False)
 
     def _refresh_write_actions(self) -> None:
         """Offer adding only where something can take it.
@@ -861,6 +931,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             if request != self._listing_request:
                 return
             logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
+            self._modified.update(
+                {
+                    (backend_id, password.name): password.modified
+                    for password in passwords
+                }
+            )
             # The whole listing at once, so the tree can be compared with it
             # rather than emptied and filled. A listing that says what is
             # already there changes nothing at all -- which is what a sync of
@@ -920,7 +996,6 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._show_placeholder("no-backends")
             return
 
-        self._show_placeholder("found-store", _tilde(store))
         self.adopt_store_button.set_label(f"Use {_tilde(store)}")
         # The label is a path, and a path can be longer than a narrow window.
         # Ellipsized in the middle, so the start and the store's own name --
@@ -928,7 +1003,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         label = self.adopt_store_button.get_child()
         if isinstance(label, Gtk.Label):
             label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        self.adopt_store_button.set_visible(True)
+        self._show_placeholder("found-store", _tilde(store))
 
     def _on_adopt_store(self, _action, _param) -> None:
         """Configure the store the first-run screen found, and open it.
@@ -970,18 +1045,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
         An entry already on display is left alone: only the states that mean
         "there is nothing to show" take the pane back from it.
         """
-        title, description, icon, offer_preferences = PLACEHOLDER_STATES[state]
+        title, description, icon, buttons = PLACEHOLDER_STATES[state]
         self.placeholder_page.set_title(title)
         self.placeholder_page.set_description(
             detail if description is None else description
         )
         self.placeholder_page.set_icon_name(icon)
-        self.open_preferences_button.set_visible(offer_preferences)
+        for button in PLACEHOLDER_BUTTONS:
+            getattr(self, button).set_visible(button in buttons)
         self._placeholder_state = state
-
-        if state != "found-store":
-            # Only the first-run screen offers it, and only while it is up.
-            self.adopt_store_button.set_visible(False)
 
         if (
             state
@@ -990,6 +1062,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 "found-store",
                 "empty",
                 "failed",
+                "unavailable",
             )
             or not self._showing_entry
         ):
@@ -1364,7 +1437,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
             if request != self._detail_request:
                 entry.clear_password()
                 return
-            self.password_detail.show_entry(entry)
+            self.password_detail.show_entry(
+                entry,
+                store_name=self._get_backend_display_name(backend_id),
+                modified=self._modified.get((backend_id, password_name)),
+            )
             self._set_shown((backend_id, password_name))
 
         def report(error):
@@ -1377,6 +1454,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             # On the page rather than only in a toast: five seconds is not long
             # enough to read a GPG error, and the pane is where the user is
             # already looking.
+            self._failed_open = (backend_id, password_name)
             self._show_placeholder("failed", f"{password_name}\n\n{error}")
 
         try:
@@ -1385,6 +1463,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
             report(e)
             return
         on_ui_thread(future, show, report)
+
+    def _on_retry_open(self, _action, _param) -> None:
+        if self._failed_open is not None:
+            self._on_password_selected(*self._failed_open)
+
+    def _on_clear_clipboard(self, _action, _param) -> None:
+        """Take a copied secret back now rather than when the timeout does."""
+        self._clipboard.clear_if_ours()
+        self._copied_from = None
 
     def _apply_reveal_preference(self, *_args) -> None:
         """Show or dot out passwords, following the preference."""
@@ -1707,9 +1794,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._clipboard.copy(value, timeout)
         self._copied_from = self._shown
         if timeout > 0:
-            self._toast(f"{field} copied, clearing in {timeout}s")
+            message = f"{field} copied, clearing in {timeout}s"
         else:
-            self._toast(f"{field} copied")
+            message = f"{field} copied"
+        # The toast announces a clear nobody asked for the timing of; the
+        # button is the say in it -- pasted already, take it back now.
+        self._toast(message, button="Clear Now", action="win.clear-clipboard")
 
     def discard_clipboard(self) -> None:
         """Take a copied secret back before the application goes away.
@@ -1723,8 +1813,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """
         self._clipboard.clear_at_shutdown()
 
-    def _toast(self, message: str) -> None:
-        self.toast_overlay.add_toast(Adw.Toast.new(message))
+    def _toast(
+        self, message: str, button: str | None = None, action: str | None = None
+    ) -> None:
+        toast = Adw.Toast.new(message)
+        if button and action:
+            toast.set_button_label(button)
+            toast.set_action_name(action)
+        self.toast_overlay.add_toast(toast)
 
     def _report_failure(self, summary: str, error: object) -> None:
         """Say what failed, and keep the whole of why within reach.
