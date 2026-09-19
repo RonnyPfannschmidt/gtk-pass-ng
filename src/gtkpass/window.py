@@ -4,7 +4,7 @@ import importlib.resources
 import logging
 from pathlib import Path
 
-from gtkpass._gi import Adw, Gio, GLib, Gtk, Pango
+from gtkpass._gi import Adw, Gdk, Gio, GLib, Gtk, Pango
 from gtkpass.backends import (
     BackendError,
     PasswordBackend,
@@ -329,7 +329,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.set_help_overlay(overlay)
 
     def _copy_field(self, field: str) -> None:
-        """Copy a field of the selected entry, whether or not the pane has it.
+        """Copy a field of the selected entry, whether or not the pane has it."""
+        self._copy_from(self.password_list.get_selected_password(), field)
+
+    def _copy_from(self, selected: tuple[str, str] | None, field: str) -> None:
+        """Copy a field of ``selected``, whether or not the pane has it.
 
         When the pane holds the entry this goes through the pane rather than
         around it, so the clipboard timeout, the toast and the take-back on
@@ -341,7 +345,6 @@ class GTKPassWindow(Adw.ApplicationWindow):
         takes as long as it takes -- and reading the pane then would copy an
         empty string or, worse, whatever was on it before.
         """
-        selected = self.password_list.get_selected_password()
         if selected is None or selected == self._shown:
             if not self.password_detail.copy_field(field):
                 self._toast(f"There is no {field.lower()} to copy")
@@ -634,6 +637,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self.password_list.connect(
             "selection-changed", lambda *_: self._refresh_write_actions()
         )
+        # Enter or a double-click on an entry copies its password: the one
+        # thing somebody who has found the row they wanted does next.
+        self.password_list.connect(
+            "password-activated",
+            lambda _tree, backend_id, name: self._copy_from(
+                (backend_id, name), "Password"
+            ),
+        )
         self.password_detail.connect("copy-requested", self._on_copy_requested)
 
         # Not a Gio.Settings.bind: Adw.PasswordEntryRow has no property to bind
@@ -711,6 +722,19 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Escape in the box clears it rather than leaving the tree narrowed by
         # a search the user has visibly abandoned.
         self.search_entry.connect("stop-search", lambda *_: self._clear_search())
+        # Typing anywhere in the window types into the box, as every list in
+        # GNOME does; the tree has no type-ahead of its own to compete with.
+        self.search_entry.set_key_capture_widget(self)
+        # And Down leaves it again, for the rows the search just narrowed.
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_search_key)
+        self.search_entry.add_controller(keys)
+
+    def _on_search_key(self, _controller, keyval: int, _keycode, _state) -> bool:
+        if keyval != Gdk.KEY_Down:
+            return False
+        self.password_list.focus_rows()
+        return True
 
     def _on_search_changed(self, _entry) -> None:
         if self.settings.get_boolean("search-as-you-type"):

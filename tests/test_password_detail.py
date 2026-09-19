@@ -421,3 +421,42 @@ class TestCopyRequests:
         view.show_entry(entry("s3cret"))
 
         assert self.emitted(view, view.copy_username_btn) == []
+
+
+class TestOpeningTheSite:
+    """The rotation wizard could open the site; the pane, where people are
+    when they want to, could only copy it."""
+
+    def test_a_web_address_can_be_opened(self, view):
+        view.show_entry(entry("s3cret\nurl: https://mail.example.invalid"))
+
+        assert view.open_url_btn.get_visible()
+
+    def test_anything_but_a_web_address_is_shown_but_not_launched(self, view):
+        """A synced store carries whatever another machine wrote there."""
+        view.show_entry(entry("s3cret\nurl: ssh://staging.example.invalid"))
+
+        assert view.url_row.get_subtitle() == "ssh://staging.example.invalid"
+        assert not view.open_url_btn.get_visible()
+
+    def test_an_entry_without_an_address_offers_nothing(self, view):
+        view.show_entry(entry("s3cret\nusername: someone"))
+
+        assert not view.open_url_btn.get_visible()
+
+    def test_clear_takes_the_button_away(self, view):
+        view.show_entry(entry("s3cret\nurl: https://mail.example.invalid"))
+        view.clear()
+
+        assert not view.open_url_btn.get_visible()
+
+    def test_opening_hands_the_address_to_the_desktop(self, view, monkeypatch):
+        from gtkpass.ui import password_detail
+
+        launched: list[str] = []
+        monkeypatch.setattr(password_detail, "launch_uri", launched.append)
+        view.show_entry(entry("s3cret\nurl: https://mail.example.invalid"))
+
+        view._on_open_url(None)
+
+        assert launched == ["https://mail.example.invalid"]

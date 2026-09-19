@@ -2,9 +2,40 @@
 
 import importlib.resources
 from typing import ClassVar
+from urllib.parse import urlparse
 
 from gtkpass._gi import Adw, Gio, GObject, Gtk
 from gtkpass.backends import PasswordEntry, metadata_pair
+
+#: Schemes an Open button will hand to the desktop.
+#:
+#: An entry's ``url:`` line is whatever its owner wrote, and a store can be
+#: synced from a machine somebody else has written to. ``file://`` and
+#: ``smb://`` open something rather than going to a site, and a scheme nobody
+#: has thought of is handled by whichever application claimed it. The value is
+#: still shown and still selectable -- what is withheld is one click that
+#: launches it.
+OPENABLE_SCHEMES = frozenset({"http", "https"})
+
+
+def is_openable(url: str) -> bool:
+    """Whether a one-click Open is safe to offer for this value."""
+    try:
+        return urlparse(url).scheme.lower() in OPENABLE_SCHEMES
+    except ValueError:
+        return False
+
+
+def launch_uri(uri: str) -> None:
+    """Hand a site to the desktop, through the portal when there is one.
+
+    Gio rather than a browser command: inside the Flatpak this goes to
+    org.freedesktop.portal.OpenURI, which needs no host access and no network
+    permission of its own. A function of its own so a test can stand in for
+    it rather than open a browser.
+    """
+    Gio.AppInfo.launch_default_for_uri(uri, None)
+
 
 #: Metadata keys that mean "the account name", in order of preference. Stores
 #: written by different tools disagree about which to use.
@@ -153,6 +184,7 @@ class PasswordDetailView(Gtk.Box):
     copy_username_btn: Gtk.Button = Gtk.Template.Child()
     copy_password_btn: Gtk.Button = Gtk.Template.Child()
     copy_url_btn: Gtk.Button = Gtk.Template.Child()
+    open_url_btn: Gtk.Button = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -191,7 +223,9 @@ class PasswordDetailView(Gtk.Box):
         self.password_row.set_text(entry.password or "")
         # Re-applied per entry: setting the text can reset the delegate.
         self.set_reveal_password(self._reveal_password)
-        self.url_row.set_subtitle(_first(metadata, URL_KEYS) or PLACEHOLDER)
+        url = _first(metadata, URL_KEYS)
+        self.url_row.set_subtitle(url or PLACEHOLDER)
+        self.open_url_btn.set_visible(is_openable(url))
         self._show_extra_fields(metadata)
 
         notes = _notes(entry)
@@ -254,6 +288,7 @@ class PasswordDetailView(Gtk.Box):
         self.username_row.set_subtitle(PLACEHOLDER)
         self.password_row.set_text("")
         self.url_row.set_subtitle(PLACEHOLDER)
+        self.open_url_btn.set_visible(False)
         self._show_extra_fields({})
         self.notes_label.set_text("")
         self.notes_group.set_visible(False)
@@ -291,6 +326,12 @@ class PasswordDetailView(Gtk.Box):
     @Gtk.Template.Callback()
     def _on_copy_url(self, _button) -> None:
         self._request_copy("URL", self.url_row.get_subtitle())
+
+    @Gtk.Template.Callback()
+    def _on_open_url(self, _button) -> None:
+        url = self.url_row.get_subtitle() or ""
+        if is_openable(url):
+            launch_uri(url)
 
     def copy_field(self, field: str) -> bool:
         """Copy one of COPYABLE_FIELDS, exactly as its own button would.

@@ -602,6 +602,59 @@ class TestTheWindowHearsAboutEverySelection:
         assert seen
 
 
+class TestActivating:
+    """Enter, or a double-click, on a row.
+
+    Nothing was connected to it, so the one gesture every list in GNOME
+    answers did nothing here. An entry announces itself, and the window --
+    which owns the clipboard -- copies its password; a folder opens or shuts,
+    which is what activating a folder means everywhere else.
+    """
+
+    def test_activating_an_entry_announces_it(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        seen: list[tuple[str, str]] = []
+        view.connect(
+            "password-activated", lambda _view, *entry: seen.append(tuple(entry))
+        )
+
+        view.column_view.emit("activate", 1)
+
+        assert seen == [("demo_1", "alpha")]
+
+    def test_activating_a_folder_opens_it(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_first_level()
+        row = view.tree_model.get_row(1)
+        assert not row.get_expanded()
+
+        view.column_view.emit("activate", 1)
+
+        assert row.get_expanded()
+
+    def test_activating_an_open_folder_shuts_it(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_all()
+        row = view.tree_model.get_row(1)
+
+        view.column_view.emit("activate", 1)
+
+        assert not row.get_expanded()
+
+    def test_a_folder_says_nothing_about_a_password(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_first_level()
+        seen: list[tuple[str, str]] = []
+        view.connect(
+            "password-activated", lambda _view, *entry: seen.append(tuple(entry))
+        )
+
+        view.column_view.emit("activate", 1)
+
+        assert seen == []
+
+
 class TestTheContextMenu:
     """Right-click, and press-and-hold, offer the entry actions on the row.
 

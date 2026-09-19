@@ -166,6 +166,10 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         # folder is an answer to it: renaming applies to one, and deleting the
         # entry the pane still happens to hold does not.
         "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # (backend id, entry name): Enter or a double-click on an entry. The
+        # tree does not say what that means -- the window owns the clipboard
+        # and decides -- it only says which entry it happened to.
+        "password-activated": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
     }
 
     column_view: Gtk.ColumnView = Gtk.Template.Child()
@@ -193,6 +197,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
 
         self._on_password_selected: Callable[[str, str], None] | None = None
         self.selection.connect("notify::selected-item", self._selection_changed)
+        self.column_view.connect("activate", self._on_row_activated)
         self._install_context_menu()
 
         #: What each backend contributed, kept so a filter can be lifted again.
@@ -318,6 +323,27 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         header = self.column_view.get_first_child()
         if header is not None:
             header.set_visible(False)
+
+    def _on_row_activated(self, _view, position: int) -> None:
+        """Enter or a double-click: open a folder, announce an entry.
+
+        Nothing was connected here, so the one gesture every list in GNOME
+        answers did nothing in this one. A folder opens or shuts, which is
+        what activating one means in a file manager; an entry is reported and
+        the window, which owns the clipboard, decides what to do with it.
+        """
+        row = self.tree_model.get_row(position)
+        if row is None:
+            return
+        node = row.get_item()
+        if node.password_name:
+            self.emit("password-activated", node.backend_id, node.password_name)
+        else:
+            row.set_expanded(not row.get_expanded())
+
+    def focus_rows(self) -> None:
+        """Put the keyboard focus on the tree, for arriving from the search box."""
+        self.column_view.grab_focus()
 
     def _selection_changed(self, *_args) -> None:
         if self._restoring:

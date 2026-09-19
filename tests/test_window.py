@@ -521,6 +521,63 @@ class TestKeyboard:
 
         assert run_in_application(focus) is True
 
+    def test_typing_anywhere_in_the_window_goes_to_the_search_box(
+        self, demo_backend_configured
+    ):
+        """The convention every GNOME list follows: type, and it searches."""
+
+        def capture(app):
+            window = listed_window(app)
+            return window.search_entry.get_key_capture_widget() is window
+
+        assert run_in_application(capture) is True
+
+    def test_down_from_the_search_box_moves_into_the_tree(
+        self, demo_backend_configured
+    ):
+        from gtkpass._gi import Gdk
+
+        def within_tree(window):
+            widget = window.get_focus()
+            while widget is not None:
+                if widget is window.password_list:
+                    return True
+                widget = widget.get_parent()
+            return False
+
+        def move(app):
+            window = listed_window(app)
+            window.present()
+            try:
+                pump_until(lambda: window.get_mapped())
+                window.activate_action("win.search", None)
+                handled = window._on_search_key(None, Gdk.KEY_Down, 0, 0)
+                pump_until(lambda: within_tree(window))
+                return handled, within_tree(window)
+            finally:
+                window.destroy()
+                pump_until(lambda: not window.get_mapped())
+
+        handled, moved = run_in_application(move)
+
+        assert handled is True
+        assert moved is True
+
+    def test_activating_an_entry_copies_its_password(self, demo_backend_configured):
+        def activate(app):
+            window = listed_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            name = backend.list_passwords()[0].name
+            said = captured_messages(window)
+
+            window.password_list.emit("password-activated", DEMO_BACKEND_ID, name)
+            pump_until(lambda: bool(said), timeout_seconds=5.0)
+            return said
+
+        said = run_in_application(activate)
+
+        assert said and "Password copied" in said[0]
+
     def test_copying_the_password_needs_an_entry(self, demo_backend_configured):
         def enabled(app):
             return listed_window(app).lookup_action("copy-password").get_enabled()
