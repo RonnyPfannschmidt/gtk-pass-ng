@@ -13,6 +13,7 @@ import importlib.resources
 from typing import ClassVar
 
 from gtkpass._gi import Adw, GObject, Gtk
+from gtkpass.ui.entry_fields import lower
 from gtkpass.ui.password_generator import PasswordGeneratorGroup
 
 
@@ -32,6 +33,8 @@ class PasswordAddDialog(Adw.Dialog):
     backend_row: Adw.ComboRow = Gtk.Template.Child()
     name_row: Adw.EntryRow = Gtk.Template.Child()
     password_row: Adw.PasswordEntryRow = Gtk.Template.Child()
+    username_row: Adw.EntryRow = Gtk.Template.Child()
+    url_row: Adw.EntryRow = Gtk.Template.Child()
     generator: PasswordGeneratorGroup = Gtk.Template.Child()
     details_view: Gtk.TextView = Gtk.Template.Child()
     cancel_button: Gtk.Button = Gtk.Template.Child()
@@ -99,6 +102,12 @@ class PasswordAddDialog(Adw.Dialog):
         """The new entry, ready to hand to a backend."""
         buffer = self.details_view.get_buffer()
         details = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        # The rows become the `username:` and `url:` lines the pane reads,
+        # ahead of whatever else was typed. Nothing was lifted out on the way
+        # in: there was no entry to lift them from.
+        details = lower(
+            details, self.username_row.get_text(), self.url_row.get_text(), None, None
+        )
         return f"{self.password_row.get_text()}\n{details}"
 
     @Gtk.Template.Callback()

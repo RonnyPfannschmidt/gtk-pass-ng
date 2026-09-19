@@ -1601,6 +1601,34 @@ class TestAdding:
 
         assert written == [("new/entry", "s3cret\n")]
 
+    def test_username_and_url_become_fields_below_the_password(
+        self, demo_backend_configured
+    ):
+        """Typed into rows of their own, written in the form the pane reads."""
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.add_password = lambda name, content, commit=True: written.append(
+                content
+            )
+
+            dialog = window._open_add_dialog()
+            dialog.name_row.set_text("new/entry")
+            dialog.password_row.set_text("s3cret")
+            dialog.username_row.set_text("alice")
+            dialog.url_row.set_text("https://example.invalid")
+            dialog.details_view.get_buffer().set_text("host: h\n")
+            dialog.save_button.emit("clicked")
+            pump_until(lambda: bool(written), timeout_seconds=5.0)
+
+        run_in_application(add)
+
+        assert written == [
+            "s3cret\nusername: alice\nurl: https://example.invalid\nhost: h\n"
+        ]
+
     def test_the_name_is_tidied_rather_than_taken_literally(
         self, demo_backend_configured
     ):

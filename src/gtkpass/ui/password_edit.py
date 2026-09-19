@@ -14,6 +14,8 @@ from typing import ClassVar
 
 from gtkpass._gi import Adw, GObject, Gtk
 from gtkpass.backends import PasswordEntry
+from gtkpass.ui.entry_fields import LiftedField, lift, lower
+from gtkpass.ui.password_detail import URL_KEYS, USERNAME_KEYS
 from gtkpass.ui.password_generator import PasswordGeneratorGroup
 
 
@@ -38,18 +40,37 @@ class PasswordEditDialog(Adw.Dialog):
 
     name_row: Adw.ActionRow = Gtk.Template.Child()
     password_row: Adw.PasswordEntryRow = Gtk.Template.Child()
+    username_row: Adw.EntryRow = Gtk.Template.Child()
+    url_row: Adw.EntryRow = Gtk.Template.Child()
     generator: PasswordGeneratorGroup = Gtk.Template.Child()
     details_view: Gtk.TextView = Gtk.Template.Child()
     cancel_button: Gtk.Button = Gtk.Template.Child()
     save_button: Gtk.Button = Gtk.Template.Child()
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        #: Where the username and the URL sat in the text, and how they were
+        #: written, so that saving puts them back rather than somewhere new.
+        self._lifted_username: LiftedField | None = None
+        self._lifted_url: LiftedField | None = None
+
     def load(self, entry: PasswordEntry) -> None:
-        """Fill the dialog in from a decrypted entry."""
+        """Fill the dialog in from a decrypted entry.
+
+        The username and the URL come out of the text and into rows of their
+        own; everything else stays in the text exactly as it was.
+        """
         self.name_row.set_subtitle(entry.name)
 
         password, _, details = (entry.content or "").partition("\n")
         self.password_row.set_text(password)
-        self.details_view.get_buffer().set_text(details)
+
+        lifted = lift(details, USERNAME_KEYS, URL_KEYS)
+        self._lifted_username = lifted.username
+        self._lifted_url = lifted.url
+        self.username_row.set_text(lifted.username.value if lifted.username else "")
+        self.url_row.set_text(lifted.url.value if lifted.url else "")
+        self.details_view.get_buffer().set_text(lifted.text)
 
     @property
     def content(self) -> str:
@@ -60,6 +81,13 @@ class PasswordEditDialog(Adw.Dialog):
         """
         buffer = self.details_view.get_buffer()
         details = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        details = lower(
+            details,
+            self.username_row.get_text(),
+            self.url_row.get_text(),
+            self._lifted_username,
+            self._lifted_url,
+        )
         return f"{self.password_row.get_text()}\n{details}"
 
     @Gtk.Template.Callback()
