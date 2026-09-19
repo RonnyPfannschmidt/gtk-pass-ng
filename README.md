@@ -28,8 +28,12 @@ What works today:
 - Searching, as you type or on Enter, as the preference says
 - Opening an entry: decrypted off the UI thread, and every field it carries
   shown, whether or not GTKPass knows what the field means
-- Copying a field, with the clipboard cleared again after a timeout
-- Adding an entry, with a generated password if you want one
+- Copying a field, with the clipboard cleared again after a timeout, or
+  sooner from the toast; Enter on an entry copies its password
+- Opening an entry's site in the browser, and seeing which store it is in
+  and when it last changed
+- Adding an entry, with a generated password if you want one, and the
+  username and URL as fields of their own
 - Generating by any of three schemes -- random characters, a diceware
   passphrase, or digits for a PIN -- with the entropy of each shown, wherever
   a password is set
@@ -40,8 +44,10 @@ What works today:
 - Renaming and moving an entry -- one operation, because a name is a path --
   and moving a whole folder, all or none of it
 - Deleting an entry, after being asked about it by name
-- A context menu on the sidebar rows, and a keyboard shortcut for everything
-- Syncing a git-backed store: pull with rebase, then push, off the UI thread
+- A context menu on every sidebar row -- entry, folder or store -- and a
+  keyboard shortcut for everything; typing anywhere searches
+- Syncing a git-backed store: pull with rebase, then push, off the UI thread,
+  on request or at startup, with what is still to push shown beside the store
 
 What does not exist yet: OTP codes, and re-encrypting a store to a changed
 recipient set. See [ROADMAP.md](ROADMAP.md).
