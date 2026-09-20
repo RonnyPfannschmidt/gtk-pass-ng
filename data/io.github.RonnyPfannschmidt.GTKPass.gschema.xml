@@ -43,6 +43,18 @@
       </description>
     </key>
 
+    <!-- Sync settings -->
+    <key name="sync-on-start" type="b">
+      <default>false</default>
+      <summary>Sync every store with a remote when the application starts</summary>
+      <description>
+        Pull and push each git-backed store once its backend has loaded,
+        once per launch. Off by default: a sync reaches the network and may
+        ask for an SSH passphrase, and neither belongs in an application
+        that was only opened to read a password.
+      </description>
+    </key>
+
     <!-- Security settings -->
     <key name="clipboard-timeout" type="i">
       <default>45</default>

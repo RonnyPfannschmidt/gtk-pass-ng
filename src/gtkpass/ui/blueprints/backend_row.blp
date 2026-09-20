@@ -9,6 +9,13 @@ using Adw 1;
 // that is not a convenience: picking a directory through the file chooser is
 // what grants the sandbox access to it, so a path typed in by hand is a store
 // the application then cannot open.
+//
+// The text rows save on apply -- Enter, or the button the row shows once its
+// text differs from what was applied -- and not on every keystroke. A save is
+// a settings change, and the window answers one by building every backend
+// again: git over the store, a D-Bus connection, possibly a keyring prompt.
+// Typing a path was one of those per character, and a half-typed path is a
+// store that does not exist, so it was also a failure toast per character.
 template $BackendSettingsRow : Adw.ExpanderRow {
   [suffix]
   Button remove_button {
@@ -22,7 +29,8 @@ template $BackendSettingsRow : Adw.ExpanderRow {
 
   Adw.EntryRow name_row {
     title: _("Name");
-    changed => $_on_settings_changed();
+    show-apply-button: true;
+    apply => $_on_settings_changed();
   }
 
   // A demo.json, or the directory holding one; both are accepted, because the
@@ -30,7 +38,8 @@ template $BackendSettingsRow : Adw.ExpanderRow {
   Adw.EntryRow demo_path_row {
     title: _("Custom demo.json");
     visible: false;
-    changed => $_on_settings_changed();
+    show-apply-button: true;
+    apply => $_on_settings_changed();
 
     [suffix]
     Button demo_path_button {
@@ -46,13 +55,15 @@ template $BackendSettingsRow : Adw.ExpanderRow {
   Adw.EntryRow secretservice_collection_row {
     title: _("Keyring Collection");
     visible: false;
-    changed => $_on_settings_changed();
+    show-apply-button: true;
+    apply => $_on_settings_changed();
   }
 
   Adw.EntryRow pass_store_row {
     title: _("Password Store Directory");
     visible: false;
-    changed => $_on_settings_changed();
+    show-apply-button: true;
+    apply => $_on_settings_changed();
 
     [suffix]
     Button pass_store_button {
@@ -75,7 +86,8 @@ template $BackendSettingsRow : Adw.ExpanderRow {
   Adw.EntryRow direct_store_row {
     title: _("Password Store Directory");
     visible: false;
-    changed => $_on_settings_changed();
+    show-apply-button: true;
+    apply => $_on_settings_changed();
 
     [suffix]
     Button direct_store_button {
@@ -91,7 +103,8 @@ template $BackendSettingsRow : Adw.ExpanderRow {
   Adw.EntryRow direct_gpg_home_row {
     title: _("GPG Home Directory");
     visible: false;
-    changed => $_on_settings_changed();
+    show-apply-button: true;
+    apply => $_on_settings_changed();
 
     [suffix]
     Button direct_gpg_home_button {

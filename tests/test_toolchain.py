@@ -14,6 +14,7 @@ spellings in three places, one of which is a CI workflow nobody reads until it
 breaks.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -398,14 +399,21 @@ class TestRunningAPackageBuildsItFirst:
         is meant to replace.
         """
         stamp = ROOT / "dist" / "flatpak" / ".installed"
-        existed = stamp.exists()
+        # The time is restored, not just the file. Touching a stamp that was
+        # already there tells the next `make flatpak` that the installed build
+        # is current, so it installs nothing and `make flatpak-run` launches
+        # the previous build -- this class's own failure, reintroduced by the
+        # test for it, on every developer who ran the suite before building.
+        was = stamp.stat().st_mtime_ns if stamp.exists() else None
         stamp.parent.mkdir(parents=True, exist_ok=True)
         stamp.touch()
         try:
             planned = self.dry_run("flatpak-run")
         finally:
-            if not existed:
+            if was is None:
                 stamp.unlink()
+            else:
+                os.utime(stamp, ns=(was, was))
 
         assert "flatpak-builder" not in planned, (
             f"an up-to-date Flatpak was rebuilt anyway: {planned.strip()}"

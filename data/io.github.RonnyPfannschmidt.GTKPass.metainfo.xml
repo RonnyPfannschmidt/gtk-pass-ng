@@ -63,8 +63,9 @@
     <release version="0.1.0" type="development" date="2026-08-06">
       <description>
         <p>
-          Early development build. Browsing, opening and editing entries work;
-          adding and deleting them do not yet.
+          Early development build. Entries can be browsed, opened, added,
+          edited, rotated, renamed, moved and deleted, and a git-backed store
+          can be synced with its remote.
         </p>
       </description>
     </release>

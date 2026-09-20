@@ -602,6 +602,98 @@ class TestTheWindowHearsAboutEverySelection:
         assert seen
 
 
+class TestTheStoreBadge:
+    """A store row can carry a word or two beside its name: what is still to
+    push, for a store with a remote. Kept on the record rather than only on
+    the row, because a search takes the row away and gives it back."""
+
+    def test_it_is_shown_on_the_store_row(self, view, backend):
+        view.set_badge("demo_1", "2 to push")
+
+        assert view.root.get_item(0).badge == "2 to push"
+
+    def test_it_can_be_taken_away_again(self, view, backend):
+        view.set_badge("demo_1", "2 to push")
+        view.set_badge("demo_1", "")
+
+        assert view.root.get_item(0).badge == ""
+
+    def test_an_unknown_store_is_ignored(self, view, backend):
+        view.set_badge("nobody", "2 to push")
+
+        assert view.root.get_item(0).badge == ""
+
+    def test_it_survives_a_search(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.set_badge("demo_1", "2 to push")
+
+        view.set_filter("zzz")
+        view.set_filter("")
+
+        assert view.root.get_item(0).badge == "2 to push"
+
+    def test_it_reaches_the_display(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.set_badge("demo_1", "2 to push")
+
+        present(view, lambda v: "2 to push" in TestRendering().labels(v))
+
+        assert "2 to push" in TestRendering().labels(view)
+
+
+class TestActivating:
+    """Enter, or a double-click, on a row.
+
+    Nothing was connected to it, so the one gesture every list in GNOME
+    answers did nothing here. An entry announces itself, and the window --
+    which owns the clipboard -- copies its password; a folder opens or shuts,
+    which is what activating a folder means everywhere else.
+    """
+
+    def test_activating_an_entry_announces_it(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        seen: list[tuple[str, str]] = []
+        view.connect(
+            "password-activated", lambda _view, *entry: seen.append(tuple(entry))
+        )
+
+        view.column_view.emit("activate", 1)
+
+        assert seen == [("demo_1", "alpha")]
+
+    def test_activating_a_folder_opens_it(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_first_level()
+        row = view.tree_model.get_row(1)
+        assert not row.get_expanded()
+
+        view.column_view.emit("activate", 1)
+
+        assert row.get_expanded()
+
+    def test_activating_an_open_folder_shuts_it(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_all()
+        row = view.tree_model.get_row(1)
+
+        view.column_view.emit("activate", 1)
+
+        assert not row.get_expanded()
+
+    def test_a_folder_says_nothing_about_a_password(self, view, backend):
+        view.add_password(backend, "work/mail")
+        view.expand_first_level()
+        seen: list[tuple[str, str]] = []
+        view.connect(
+            "password-activated", lambda _view, *entry: seen.append(tuple(entry))
+        )
+
+        view.column_view.emit("activate", 1)
+
+        assert seen == []
+
+
 class TestTheContextMenu:
     """Right-click, and press-and-hold, offer the entry actions on the row.
 
@@ -613,23 +705,54 @@ class TestTheContextMenu:
         assert view._menu.get_parent() is view
 
     def test_its_items_are_window_actions(self, view, backend):
-        model = view._menu.get_menu_model()
-        actions = []
-        for section in range(model.get_n_items()):
-            links = model.get_item_link(section, "section")
-            for index in range(links.get_n_items()):
-                actions.append(
-                    links.get_item_attribute_value(index, "action").get_string()
-                )
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
 
-        assert actions == [
+        view._popup_at(10.0, view._row_height() * 1.5)
+
+        assert menu_actions(view._menu.get_menu_model()) == [
             "win.copy-password",
             "win.copy-username",
+            "win.copy-url",
+            "win.copy-otp",
+            "win.add-password",
             "win.edit-password",
             "win.rotate-password",
             "win.rename-password",
             "win.delete-password",
         ]
+        window.destroy()
+
+    def test_a_folder_gets_a_menu_of_its_own(self, view, backend):
+        """Copy, edit and delete are entry actions; a folder was offered them
+        all greyed out, which reads as broken rather than as not applicable."""
+        view.add_password(backend, "work/mail")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
+
+        view._popup_at(10.0, view._row_height() * 1.5)
+
+        assert menu_actions(view._menu.get_menu_model()) == [
+            "win.add-password",
+            "win.rename-password",
+        ]
+        window.destroy()
+
+    def test_a_store_gets_a_menu_of_its_own(self, view, backend):
+        view.add_password(backend, "alpha")
+        view.expand_first_level()
+        window = present(view, rendered_rows)
+
+        view._popup_at(10.0, view._row_height() * 0.5)
+
+        assert menu_actions(view._menu.get_menu_model()) == [
+            "win.add-password",
+            "win.sync-store",
+            "win.reload",
+            "app.preferences",
+        ]
+        window.destroy()
 
     def test_a_click_selects_the_row_under_it(self, view, backend):
         for path in ("alpha", "beta", "gamma"):
@@ -658,6 +781,16 @@ class TestTheContextMenu:
         view._popup_at(10.0, 10.0)
 
         assert not view._menu.is_visible()
+
+
+def menu_actions(model) -> list[str]:
+    """The action behind every item of a menu, section by section."""
+    actions = []
+    for section in range(model.get_n_items()):
+        links = model.get_item_link(section, "section")
+        for index in range(links.get_n_items()):
+            actions.append(links.get_item_attribute_value(index, "action").get_string())
+    return actions
 
 
 def present(view, ready):

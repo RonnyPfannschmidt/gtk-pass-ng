@@ -18,22 +18,11 @@ and the one clipboard that gets cleared on a timer -- does both.
 
 import importlib.resources
 from typing import ClassVar
-from urllib.parse import urlparse
 
-from gtkpass._gi import Adw, Gio, GObject, Gtk
+from gtkpass._gi import Adw, GObject, Gtk
 from gtkpass.backends import PasswordEntry
-from gtkpass.ui.password_detail import field_of
+from gtkpass.ui.password_detail import field_of, is_openable, launch_uri
 from gtkpass.ui.password_generator import PasswordGeneratorGroup
-
-#: Schemes the Open button will hand to the desktop.
-#:
-#: An entry's ``url:`` line is whatever its owner wrote, and a store can be
-#: synced from a machine somebody else has written to. ``file://`` and
-#: ``smb://`` open something rather than going to a site, and a scheme nobody
-#: has thought of is handled by whichever application claimed it. The value is
-#: still shown and still selectable -- what is withheld is one click that
-#: launches it.
-_OPENABLE_SCHEMES = frozenset({"http", "https"})
 
 
 @Gtk.Template(
@@ -117,7 +106,9 @@ class PasswordRotateDialog(Adw.Dialog):
         url = field_of(entry, "URL")
         self.url_row.set_subtitle(url)
         self.url_row.set_visible(bool(url))
-        self._openable_url = url if _is_openable(url) else ""
+        # The same rule the detail pane applies: a web address and nothing
+        # else, because a synced store carries whatever another machine wrote.
+        self._openable_url = url if is_openable(url) else ""
         self.open_url_button.set_visible(bool(self._openable_url))
 
         self.rotate_note.set_label(
@@ -208,25 +199,5 @@ class PasswordRotateDialog(Adw.Dialog):
 
     @Gtk.Template.Callback()
     def _on_open_url(self, _button) -> None:
-        """Hand the site to the desktop, through the portal when there is one.
-
-        Gio rather than a browser command: inside the Flatpak this goes to
-        org.freedesktop.portal.OpenURI, which needs no host access and no
-        network permission of its own.
-        """
         if self._openable_url:
-            Gio.AppInfo.launch_default_for_uri(self._openable_url, None)
-
-
-def _is_openable(url: str) -> bool:
-    """Whether a one-click Open is safe to offer for this value.
-
-    A store's ``url:`` line is whatever its owner wrote, and a synced store
-    carries whatever another machine wrote. Launching an arbitrary scheme hands
-    the value to whichever application claimed it, which is a wider action than
-    the button says it is.
-    """
-    try:
-        return urlparse(url).scheme.lower() in _OPENABLE_SCHEMES
-    except ValueError:
-        return False
+            launch_uri(self._openable_url)

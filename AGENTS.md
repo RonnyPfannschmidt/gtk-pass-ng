@@ -98,10 +98,10 @@ present the widget and read back what it rendered.
   process without a traceback, so go through `config.get_settings()`.
 - Do not add dependencies without discussion. In particular not `keyring`,
   `GitPython`, `qrcode`, `pillow` or `opencv`: an earlier version of this file
-  prescribed all of them and none were ever used. `pyotp` is the one that has
-  since become arguable, OTP being planned — argue it rather than assume it,
-  because RFC 6238 over `hmac` and `hashlib` is a short function with no
-  dependency at all.
+  prescribed all of them and none were ever used. `pyotp` was the arguable one
+  and the argument is settled: `otp.py` is RFC 6238 over `hmac` and `hashlib`,
+  checked against the vectors in the RFC, and it is shorter than the paperwork
+  of pinning a package would have been.
 - An installed build must work with nothing set in its environment. There is no
   launcher script in any package, so anything the application needs arranged, it
   arranges itself — see `safety.running_from_checkout()`,

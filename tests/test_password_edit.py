@@ -57,9 +57,9 @@ class TestPrefill:
         assert dialog.password_row.get_text() == SECRET
 
     def test_the_remaining_lines_become_the_details(self, dialog):
-        dialog.load(entry(f"{SECRET}\nusername: alice\nurl: example.invalid\n"))
+        dialog.load(entry(f"{SECRET}\nhost: db.example.invalid\nport: 5432\n"))
 
-        assert details(dialog) == "username: alice\nurl: example.invalid\n"
+        assert details(dialog) == "host: db.example.invalid\nport: 5432\n"
 
     def test_an_entry_with_no_details_leaves_them_empty(self, dialog):
         dialog.load(entry(f"{SECRET}\n"))
@@ -88,11 +88,11 @@ class TestAssembly:
         assert dialog.content == "replaced\nusername: alice\n"
 
     def test_new_details_replace_everything_after_it(self, dialog):
-        dialog.load(entry(f"{SECRET}\nusername: alice\n"))
+        dialog.load(entry(f"{SECRET}\nhost: one\n"))
 
-        set_details(dialog, "username: bob\n")
+        set_details(dialog, "host: two\n")
 
-        assert dialog.content == f"{SECRET}\nusername: bob\n"
+        assert dialog.content == f"{SECRET}\nhost: two\n"
 
     def test_an_entry_without_a_trailing_newline_gains_one(self, dialog):
         """Stores conventionally end an entry with a newline; normalise to it."""
@@ -163,7 +163,8 @@ class TestGeneratingAReplacement:
 
         dialog.generator.generate_button.emit("clicked")
 
-        assert details(dialog) == "username: alice\nurl: example.invalid\n"
+        below = dialog.content.partition("\n")[2]
+        assert below == "username: alice\nurl: example.invalid\n"
 
     def test_the_scheme_on_offer_is_the_one_used(self, dialog):
         from gtkpass.utils.generate import Scheme
@@ -195,3 +196,89 @@ class TestGeneratingAReplacement:
         dialog.save_button.emit("clicked")
 
         assert seen == [f"{generated}\nusername: alice\n"]
+
+
+class TestTheFieldsThePaneKnows:
+    """Username and URL have rows of their own, as they do in the pane.
+
+    The pane knew what ``username:`` and ``url:`` meant, and the dialogs made
+    you type the key names by hand into a free-text box. The rows take those
+    two out of the text on the way in and put them back on the way out --
+    where they were, spelled as they were -- so that nothing else the entry
+    carries is disturbed.
+    """
+
+    def test_the_username_is_pulled_into_its_row(self, dialog):
+        dialog.load(entry(f"{SECRET}\nusername: alice\n"))
+
+        assert dialog.username_row.get_text() == "alice"
+
+    def test_the_url_is_pulled_into_its_row(self, dialog):
+        dialog.load(entry(f"{SECRET}\nurl: https://example.invalid\n"))
+
+        assert dialog.url_row.get_text() == "https://example.invalid"
+
+    @pytest.mark.parametrize("key", ["user", "login"])
+    def test_the_other_spellings_of_username_are_recognised(self, dialog, key):
+        dialog.load(entry(f"{SECRET}\n{key}: alice\n"))
+
+        assert dialog.username_row.get_text() == "alice"
+
+    def test_the_pulled_lines_leave_the_details(self, dialog):
+        dialog.load(
+            entry(f"{SECRET}\nusername: alice\nhost: h\nurl: https://x.invalid\n")
+        )
+
+        assert details(dialog) == "host: h\n"
+
+    def test_an_entry_without_them_leaves_the_rows_empty(self, dialog):
+        dialog.load(entry(f"{SECRET}\nhost: h\n"))
+
+        assert dialog.username_row.get_text() == ""
+        assert dialog.url_row.get_text() == ""
+
+    def test_a_changed_username_keeps_the_key_it_was_written_with(self, dialog):
+        """A store written by another tool stays readable by that tool."""
+        dialog.load(entry(f"{SECRET}\nuser: alice\n"))
+
+        dialog.username_row.set_text("bob")
+
+        assert dialog.content == f"{SECRET}\nuser: bob\n"
+
+    def test_a_changed_line_keeps_its_place(self, dialog):
+        dialog.load(entry(f"{SECRET}\nhost: h\nusername: alice\nsome notes\n"))
+
+        dialog.username_row.set_text("bob")
+
+        assert dialog.content == f"{SECRET}\nhost: h\nusername: bob\nsome notes\n"
+
+    def test_an_emptied_username_drops_the_line(self, dialog):
+        dialog.load(entry(f"{SECRET}\nusername: alice\nhost: h\n"))
+
+        dialog.username_row.set_text("")
+
+        assert dialog.content == f"{SECRET}\nhost: h\n"
+
+    def test_a_username_given_to_an_entry_without_one_is_written_first(self, dialog):
+        dialog.load(entry(f"{SECRET}\nhost: h\n"))
+
+        dialog.username_row.set_text("alice")
+        dialog.url_row.set_text("https://x.invalid")
+
+        assert (
+            dialog.content
+            == f"{SECRET}\nusername: alice\nurl: https://x.invalid\nhost: h\n"
+        )
+
+    def test_an_untouched_line_is_written_back_exactly(self, dialog):
+        """Odd spacing and all: a line nobody edited is not ours to tidy."""
+        original = f"{SECRET}\nUsername:   alice  \n"
+        dialog.load(entry(original))
+
+        assert dialog.content == original
+
+    def test_only_the_first_of_two_username_lines_is_taken(self, dialog):
+        dialog.load(entry(f"{SECRET}\nusername: alice\nlogin: alice@x\n"))
+
+        assert dialog.username_row.get_text() == "alice"
+        assert details(dialog) == "login: alice@x\n"

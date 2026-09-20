@@ -47,17 +47,33 @@ application; none of its dates survived contact with the work.
   the change took -- the editor writes first and leaves a store holding a
   password the site refused
 - Deleting an entry, after a question that names it and the store it leaves
-- A context menu on the sidebar rows, reached by right-click or press-and-hold
+- A context menu on the sidebar rows, reached by right-click or press-and-hold,
+  and a different one for an entry, a folder and a store
 - An accelerator for every action, and a window that documents them
+- Enter on an entry copies its password, typing anywhere searches, and Down
+  leaves the search box for the rows it narrowed
+- Username and URL as rows of their own in the add and edit dialogs, lifted
+  out of the text on the way in and put back where they were on the way out
+- The pane names the store an entry is in, shows when it last changed, and
+  opens its site in the browser
+- Every placeholder page offers the way out of it: Add Password, Try Again,
+  the reason a store did not load with Preferences beside it
 - Showing a password rather than dotting it out, from the preference
 - A breakpoint, so the window works at the 360 points its metadata claims
 - The store that is already there offered on first run, rather than a combo box
   of four backend type names
-- Syncing a git-backed store: pull with rebase, then push, off the UI thread
+- Syncing a git-backed store: pull with rebase, then push, off the UI thread;
+  one store from its row, all of them from the header, or at startup from a
+  preference that is off by default
+- What a store still has to push, counted off the UI thread and shown beside
+  its name
 
 **Hardening**
 - The window opens at the size it was left at, and no schema key is offered that
   nothing reads -- a test now fails on one
+- A settings write that changes nothing is not made, and a burst of writes
+  costs one rebuild of the backends: the keyfile backend reports every write,
+  and a row that saved per keystroke rebuilt every backend per keystroke
 - Every subprocess GTKPass owns has a deadline, and the pool is never joined
   from the UI thread, so a passphrase prompt nobody answers cannot freeze or
   trap the application
@@ -93,16 +109,16 @@ application; none of its dates survived contact with the work.
 - No launcher script in any of them: an installed build refuses nothing and
   needs nothing set, because the store guard asks whether it is running from a
   checkout rather than waiting to be told
+- One-time codes from the `otpauth://` line `pass-otp` writes, with the seconds
+  the code has left, computed in `otp.py` from RFC 6238 over `hmac` and checked
+  against the vectors in the RFC. The line stays in the entry, so the store is
+  still a `pass-otp` store; counter-based (HOTP) URIs say they are unsupported
+  rather than handing out a code whose counter nothing writes back
 
 ## Next
 
 Roughly in the order that would make the application usable day to day.
 
-- **`pass-otp`.** Reading an entry's `otpauth://` line and showing a code with
-  its countdown, in the format `pass-otp` already writes, so a store stays
-  usable from both. Generating the code is RFC 6238 over `hmac` — the work is in
-  the entry format and the interface, not the arithmetic. QR code scanning is
-  not part of this and stays out; see below.
 - **Re-encrypting a store to a changed recipient set**, which `pass init
   <ids...>` does and GTKPass cannot. Multi-recipient stores already work, so a
   per-machine key model is adoptable today — but enrolling a machine or retiring
@@ -164,11 +180,12 @@ are the part that would have cost a webcam, an image decoder and two
 dependencies to match. Reading an `otpauth://` line an entry already contains
 and showing a code costs none of that, and an entry a store holds that the
 application will not display is a gap in the frontend rather than a decision.
-QR codes stay out.
+It has since landed, and QR codes stay out.
 
 The original specification prescribed `keyring`, `GitPython`, `pyotp`, `qrcode`,
-`pillow` and `opencv` as dependencies. None were ever used, and OTP moving does
-not admit one by itself; see [AGENTS.md](AGENTS.md).
+`pillow` and `opencv` as dependencies. None were ever used, and OTP did not
+admit one either: it is RFC 6238 over the standard library. See
+[AGENTS.md](AGENTS.md).
 
 ## Versioning
 

@@ -28,8 +28,12 @@ What works today:
 - Searching, as you type or on Enter, as the preference says
 - Opening an entry: decrypted off the UI thread, and every field it carries
   shown, whether or not GTKPass knows what the field means
-- Copying a field, with the clipboard cleared again after a timeout
-- Adding an entry, with a generated password if you want one
+- Copying a field, with the clipboard cleared again after a timeout, or
+  sooner from the toast; Enter on an entry copies its password
+- Opening an entry's site in the browser, and seeing which store it is in
+  and when it last changed
+- Adding an entry, with a generated password if you want one, and the
+  username and URL as fields of their own
 - Generating by any of three schemes -- random characters, a diceware
   passphrase, or digits for a PIN -- with the entropy of each shown, wherever
   a password is set
@@ -40,11 +44,18 @@ What works today:
 - Renaming and moving an entry -- one operation, because a name is a path --
   and moving a whole folder, all or none of it
 - Deleting an entry, after being asked about it by name
-- A context menu on the sidebar rows, and a keyboard shortcut for everything
-- Syncing a git-backed store: pull with rebase, then push, off the UI thread
+- A context menu on every sidebar row -- entry, folder or store -- and a
+  keyboard shortcut for everything; typing anywhere searches
+- Syncing a git-backed store: pull with rebase, then push, off the UI thread,
+  on request or at startup, with what is still to push shown beside the store
+- One-time codes from an entry's `otpauth://` line, with the seconds they have
+  left, computed here rather than by a dependency
+- A Raw tab showing the entry exactly as the store wrote it, for when the
+  pane's reading of a line is not what its owner meant
+- A copy button on every field, including the ones that are dotted out
 
-What does not exist yet: OTP codes, and re-encrypting a store to a changed
-recipient set. See [ROADMAP.md](ROADMAP.md).
+What does not exist yet: re-encrypting a store to a changed recipient set. See
+[ROADMAP.md](ROADMAP.md).
 
 ## Backends
 
@@ -117,10 +128,12 @@ fit together.
 ## Compatibility
 
 The Direct GPG and Pass backends use the passwordstore format, so a store stays
-readable by `pass`, qtpass, and Android Password Store via git sync. Extensions
-are not supported yet — `pass-otp` and `pass-update` are the two intended, and
-until they land an OTP secret is shown as the secret it is, masked with the
-other fields that are secrets, rather than turned into a code.
+readable by `pass`, qtpass, and Android Password Store via git sync. An entry
+written by `pass-otp` is read as `pass-otp` wrote it: the `otpauth://` line
+becomes a code with a countdown, and the line itself stays in the entry, so the
+same store keeps working from both. Nothing here writes or edits that line, and
+counter-based (HOTP) URIs are shown as unsupported rather than advanced without
+being written back. `pass-update` is not supported.
 
 ## Security
 

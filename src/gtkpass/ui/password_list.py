@@ -41,6 +41,9 @@ class PasswordNode(GObject.Object):
     #: row; a backend that would not load carries the reason it gave, which
     #: otherwise lived only in a toast that had five seconds and then went.
     tooltip = GObject.Property(type=str, default="")
+    #: A word or two beside the name: what a store still has to push. Empty
+    #: for every row but a store's, and for a store with nothing to say.
+    badge = GObject.Property(type=str, default="")
 
     def __init__(
         self,
@@ -50,8 +53,9 @@ class PasswordNode(GObject.Object):
         password_name: str = "",
         tooltip: str = "",
         path: str = "",
+        badge: str = "",
     ) -> None:
-        super().__init__(name=name, icon_name=icon_name, tooltip=tooltip)
+        super().__init__(name=name, icon_name=icon_name, tooltip=tooltip, badge=badge)
         #: Where this row sits in its backend: ``work/mail`` for a folder of
         #: that name and for the entry inside it, empty for a backend heading.
         #: What a listing is reconciled against, and what says a row is still
@@ -85,6 +89,9 @@ class BackendEntries:
         self.name = name
         self.icon_name = icon_name
         self.tooltip = tooltip
+        #: What the store's row says beside its name, kept here because a
+        #: search takes the row away and gives it back.
+        self.badge = ""
         #: Full entry paths, in the order they were listed.
         self.entries: list[str] = []
         #: This backend's row while it is shown, None while it is filtered out.
@@ -166,6 +173,10 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         # folder is an answer to it: renaming applies to one, and deleting the
         # entry the pane still happens to hold does not.
         "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # (backend id, entry name): Enter or a double-click on an entry. The
+        # tree does not say what that means -- the window owns the clipboard
+        # and decides -- it only says which entry it happened to.
+        "password-activated": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
     }
 
     column_view: Gtk.ColumnView = Gtk.Template.Child()
@@ -193,6 +204,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
 
         self._on_password_selected: Callable[[str, str], None] | None = None
         self.selection.connect("notify::selected-item", self._selection_changed)
+        self.column_view.connect("activate", self._on_row_activated)
         self._install_context_menu()
 
         #: What each backend contributed, kept so a filter can be lifted again.
@@ -223,6 +235,13 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         )
         self._menu = builder.get_object("password_menu")
         self._menu.set_parent(self)
+        # What each kind of row is offered. A folder given the entry actions
+        # was given them greyed out, which reads as broken.
+        self._menus = {
+            "entry": builder.get_object("entry_actions"),
+            "folder": builder.get_object("folder_actions"),
+            "store": builder.get_object("store_actions"),
+        }
 
         # Right-click on a pointer, and press-and-hold on a touchscreen. The
         # metadata claims touch, and a context menu no finger can reach is one
@@ -252,6 +271,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         if row is None:
             return
         self.selection.set_selected(row)
+        self._menu.set_menu_model(self._menus[self._kind_of(row)])
 
         # Built empty and filled in: passing the fields to the constructor is
         # deprecated for a boxed type, and silently ignored.
@@ -259,6 +279,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         at.x, at.y, at.width, at.height = int(x), int(y), 1, 1
         self._menu.set_pointing_to(at)
         self._menu.popup()
+
+    def _kind_of(self, position: int) -> str:
+        """Whether the row at ``position`` is an entry, a folder or a store."""
+        node = self.tree_model.get_row(position).get_item()
+        if node.password_name:
+            return "entry"
+        if any(record.node is node for record in self._backends):
+            return "store"
+        return "folder"
 
     def _row_at(self, y: float) -> int | None:
         """Which row of the model sits at ``y``, in this widget's coordinates.
@@ -319,6 +348,27 @@ class PasswordTreeView(Gtk.ScrolledWindow):
         if header is not None:
             header.set_visible(False)
 
+    def _on_row_activated(self, _view, position: int) -> None:
+        """Enter or a double-click: open a folder, announce an entry.
+
+        Nothing was connected here, so the one gesture every list in GNOME
+        answers did nothing in this one. A folder opens or shuts, which is
+        what activating one means in a file manager; an entry is reported and
+        the window, which owns the clipboard, decides what to do with it.
+        """
+        row = self.tree_model.get_row(position)
+        if row is None:
+            return
+        node = row.get_item()
+        if node.password_name:
+            self.emit("password-activated", node.backend_id, node.password_name)
+        else:
+            row.set_expanded(not row.get_expanded())
+
+    def focus_rows(self) -> None:
+        """Put the keyboard focus on the tree, for arriving from the search box."""
+        self.column_view.grab_focus()
+
     def _selection_changed(self, *_args) -> None:
         if self._restoring:
             # Putting the highlight back on the entry the pane is already
@@ -370,6 +420,7 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             icon_name=record.icon_name,
             backend_id=record.backend_id,
             tooltip=record.tooltip,
+            badge=record.badge,
         )
         position = sum(
             1
@@ -431,6 +482,15 @@ class PasswordTreeView(Gtk.ScrolledWindow):
             for record in self._backends:
                 self._node_for(record)
         return records
+
+    def set_badge(self, backend_id: str, badge: str) -> None:
+        """Put a word or two beside a store's name, or take it away with ``""``."""
+        for record in self._backends:
+            if record.backend_id == backend_id:
+                record.badge = badge
+                if record.node is not None:
+                    record.node.badge = badge
+                return
 
     def _drop(self, record: BackendEntries) -> None:
         """Take one backend's row away, if it has one."""

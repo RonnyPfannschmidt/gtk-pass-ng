@@ -51,13 +51,30 @@ class TestRenamingThroughTheDialog:
         set_backend_display_name("demo", self.BACKEND_ID, "")
         settings.set_value("backend-instances", previous)
 
-    def test_typing_a_name_persists_it(self, dialog):
+    def test_an_applied_name_persists(self, dialog):
+        from gtkpass.config import get_backend_display_name
+
+        row = dialog.backend_rows[self.BACKEND_ID]
+        row.name_row.set_text("Team Vault")
+        row.name_row.emit("apply")
+
+        assert get_backend_display_name("demo", self.BACKEND_ID) == "Team Vault"
+
+    def test_a_name_still_being_typed_is_not_saved_yet(self, dialog):
+        """Every keystroke used to be a save, and every save a reload.
+
+        The window answers a settings change by shutting its thread pool down
+        and building every backend again -- git over the store, a D-Bus
+        connection, possibly a keyring prompt -- so typing a twelve-letter name
+        was twelve of those. The row saves when the name is applied, with
+        Enter or the row's own button, and not before.
+        """
         from gtkpass.config import get_backend_display_name
 
         row = dialog.backend_rows[self.BACKEND_ID]
         row.name_row.set_text("Team Vault")
 
-        assert get_backend_display_name("demo", self.BACKEND_ID) == "Team Vault"
+        assert get_backend_display_name("demo", self.BACKEND_ID) != "Team Vault"
 
     def test_the_entry_is_prefilled_from_storage(self, dialog):
         from gtkpass.config import set_backend_display_name
@@ -277,3 +294,103 @@ class TestRemovingAsks:
         dialog._on_remove_backend(row).emit("response", "remove")
 
         assert dialog.backend_rows == {}
+
+
+class Counting:
+    """A settings object that counts what is written to it."""
+
+    def __init__(self, settings):
+        self._settings = settings
+        self.writes = 0
+
+    def __getattr__(self, name):
+        attribute = getattr(self._settings, name)
+        if name.startswith("set_"):
+
+            def counted(*args):
+                self.writes += 1
+                return attribute(*args)
+
+            return counted
+        return attribute
+
+
+class TestSavingWritesOnlyWhatChanged:
+    """A write of an unchanged value is still a write, and the window hears it.
+
+    The keyfile backend, which the development launcher uses, emits ``changed``
+    for every write whether or not the value differs; the memory backend the
+    tests run on does not, which is how this went unnoticed. Each emission
+    costs the window a full rebuild of every backend, so an unchanged value
+    must not be written at all.
+    """
+
+    BACKEND_ID = "demo_1766234612"
+
+    @pytest.fixture
+    def dialog(self, monkeypatch):
+        from gtkpass._gi import GLib
+        from gtkpass.config import get_settings, set_backend_display_name
+        from gtkpass.ui.settings import SettingsWindow
+
+        settings = get_settings()
+        previous = settings.get_value("backend-instances")
+        settings.set_value(
+            "backend-instances", GLib.Variant("a(ss)", [(self.BACKEND_ID, "demo")])
+        )
+        yield SettingsWindow()
+        set_backend_display_name("demo", self.BACKEND_ID, "")
+        settings.set_value("backend-instances", previous)
+
+    def test_an_unchanged_instance_list_is_not_rewritten(self, dialog, monkeypatch):
+        counted = Counting(dialog.settings)
+        monkeypatch.setattr(dialog, "settings", counted)
+
+        dialog._save_backend_configs()
+
+        assert counted.writes == 0
+
+    def test_an_unchanged_backend_setting_is_not_rewritten(self, dialog, monkeypatch):
+        import gtkpass.config
+        import gtkpass.ui.settings
+
+        handed_out: list[Counting] = []
+
+        def counting(backend_type, backend_id):
+            counted = Counting(real(backend_type, backend_id))
+            handed_out.append(counted)
+            return counted
+
+        real = gtkpass.config.get_backend_settings
+        monkeypatch.setattr(gtkpass.ui.settings, "get_backend_settings", counting)
+        monkeypatch.setattr(gtkpass.config, "get_backend_settings", counting)
+
+        dialog._save_backend_configs()
+
+        assert sum(counted.writes for counted in handed_out) == 0
+
+    def test_a_changed_setting_is_still_written(self, dialog):
+        from gtkpass.config import get_backend_settings
+
+        row = dialog.backend_rows[self.BACKEND_ID]
+        row.demo_path_row.set_text("/srv/demo.json")
+        row.demo_path_row.emit("apply")
+
+        stored = get_backend_settings("demo", self.BACKEND_ID)
+        try:
+            assert stored.get_string("custom-data-path") == "/srv/demo.json"
+        finally:
+            stored.reset("custom-data-path")
+
+
+class TestSyncOnStart:
+    def test_the_switch_is_bound_to_the_setting(self):
+        from gtkpass.config import get_settings
+        from gtkpass.ui.settings import SettingsWindow
+
+        settings = get_settings()
+        settings.set_boolean("sync-on-start", True)
+        try:
+            assert SettingsWindow().sync_on_start_row.get_active() is True
+        finally:
+            settings.reset("sync-on-start")

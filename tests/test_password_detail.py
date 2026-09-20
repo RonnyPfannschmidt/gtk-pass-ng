@@ -421,3 +421,374 @@ class TestCopyRequests:
         view.show_entry(entry("s3cret"))
 
         assert self.emitted(view, view.copy_username_btn) == []
+
+
+class TestOpeningTheSite:
+    """The rotation wizard could open the site; the pane, where people are
+    when they want to, could only copy it."""
+
+    def test_a_web_address_can_be_opened(self, view):
+        view.show_entry(entry("s3cret\nurl: https://mail.example.invalid"))
+
+        assert view.open_url_btn.get_visible()
+
+    def test_anything_but_a_web_address_is_shown_but_not_launched(self, view):
+        """A synced store carries whatever another machine wrote there."""
+        view.show_entry(entry("s3cret\nurl: ssh://staging.example.invalid"))
+
+        assert view.url_row.get_subtitle() == "ssh://staging.example.invalid"
+        assert not view.open_url_btn.get_visible()
+
+    def test_an_entry_without_an_address_offers_nothing(self, view):
+        view.show_entry(entry("s3cret\nusername: someone"))
+
+        assert not view.open_url_btn.get_visible()
+
+    def test_clear_takes_the_button_away(self, view):
+        view.show_entry(entry("s3cret\nurl: https://mail.example.invalid"))
+        view.clear()
+
+        assert not view.open_url_btn.get_visible()
+
+    def test_opening_hands_the_address_to_the_desktop(self, view, monkeypatch):
+        from gtkpass.ui import password_detail
+
+        launched: list[str] = []
+        monkeypatch.setattr(password_detail, "launch_uri", launched.append)
+        view.show_entry(entry("s3cret\nurl: https://mail.example.invalid"))
+
+        view._on_open_url(None)
+
+        assert launched == ["https://mail.example.invalid"]
+
+
+class TestTheStoreIsNamed:
+    """With two stores configured, only the sidebar said which one an entry
+    was in, and the sidebar is an overlay at narrow widths."""
+
+    def test_the_store_is_named_under_the_heading(self, view):
+        view.show_entry(entry("s3cret"), store_name="Work Vault")
+
+        assert view.store_label.get_visible()
+        assert view.store_label.get_text() == "in Work Vault"
+
+    def test_an_entry_shown_without_a_store_has_no_line_for_it(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert not view.store_label.get_visible()
+
+    def test_clear_takes_it_away(self, view):
+        view.show_entry(entry("s3cret"), store_name="Work Vault")
+        view.clear()
+
+        assert not view.store_label.get_visible()
+
+
+class TestLastChanged:
+    """Every backend lists a modification time, and nothing showed it.
+
+    "How old is this password" is the question behind most rotations, and
+    the answer was in hand all along.
+    """
+
+    def test_the_time_is_shown_as_a_row(self, view):
+        from gtkpass._gi import GLib
+
+        view.show_entry(entry("s3cret"), modified=1_700_000_000.0)
+
+        expected = GLib.DateTime.new_from_unix_local(1_700_000_000).format("%x %H:%M")
+        assert view.modified_row.get_visible()
+        assert view.modified_row.get_subtitle() == expected
+
+    def test_a_store_that_keeps_no_time_shows_no_row(self, view):
+        """The demo data says 0, the interface says nothing."""
+        view.show_entry(entry("s3cret"), modified=0.0)
+
+        assert not view.modified_row.get_visible()
+
+    def test_an_entry_shown_without_one_shows_no_row(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert not view.modified_row.get_visible()
+
+    def test_clear_takes_it_away(self, view):
+        view.show_entry(entry("s3cret"), modified=1_700_000_000.0)
+        view.clear()
+
+        assert not view.modified_row.get_visible()
+
+
+OTP_URI = "otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP"
+
+#: A Unix time with 12 seconds gone from its 30-second step, so the code and
+#: the countdown are both fixed and neither sits on a boundary.
+OTP_TIME = 1_700_000_052.0
+
+
+@pytest.fixture
+def at_a_fixed_time(monkeypatch):
+    """Freeze the pane's clock, so a code and a countdown can be asserted."""
+    monkeypatch.setattr("gtkpass.ui.password_detail.now", lambda: OTP_TIME)
+
+
+class TestOneTimeCode:
+    """An entry's otpauth:// line, shown as the code it currently stands for.
+
+    The line is what `pass-otp` writes and what the pane used to show as a
+    dotted-out field nobody could do anything with: the secret was there, the
+    code was not, and the entry had to be taken to another application.
+    """
+
+    def test_an_entry_without_one_has_no_row(self, view):
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert not view.otp_row.get_visible()
+
+    def test_the_code_is_the_one_the_secret_stands_for(self, view, at_a_fixed_time):
+        from gtkpass.otp import code_at, format_code, parse_otpauth
+
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        expected = format_code(code_at(parse_otpauth(OTP_URI), OTP_TIME))
+        assert view.otp_row.get_visible()
+        assert view.otp_row.get_subtitle() == expected
+
+    def test_the_countdown_says_how_long_it_lasts(self, view, at_a_fixed_time):
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        assert view.otp_countdown_label.get_text() == "18s"
+
+    def test_the_code_follows_the_clock(self, view, monkeypatch):
+        """The row is a countdown, so it has to redraw without being reopened."""
+        from gtkpass.otp import code_at, format_code, parse_otpauth
+
+        monkeypatch.setattr("gtkpass.ui.password_detail.now", lambda: OTP_TIME)
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        first = view.otp_row.get_subtitle()
+
+        monkeypatch.setattr("gtkpass.ui.password_detail.now", lambda: OTP_TIME + 30)
+        view.refresh_otp()
+
+        params = parse_otpauth(OTP_URI)
+        assert view.otp_row.get_subtitle() == format_code(
+            code_at(params, OTP_TIME + 30)
+        )
+        assert view.otp_row.get_subtitle() != first
+
+    def test_a_line_that_cannot_produce_codes_says_so(self, view):
+        """Silently showing no row would hide a broken entry from its owner."""
+        view.show_entry(entry("s3cret\notpauth://hotp/a?secret=JBSWY3DPEHPK3PXP"))
+
+        assert view.otp_row.get_visible()
+        assert "HOTP" in view.otp_row.get_subtitle()
+        assert not view.copy_otp_btn.get_visible()
+
+    def test_the_copy_button_returns_when_the_line_is_readable(self, view):
+        view.show_entry(entry("s3cret\notpauth://hotp/a?secret=JBSWY3DPEHPK3PXP"))
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        assert view.copy_otp_btn.get_visible()
+
+    def test_copying_gives_the_digits_not_the_grouping(self, view, at_a_fixed_time):
+        """The row groups the code to be read; a form wants it unspaced."""
+        from gtkpass.otp import code_at, parse_otpauth
+
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.copy_otp_btn.emit("clicked")
+
+        assert captured == [
+            ("One-Time Code", code_at(parse_otpauth(OTP_URI), OTP_TIME))
+        ]
+
+    def test_copying_by_name_reaches_the_same_code(self, view, at_a_fixed_time):
+        """What the window's action and the sidebar's menu go through."""
+        from gtkpass.otp import code_at, parse_otpauth
+
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        assert view.copy_field("One-Time Code") is True
+        assert captured == [
+            ("One-Time Code", code_at(parse_otpauth(OTP_URI), OTP_TIME))
+        ]
+
+    def test_copying_an_entry_that_has_none_reports_nothing_to_copy(self, view):
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert view.copy_field("One-Time Code") is False
+
+    def test_moving_to_an_entry_without_one_takes_the_row_away(self, view):
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert not view.otp_row.get_visible()
+
+    def test_clear_takes_it_away(self, view):
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.clear()
+
+        assert not view.otp_row.get_visible()
+
+    def test_clearing_stops_the_countdown(self, view):
+        """A timer left running holds the secret and redraws a hidden row."""
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.clear()
+
+        assert view._otp_tick == 0
+
+    def test_the_secret_is_not_left_in_other_fields(self, view):
+        """It is still the entry's own line, so it stays -- dotted out."""
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        shown = present_until(view, lambda v: v.extra_fields.get_n_items() > 0)
+        assert OTP_URI not in shown
+
+
+class TestOTPFieldOf:
+    """field_of is how a copy made without opening the entry finds a value."""
+
+    def test_the_code_is_computed_from_the_entry(self, at_a_fixed_time):
+        from gtkpass.otp import code_at, parse_otpauth
+        from gtkpass.ui.password_detail import field_of
+
+        value = field_of(entry(f"s3cret\n{OTP_URI}"), "One-Time Code")
+
+        assert value == code_at(parse_otpauth(OTP_URI), OTP_TIME)
+
+    def test_an_entry_without_one_yields_nothing(self):
+        from gtkpass.ui.password_detail import field_of
+
+        assert field_of(entry("s3cret\nusername: alice"), "One-Time Code") == ""
+
+    def test_a_broken_line_yields_nothing_rather_than_raising(self):
+        """The pane says why; a copy from the sidebar just has nothing to give."""
+        from gtkpass.ui.password_detail import field_of
+
+        broken = entry("s3cret\notpauth://totp/a?secret=!!!")
+        assert field_of(broken, "One-Time Code") == ""
+
+
+def buttons_of(widget):
+    """Every Button below ``widget``, in the order they are laid out."""
+
+    def walk(parent):
+        child = parent.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Button):
+                yield child
+            yield from walk(child)
+            child = child.get_next_sibling()
+
+    return list(walk(widget))
+
+
+class TestTheRawTab:
+    """The entry as the store wrote it, beside the pane that interprets it.
+
+    The pane divides an entry into fields, notes and a password, and every one
+    of those divisions is a convention rather than a specification. When it
+    reads a line the way its owner did not mean, the only way to see that was
+    to decrypt the file outside the application.
+    """
+
+    CONTENT = "s3cret\nusername: alice\nhost: db.example.com\nthe safe opens at 10:30"
+
+    def test_it_shows_the_entry_exactly_as_stored(self, view):
+        view.show_entry(entry(self.CONTENT))
+
+        assert view.raw_text() == self.CONTENT
+
+    def test_the_fields_are_still_what_opens(self, view):
+        """Raw is for when the reading looks wrong, not the way in."""
+        view.show_entry(entry(self.CONTENT))
+
+        assert view.view_stack.get_visible_child_name() == "fields"
+
+    def test_another_entry_replaces_it(self, view):
+        view.show_entry(entry(self.CONTENT))
+        view.show_entry(entry("other\nusername: bob"))
+
+        assert view.raw_text() == "other\nusername: bob"
+
+    def test_clear_empties_it(self, view):
+        """A buffer keeps what it was given: the plaintext would outlive the
+        entry that was dropped when the pane moved on."""
+        view.show_entry(entry(self.CONTENT))
+        view.clear()
+
+        assert view.raw_text() == ""
+
+    def test_copying_everything_copies_the_whole_entry(self, view):
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(self.CONTENT))
+        view.copy_raw_btn.emit("clicked")
+
+        assert captured == [("Entry", self.CONTENT)]
+
+    def test_an_entry_with_nothing_below_the_password_is_still_raw(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert view.raw_text() == "s3cret"
+
+
+class TestCopyingTheOtherFields:
+    """A copy button per row, for the fields the pane has no row of its own for.
+
+    They were readable and selectable and nothing else: copying a host or an
+    API key meant dragging across a label, which is the one interaction a
+    dotted-out field does not offer at all.
+    """
+
+    CONTENT = "s3cret\nhost: db.example.com\nport: 5432\napi-key: sk-live-42"
+
+    def test_every_row_gets_one(self, view):
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+
+        assert len(buttons_of(view.extras_view)) == 3
+
+    def test_clicking_it_copies_that_field(self, view):
+        """Presented rather than driven through the action: a binding in a
+        list-item template only runs when a row is actually built."""
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+
+        buttons_of(view.extras_view)[0].emit("clicked")
+
+        assert captured == [("host", "db.example.com")]
+
+    def test_a_hidden_field_copies_its_value_and_not_the_dots(self, view):
+        """api-key is dotted out on screen; the clipboard wants the key."""
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+
+        buttons_of(view.extras_view)[2].emit("clicked")
+
+        assert captured == [("api-key", "sk-live-42")]
+
+    def test_the_buttons_follow_the_entry(self, view):
+        """Fewer fields than the entry before must leave no stale action."""
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+        view.show_entry(entry("s3cret\nhost: only.example.com"))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) == 1)
+
+        assert len(buttons_of(view.extras_view)) == 1

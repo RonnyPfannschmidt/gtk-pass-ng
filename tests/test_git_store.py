@@ -404,6 +404,39 @@ class TestSyncing:
         assert result.pushed == 0
 
 
+class TestWhatIsStillToPush:
+    """The sidebar shows how many commits the remote has not seen.
+
+    Every write commits, so a store edited on a machine that is offline for
+    a while accrues them, and nothing said so until a sync was tried.
+    """
+
+    def test_a_pushed_store_has_nothing_to_push(self, store_repo, bare_remote):
+        assert open_store(store_repo).commits_ahead() == 0
+
+    def test_a_local_commit_counts(self, store_repo, bare_remote):
+        store = open_store(store_repo)
+        store.commit([entry(store_repo, "email/work")], "Add email/work")
+        store.commit([entry(store_repo, "email/home")], "Add email/home")
+
+        assert store.commits_ahead() == 2
+
+    def test_a_sync_brings_it_back_to_nothing(self, store_repo, bare_remote):
+        store = open_store(store_repo)
+        store.commit([entry(store_repo, "email/work")], "Add email/work")
+
+        store.sync()
+
+        assert store.commits_ahead() == 0
+
+    def test_a_store_without_an_upstream_counts_nothing(self, store_repo):
+        """There is nowhere for them to go, so there is nothing to say."""
+        store = GitStore(store_repo, "git", commit_on_write=True)
+        store.commit([entry(store_repo, "email/work")], "Add email/work")
+
+        assert store.commits_ahead() == 0
+
+
 class TestSyncingRefusesToLeaveAMess:
     def test_a_conflict_leaves_the_store_usable(
         self, store_repo, bare_remote, other_clone

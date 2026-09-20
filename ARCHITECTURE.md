@@ -157,6 +157,36 @@ to connect it to, and `action-target` takes a `GVariant` that a string property
 cannot be bound to. The row binds `display`, which the item recomputes and
 notifies when it is revealed.
 
+An entry carrying an `otpauth://` line gets a row of its own above the URL,
+showing the code that line currently stands for and the seconds it has left.
+The arithmetic is `otp.py` — RFC 6238 over `hmac`, which is a counter read off
+the clock, an HMAC and a truncation — rather than a dependency. The line itself
+stays below in the other fields, dotted out: it is the secret every future code
+comes from, and somebody moving to another device needs to get at it. A line
+that cannot produce codes keeps the row and says why, because an entry with a
+broken OTP line has a problem its owner wants told.
+
+The pane offers two readings of the same entry, as an `Adw.ViewStack` with a
+switcher above it: **Fields**, which is everything described above, and **Raw**,
+which is the decrypted content as the store wrote it, in a monospace
+`Gtk.TextView`. Every division the pane makes — field against prose, notes
+against the rest — is a convention rather than a specification, because `pass`
+prescribes no format below the first line. When a line is read the way its
+owner did not mean it, Raw is what shows that without decrypting the file
+outside the application. Fields stays the default: Raw is for when the reading
+looks wrong, not the way in. Clearing the pane empties the buffer, which would
+otherwise hold the plaintext after the entry itself was dropped.
+
+Each extra field's row carries a copy button, and how it reaches a handler is
+worth knowing. A `BuilderListItemFactory` template cannot connect a signal, so
+the button activates an action — but a *parameterised* action needs its target
+bound to the item, and that target is null until the row is bound, which makes
+GTK's action helper warn about the type mismatch twice for every row built. So
+each field gets its own parameterless action instead, named for its position in
+the model (`extras.copy-3`), registered beside the model in `_show_extra_fields`
+and dropped when the next entry replaces it. A stale action left behind would be
+a row recycled onto a shorter entry copying a value no longer on screen.
+
 It emits `copy-requested` instead of touching the clipboard, leaving the window
 to apply the user's timeout and raise the toast.
 
@@ -289,7 +319,10 @@ The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
 
 An earlier design described OTP, QR code, Git and keyring *services*, and
 prescribed the dependencies to build them — `keyring`, `GitPython`, `pyotp`,
-`qrcode`, `pillow`, `opencv`. None were ever written and none are planned.
+`qrcode`, `pillow`, `opencv`. None were ever installed. OTP was the one of them
+that turned out to be worth having, and it cost no dependency: `otp.py` is RFC
+6238 over the standard library. QR code scanning stays out — that is the half
+that would have wanted a camera and an image decoder.
 
 Git is handled by `backends/git_store.py`, a plain `GitStore` object owned by a
 backend instance rather than a mixin on `PasswordBackend`. It is the only thing

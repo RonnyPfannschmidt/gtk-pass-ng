@@ -455,6 +455,9 @@ class TestAStoreWithoutGitStillWorks:
         assert not capability.supported
         assert capability.reason is SyncUnavailable.NOT_A_REPO
 
+    def test_it_has_nothing_to_push(self, backend):
+        assert backend.unpushed_commits() == 0
+
 
 class TestWritingWaitsForTheRecipientsToBeApproved:
     """A store whose .gpg-id changed is not written to until somebody looks.

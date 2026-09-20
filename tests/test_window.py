@@ -134,7 +134,7 @@ def captured_messages(window) -> list[str]:
     separately, in TestAFailureCanBeRead.
     """
     said: list[str] = []
-    window._toast = said.append
+    window._toast = lambda message, *_, **__: said.append(message)
     window._report_failure = lambda summary, error: said.append(f"{summary}: {error}")
     return said
 
@@ -340,7 +340,8 @@ class TestThePlaceholderSaysWhichStateItIsIn:
         monkeypatch.setattr(DemoBackend, "list_passwords", lambda self, prefix="": [])
 
         def state(app):
-            return listed_window(app)._placeholder_state
+            window = listed_window(app)
+            return window._placeholder_state, window.add_password_button.get_visible()
 
         settings = get_settings()
         previous = settings.get_value("backend-instances")
@@ -348,9 +349,37 @@ class TestThePlaceholderSaysWhichStateItIsIn:
             "backend-instances", GLib.Variant("a(ss)", [(DEMO_BACKEND_ID, "demo")])
         )
         try:
-            assert run_in_application(state) == "empty"
+            state_name, offers_adding = run_in_application(state)
         finally:
             settings.set_value("backend-instances", previous)
+
+        assert state_name == "empty"
+        assert offers_adding, "it says to add a password and offers no way to"
+
+    def test_a_failed_open_offers_to_try_again(self, demo_backend_configured):
+        """A store on a mount that was not up, a passphrase prompt dismissed:
+        the second attempt is the one that works, and it wanted a button."""
+
+        def retry(app):
+            window = listed_window(app)
+            window._on_password_selected(DEMO_BACKEND_ID, "no/such/entry")
+            pump_until(lambda: window._placeholder_state == "failed")
+            offered = window.retry_open_button.get_visible()
+            attempts = window._detail_request
+
+            window.activate_action("win.retry-open", None)
+            return offered, window._detail_request - attempts
+
+        offered, attempts = run_in_application(retry)
+
+        assert offered is True
+        assert attempts == 1
+
+    def test_the_retry_button_is_not_offered_elsewhere(self, demo_backend_configured):
+        def visible(app):
+            return listed_window(app).retry_open_button.get_visible()
+
+        assert run_in_application(visible) is False
 
 
 class TestTheWindowOpensWhereItWasLeft:
@@ -520,6 +549,114 @@ class TestKeyboard:
                 pump_until(lambda: not window.get_mapped())
 
         assert run_in_application(focus) is True
+
+    def test_typing_anywhere_in_the_window_goes_to_the_search_box(
+        self, demo_backend_configured
+    ):
+        """The convention every GNOME list follows: type, and it searches."""
+
+        def capture(app):
+            window = listed_window(app)
+            return window.search_entry.get_key_capture_widget() is window
+
+        assert run_in_application(capture) is True
+
+    def test_down_from_the_search_box_moves_into_the_tree(
+        self, demo_backend_configured
+    ):
+        from gtkpass._gi import Gdk
+
+        def within_tree(window):
+            widget = window.get_focus()
+            while widget is not None:
+                if widget is window.password_list:
+                    return True
+                widget = widget.get_parent()
+            return False
+
+        def move(app):
+            window = listed_window(app)
+            window.present()
+            try:
+                pump_until(lambda: window.get_mapped())
+                window.activate_action("win.search", None)
+                handled = window._on_search_key(None, Gdk.KEY_Down, 0, 0)
+                pump_until(lambda: within_tree(window))
+                return handled, within_tree(window)
+            finally:
+                window.destroy()
+                pump_until(lambda: not window.get_mapped())
+
+        handled, moved = run_in_application(move)
+
+        assert handled is True
+        assert moved is True
+
+    def test_activating_an_entry_copies_its_password(self, demo_backend_configured):
+        def activate(app):
+            window = listed_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            name = backend.list_passwords()[0].name
+            said = captured_messages(window)
+
+            window.password_list.emit("password-activated", DEMO_BACKEND_ID, name)
+            pump_until(lambda: bool(said), timeout_seconds=5.0)
+            return said
+
+        said = run_in_application(activate)
+
+        assert said and "Password copied" in said[0]
+
+    def test_copying_the_url_copies_the_one_on_display(self, demo_backend_configured):
+        """The password and the username had shortcuts; the URL did not."""
+        copied = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            with_url = next(
+                entry.name
+                for entry in backend.list_passwords()
+                if "url" in (backend.get_password(entry.name).metadata)
+            )
+            window._on_password_selected(DEMO_BACKEND_ID, with_url)
+            pump_until(lambda: window._shown is not None)
+            window.lookup_action("copy-url").activate(None)
+            return window.password_detail.url_row.get_subtitle()
+
+        url = run_in_application(copy)
+
+        assert copied == [url]
+
+    def test_copying_the_one_time_code_copies_the_one_on_display(
+        self, demo_backend_configured
+    ):
+        """The code, not the otpauth line the pane computed it from."""
+        copied = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            with_otp = next(
+                entry.name
+                for entry in backend.list_passwords()
+                if "otpauth" in backend.get_password(entry.name).metadata
+            )
+            window._on_password_selected(DEMO_BACKEND_ID, with_otp)
+            pump_until(lambda: window._shown is not None)
+            window.activate_action("win.copy-otp", None)
+            return window.password_detail.otp_row.get_subtitle()
+
+        shown = run_in_application(copy)
+
+        assert copied and copied[0].isdigit()
+        assert copied[0] == shown.replace(" ", "")
 
     def test_copying_the_password_needs_an_entry(self, demo_backend_configured):
         def enabled(app):
@@ -749,6 +886,72 @@ class TestNarrowWindows:
 
         assert run_in_application(select) is False
 
+    def test_the_window_fits_at_the_width_the_metadata_claims(
+        self, demo_backend_configured
+    ):
+        """360 points, as the AppStream component promises.
+
+        The header bar packed the sidebar toggle, add, edit, the title, sync,
+        the menu and three window controls, and asked for 392 points to do it.
+        GTK gives a window its minimum whatever was asked for, so at 360 the
+        close button sat past the right edge of the screen.
+        """
+        from gtkpass._gi import Gtk
+
+        def minimum_width(window):
+            minimum, _natural, _, _ = window.get_content().measure(
+                Gtk.Orientation.HORIZONTAL, -1
+            )
+            return minimum
+
+        needed = run_in_application(
+            lambda app: self.at_width(
+                app,
+                360,
+                lambda window: window.split_view.get_collapsed(),
+                minimum_width,
+            )
+        )
+
+        assert needed <= 360, f"the window cannot be narrower than {needed} points"
+
+    def test_the_entry_buttons_move_to_the_bottom_when_narrow(
+        self, demo_backend_configured
+    ):
+        """Where a thumb can reach them, and out of a header that has no room."""
+        in_header, at_bottom = run_in_application(
+            lambda app: self.at_width(
+                app,
+                360,
+                lambda window: window.split_view.get_collapsed(),
+                lambda window: (
+                    window.add_button.get_visible(),
+                    window.bottom_bar.get_revealed(),
+                ),
+            )
+        )
+
+        assert in_header is False
+        assert at_bottom is True
+
+    def test_the_entry_buttons_stay_in_the_header_when_wide(
+        self, demo_backend_configured
+    ):
+        in_header, at_bottom = run_in_application(
+            lambda app: self.at_width(
+                app,
+                1000,
+                lambda window: True,
+                lambda window: (
+                    window.add_button.get_visible(),
+                    window.bottom_bar.get_revealed(),
+                ),
+            )
+        )
+
+        assert in_header is True
+        assert at_bottom is False
+
     def test_the_sidebar_stays_put_at_full_width(self, demo_backend_configured):
         def select(app):
             window = listed_window(app)
@@ -907,6 +1110,26 @@ class TestABackendThatWouldNotLoad:
             return window.password_list.root.get_item(0).name
 
         assert "unavailable" in run_in_application(name)
+
+    def test_choosing_the_row_says_why_and_offers_a_way_out(self, broken):
+        """Clicking the row did nothing, and the reason lived in a tooltip."""
+
+        def choose(app):
+            window = self.failed_window(app)
+            pump_until(lambda: window.password_list.root.get_n_items() > 0)
+            window.password_list.selection.set_selected(0)
+            return (
+                window._placeholder_state,
+                window.placeholder_page.get_description(),
+                window.reload_button.get_visible(),
+                window.open_preferences_button.get_visible(),
+            )
+
+        state, description, retry, preferences = run_in_application(choose)
+
+        assert state == "unavailable"
+        assert "not mounted" in description
+        assert retry and preferences
 
     def test_the_toast_offers_a_retry(self, broken):
         from gtkpass._gi import Adw as _Adw
@@ -1139,6 +1362,77 @@ class TestRenaming:
         assert "Renamed Live" in run_in_application(rename_while_open)
 
 
+class TestSettingsEditsReachAnOpenWindow:
+    """A store's own keys have to be watched, not only the instance list.
+
+    The window only ever heard about the instance list, and heard about it
+    because the settings dialog rewrote that list on every keystroke whether
+    or not it had changed. Once an unchanged list is left alone, a store
+    directory edited in the dialog has to reach the window some other way --
+    and it has to reach it once, not once per key that was written.
+    """
+
+    @pytest.fixture
+    def demo_data_path(self):
+        import importlib.resources
+
+        return str(importlib.resources.files("gtkpass.backends.data") / "demo.json")
+
+    @pytest.fixture
+    def restore_demo_path(self):
+        from gtkpass.config import get_backend_settings
+
+        yield
+        get_backend_settings("demo", DEMO_BACKEND_ID).reset("custom-data-path")
+
+    def test_a_changed_store_setting_rebuilds_the_backend(
+        self, demo_backend_configured, demo_data_path, restore_demo_path
+    ):
+        from gtkpass.config import get_backend_settings
+
+        def edit(app):
+            window = listed_window(app)
+            before = window.backend_manager
+
+            get_backend_settings("demo", DEMO_BACKEND_ID).set_string(
+                "custom-data-path", demo_data_path
+            )
+            rebuilt = pump_until(
+                lambda: window.backend_manager is not before
+                and window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+            )
+            return rebuilt
+
+        assert run_in_application(edit) is True
+
+    def test_a_burst_of_writes_rebuilds_once(
+        self, demo_backend_configured, demo_data_path, restore_demo_path
+    ):
+        from gtkpass.config import get_backend_settings
+
+        def edit(app):
+            window = listed_window(app)
+            rebuilds: list[int] = []
+            original = window._rebuild_backends
+
+            def counted() -> None:
+                rebuilds.append(1)
+                original()
+
+            window._rebuild_backends = counted  # type: ignore[method-assign]
+
+            stored = get_backend_settings("demo", DEMO_BACKEND_ID)
+            stored.set_string("custom-data-path", demo_data_path)
+            stored.set_string("custom-data-path", "")
+            stored.set_string("custom-data-path", demo_data_path)
+            pump_until(lambda: bool(rebuilds))
+            # Long enough for a second one to have been scheduled and fired.
+            pump_until(lambda: False, timeout_seconds=1.0)
+            return len(rebuilds)
+
+        assert run_in_application(edit) == 1
+
+
 class TestShowingDetails:
     """Selecting an entry decrypts it and shows it in the detail pane."""
 
@@ -1166,6 +1460,13 @@ class TestShowingDetails:
 
         assert displayed_name(window) == name
         assert window.password_detail.password_row.get_text()
+
+    def test_the_pane_names_the_store(self, demo_backend_configured):
+        def store(app):
+            window, _ = self.open_first_password(app)
+            return window.password_detail.store_label.get_text()
+
+        assert run_in_application(store) == "in Demo"
 
     def test_a_missing_entry_reports_instead_of_crashing(self, demo_backend_configured):
         def select_nonsense(app):
@@ -1406,6 +1707,34 @@ class TestAdding:
         run_in_application(add)
 
         assert written == [("new/entry", "s3cret\n")]
+
+    def test_username_and_url_become_fields_below_the_password(
+        self, demo_backend_configured
+    ):
+        """Typed into rows of their own, written in the form the pane reads."""
+        written = []
+
+        def add(app):
+            window = self.writable_window(app)
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.add_password = lambda name, content, commit=True: written.append(
+                content
+            )
+
+            dialog = window._open_add_dialog()
+            dialog.name_row.set_text("new/entry")
+            dialog.password_row.set_text("s3cret")
+            dialog.username_row.set_text("alice")
+            dialog.url_row.set_text("https://example.invalid")
+            dialog.details_view.get_buffer().set_text("host: h\n")
+            dialog.save_button.emit("clicked")
+            pump_until(lambda: bool(written), timeout_seconds=5.0)
+
+        run_in_application(add)
+
+        assert written == [
+            "s3cret\nusername: alice\nurl: https://example.invalid\nhost: h\n"
+        ]
 
     def test_the_name_is_tidied_rather_than_taken_literally(
         self, demo_backend_configured
@@ -2417,6 +2746,35 @@ class TestACopiedSecretIsTakenBack:
         window._on_copy_requested(None, "Password", "hunter2")
         return window, name, cleared
 
+    def test_the_toast_offers_to_clear_it_now(self, demo_backend_configured):
+        """It promised a clear in forty-five seconds and offered no say in it."""
+
+        def check(app):
+            window, _ = TestShowingDetails().open_first_password(app)
+            toasts: list[tuple[str, str | None, str | None]] = []
+            window._toast = lambda message, button=None, action=None: toasts.append(
+                (message, button, action)
+            )
+            window._on_copy_requested(None, "Password", "hunter2")
+            return toasts
+
+        toasts = run_in_application(check)
+
+        assert toasts == [
+            ("Password copied, clearing in 45s", "Clear Now", "win.clear-clipboard")
+        ]
+
+    def test_clearing_now_takes_it_back(self, demo_backend_configured):
+        def check(app):
+            window, _, cleared = self.copy_from_first_entry(app)
+            window.activate_action("win.clear-clipboard", None)
+            return cleared, window._copied_from
+
+        cleared, remembered = run_in_application(check)
+
+        assert cleared == ["taken back"]
+        assert remembered is None
+
     def test_opening_another_entry_takes_it_back(self, demo_backend_configured):
         def check(app):
             window, name, cleared = self.copy_from_first_entry(app)
@@ -2760,6 +3118,73 @@ class TestSyncing:
 
         assert run_in_application(check) == "idle"
 
+    def test_one_store_can_be_synced_by_itself(self, demo_backend_configured):
+        """From its row's menu, rather than every store at once."""
+        from gtkpass.backends import SyncResult
+
+        def check(app):
+            window = self.window_with_sync(
+                app, self.ready(), sync=lambda: SyncResult(pulled=1, pushed=0)
+            )
+            pump_until(lambda: window._pending_listings == 0)
+            toasts = captured_messages(window)
+            window.password_list.selection.set_selected(0)
+            enabled = window.lookup_action("sync-store").get_enabled()
+
+            window.lookup_action("sync-store").activate(None)
+            pump_until(lambda: bool(toasts), timeout_seconds=5.0)
+            return enabled, toasts
+
+        enabled, toasts = run_in_application(check)
+
+        assert enabled is True
+        assert toasts and "1 in, 0 out" in toasts[0]
+
+    def test_syncing_one_store_is_closed_where_nothing_syncable_is_selected(
+        self, demo_backend_configured
+    ):
+        from gtkpass.backends import SyncCapability, SyncUnavailable
+
+        def check(app):
+            window = self.window_with_sync(
+                app,
+                SyncCapability.unsupported(
+                    SyncUnavailable.NO_REMOTE, "No remote is configured."
+                ),
+            )
+            pump_until(lambda: window._pending_listings == 0)
+            window.password_list.selection.set_selected(0)
+            return window.lookup_action("sync-store").get_enabled()
+
+        assert run_in_application(check) is False
+
+    def test_what_is_still_to_push_is_shown_on_the_store_row(
+        self, demo_backend_configured
+    ):
+        def check(app):
+            window = self.window_with_sync(app, self.ready())
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            backend.unpushed_commits = lambda: 2  # type: ignore[method-assign]
+
+            window._load_passwords()
+            pump_until(
+                lambda: window.password_list.root.get_n_items() > 0
+                and window.password_list.root.get_item(0).badge != ""
+            )
+            return window.password_list.root.get_item(0).badge
+
+        assert run_in_application(check) == "2 to push"
+
+    def test_a_pushed_store_carries_no_badge(self, demo_backend_configured):
+        def check(app):
+            window = self.window_with_sync(app, self.ready())
+            window._load_passwords()
+            pump_until(lambda: window._pending_listings == 0)
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return window.password_list.root.get_item(0).badge
+
+        assert run_in_application(check) == ""
+
     def test_a_missing_permission_offers_the_override_command(
         self, demo_backend_configured
     ):
@@ -2785,3 +3210,75 @@ class TestSyncing:
         shown = run_in_application(check)
 
         assert shown == [command]
+
+
+class TestSyncingOnStart:
+    """Off by default; on, the syncable stores are synced once the backends
+    have loaded, once per launch."""
+
+    @pytest.fixture
+    def syncable_demo(self, demo_backend_configured, monkeypatch):
+        from gtkpass.backends import SyncCapability, SyncResult, SyncUnavailable
+        from gtkpass.backends.demo import DemoBackend
+
+        synced: list[str] = []
+
+        def sync(self) -> SyncResult:
+            synced.append("synced")
+            return SyncResult(0, 0)
+
+        monkeypatch.setattr(
+            DemoBackend,
+            "sync_capability",
+            lambda self: SyncCapability(
+                supported=True,
+                reason=SyncUnavailable.READY,
+                detail="Sync with origin/main",
+                remote="origin",
+                branch="main",
+            ),
+        )
+        monkeypatch.setattr(DemoBackend, "sync", sync)
+        return synced
+
+    @pytest.fixture
+    def sync_on_start(self):
+        settings = get_settings()
+        settings.set_boolean("sync-on-start", True)
+        yield
+        settings.reset("sync-on-start")
+
+    def test_it_is_off_by_default(self, syncable_demo):
+        def check(app):
+            window = listed_window(app)
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return window.sync_stack.get_visible_child_name(), list(syncable_demo)
+
+        state, synced = run_in_application(check)
+
+        assert state == "idle"
+        assert synced == []
+
+    def test_it_syncs_once_the_backends_have_loaded(self, syncable_demo, sync_on_start):
+        def check(app):
+            window = listed_window(app)
+            pump_until(lambda: bool(syncable_demo), timeout_seconds=5.0)
+            return list(syncable_demo), window.settings.get_boolean("sync-on-start")
+
+        synced, enabled = run_in_application(check)
+
+        assert enabled is True
+        assert synced == ["synced"]
+
+    def test_a_reload_does_not_sync_again(self, syncable_demo, sync_on_start):
+        def check(app):
+            window = listed_window(app)
+            pump_until(lambda: bool(syncable_demo), timeout_seconds=5.0)
+            window.lookup_action("reload").activate(None)
+            pump_until(
+                lambda: window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+            )
+            pump_until(lambda: False, timeout_seconds=0.5)
+            return list(syncable_demo)
+
+        assert run_in_application(check) == ["synced"]

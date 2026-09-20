@@ -4,7 +4,7 @@ import importlib.resources
 import logging
 from pathlib import Path
 
-from gtkpass._gi import Adw, Gio, GLib, Gtk
+from gtkpass._gi import Adw, Gdk, Gio, GLib, Gtk, Pango
 from gtkpass.backends import (
     BackendError,
     PasswordBackend,
@@ -31,6 +31,7 @@ from gtkpass.firstrun import backend_type_for, existing_store
 # template below is parsed, or window.ui fails with "Invalid object type".
 from gtkpass.ui.password_add import PasswordAddDialog
 from gtkpass.ui.password_detail import (  # noqa: F401
+    OTP_FIELD,
     URL_KEYS,
     USERNAME_KEYS,
     PasswordDetailView,
@@ -54,44 +55,74 @@ logger = logging.getLogger(__name__)
 #: entry that would not decrypt dropped the user onto "No Passwords Found"
 #: while its store sat listed beside it.
 #:
-#: Each entry is (title, description, icon, whether to offer Preferences). A
+#: Each entry is (title, description, icon, the buttons to offer). A
 #: description of None is filled in by the caller, which is how the failure
-#: state carries what went wrong.
-PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, bool]] = {
-    "loading": ("GTKPass", "Loading...", "dialog-password-symbolic", False),
+#: states carry what went wrong. The buttons are template children of the
+#: status page, and a state that offers none says so with an empty tuple.
+PLACEHOLDER_STATES: dict[str, tuple[str, str | None, str, tuple[str, ...]]] = {
+    "loading": ("GTKPass", "Loading...", "dialog-password-symbolic", ()),
     "no-backends": (
         "No Backends Configured",
         "GTKPass needs a password backend to work.\n"
         "Choose a backend in Preferences to get started.",
         "preferences-system-symbolic",
-        True,
+        ("open_preferences_button",),
     ),
     "empty": (
         "No Passwords Found",
         "Your password store is empty.\nAdd a password to get started.",
         "dialog-password-symbolic",
-        False,
+        ("add_password_button",),
     ),
     "ready": (
         "Nothing Selected",
         "Choose an entry in the sidebar to see it here.",
         "dialog-password-symbolic",
-        False,
+        (),
     ),
     "found-store": (
         "Use Your Password Store?",
         None,
         "folder-symbolic",
-        True,
+        ("adopt_store_button", "open_preferences_button"),
     ),
     "no-matches": (
         "No Matches",
         "No entry's path contains what you searched for.",
         "system-search-symbolic",
-        False,
+        (),
     ),
-    "failed": ("Could Not Open This Entry", None, "dialog-warning-symbolic", False),
+    "failed": (
+        "Could Not Open This Entry",
+        None,
+        "dialog-warning-symbolic",
+        ("retry_open_button",),
+    ),
+    # A store that would not load, chosen in the sidebar. What stops one is
+    # almost always outside the application -- a mount, a keyring, an agent
+    # -- and fixed there, after which it wants trying again.
+    "unavailable": (
+        "This Store Did Not Load",
+        None,
+        "dialog-error-symbolic",
+        ("reload_button", "open_preferences_button"),
+    ),
 }
+
+#: Every button the status page has, so a state can hide the ones it does
+#: not offer.
+PLACEHOLDER_BUTTONS = (
+    "adopt_store_button",
+    "add_password_button",
+    "retry_open_button",
+    "reload_button",
+    "open_preferences_button",
+)
+
+
+#: How long the window waits after a settings write before rebuilding the
+#: backends, so that the several keys one save produces cost one rebuild.
+REBUILD_DELAY_MS = 250
 
 
 @Gtk.Template(
@@ -121,11 +152,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
     content_stack = Gtk.Template.Child()
     password_detail = Gtk.Template.Child()
     adopt_store_button = Gtk.Template.Child()
+    add_password_button = Gtk.Template.Child()
+    retry_open_button = Gtk.Template.Child()
+    reload_button = Gtk.Template.Child()
     sidebar_button = Gtk.Template.Child()
     add_button = Gtk.Template.Child()
     sync_button = Gtk.Template.Child()
     sync_stack = Gtk.Template.Child()
     recipient_banner = Gtk.Template.Child()
+    bottom_bar = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         """Initialize the main window."""
@@ -154,6 +189,10 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Backends whose stores have a remote, refreshed whenever they load.
         self._syncable_backends: list[str] = []
         self._pending_syncs: list[str] = []
+        # Whether the sync the preference asks for at startup has been run.
+        # Once per launch: a rebuild after a settings change loads the
+        # backends again, and is not a start.
+        self._synced_on_start = False
         # Bumped per load, so a superseded one cannot deliver into the window
         # it no longer describes. Both run on the pool, and the settings dialog
         # can start a second before the first has come back.
@@ -179,9 +218,18 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._showing_entry = False
         # The store the first-run screen found, while it is being offered.
         self._offered_store: Path | None = None
+        # The entry that last refused to open, for the Try Again button.
+        self._failed_open: tuple[str, str] | None = None
+        # When each listed entry last changed, by (backend id, name), so the
+        # pane can say so: the listing knows and the decrypted entry does not.
+        self._modified: dict[tuple[str, str], float] = {}
         # Whether a listing has ever filled the sidebar. Only the first one
         # decides what shape the tree opens in; after that the rows do.
         self._listed_once = False
+
+        # A rebuild waiting to run, so that a burst of settings writes -- a
+        # store directory and a switch saved together -- costs one rebuild.
+        self._rebuild_source: int | None = None
 
         # Monitor backend-instances for changes
         self.settings.connect("changed::backend-instances", self._on_backends_changed)
@@ -257,6 +305,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         sync_action.set_enabled(False)
         self.add_action(sync_action)
 
+        # One store rather than all of them: what a store row's own menu
+        # offers. Open only while the selected row belongs to a store that
+        # can sync and nothing is syncing already.
+        sync_store_action = Gio.SimpleAction.new("sync-store", None)
+        sync_store_action.connect("activate", self._on_sync_store)
+        sync_store_action.set_enabled(False)
+        self.add_action(sync_store_action)
+
         # Building the backends again from the configuration that is already
         # there. What a failed backend needs once whatever stopped it -- an
         # unmounted store, a locked keyring, an agent that had not started --
@@ -284,6 +340,18 @@ class GTKPassWindow(Adw.ApplicationWindow):
             tree_action.connect("activate", lambda _a, _p, run=method: run())
             self.add_action(tree_action)
 
+        # Opening again the entry that last refused to. The button that
+        # reaches it is only shown on the page that says one did.
+        retry_action = Gio.SimpleAction.new("retry-open", None)
+        retry_action.connect("activate", self._on_retry_open)
+        self.add_action(retry_action)
+
+        # Taking a copied secret back before the timeout does. The button on
+        # the copied toast is what reaches it.
+        clear_action = Gio.SimpleAction.new("clear-clipboard", None)
+        clear_action.connect("activate", self._on_clear_clipboard)
+        self.add_action(clear_action)
+
         # Reaching the search box from the keyboard. Always available: there is
         # nothing to break by focusing an empty one.
         search_action = Gio.SimpleAction.new("search", None)
@@ -295,6 +363,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
         for name, field in (
             ("copy-password", "Password"),
             ("copy-username", "Username"),
+            ("copy-url", "URL"),
+            ("copy-otp", OTP_FIELD),
         ):
             copy_action = Gio.SimpleAction.new(name, None)
             copy_action.connect(
@@ -319,7 +389,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.set_help_overlay(overlay)
 
     def _copy_field(self, field: str) -> None:
-        """Copy a field of the selected entry, whether or not the pane has it.
+        """Copy a field of the selected entry, whether or not the pane has it."""
+        self._copy_from(self.password_list.get_selected_password(), field)
+
+    def _copy_from(self, selected: tuple[str, str] | None, field: str) -> None:
+        """Copy a field of ``selected``, whether or not the pane has it.
 
         When the pane holds the entry this goes through the pane rather than
         around it, so the clipboard timeout, the toast and the take-back on
@@ -331,7 +405,6 @@ class GTKPassWindow(Adw.ApplicationWindow):
         takes as long as it takes -- and reading the pane then would copy an
         empty string or, worse, whatever was on it before.
         """
-        selected = self.password_list.get_selected_password()
         if selected is None or selected == self._shown:
             if not self.password_detail.copy_field(field):
                 self._toast(f"There is no {field.lower()} to copy")
@@ -463,6 +536,21 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._refresh_recipient_banner()
         self._show_backend_errors()
         self._load_passwords()
+        self._sync_on_start()
+
+    def _sync_on_start(self) -> None:
+        """Sync every syncable store, if the preference asks for it.
+
+        After the listing has been started rather than instead of it: the
+        window fills with what is here now, and a pull that brings more in
+        lists again when it lands.
+        """
+        if self._synced_on_start or not self._syncable_backends:
+            return
+        self._synced_on_start = True
+        if self.settings.get_boolean("sync-on-start"):
+            logger.info("Syncing on start, as the preference asks")
+            self._start_sync(list(self._syncable_backends))
 
     def _backends_failed(self, request: int, error: BaseException) -> None:
         """The build itself fell over, rather than one backend in it."""
@@ -472,11 +560,13 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._load_passwords()
 
     def _watch_display_name(self, backend_id: str, backend_type: str) -> None:
-        """Refresh the sidebar when this backend is renamed.
+        """Follow this backend's own settings while it is configured.
 
-        Renaming writes the instance's own display-name key, so it never
-        touches backend-instances and the list would otherwise keep showing
-        the old label until the next restart.
+        A rename writes the instance's display-name key and nothing else, so
+        the sidebar is listed again and relabels the row. Any other key -- the
+        store directory, the keyring collection -- changes what the backend is,
+        so it is built again. Neither touches backend-instances, and watching
+        only that left the old label, and the old store, until a restart.
         """
         if backend_id in self._backend_settings:
             return
@@ -485,10 +575,33 @@ class GTKPassWindow(Adw.ApplicationWindow):
         except Exception as e:
             logger.debug(f"Cannot watch {backend_id} for renames: {e}")
             return
-        backend_gsettings.connect(
-            "changed::display-name", lambda *_: self._load_passwords()
-        )
+        backend_gsettings.connect("changed", self._on_backend_setting_changed)
         self._backend_settings[backend_id] = backend_gsettings
+
+    def _on_backend_setting_changed(self, _settings, key: str) -> None:
+        if key == "display-name":
+            self._load_passwords()
+        else:
+            self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        """Build the backends again once the writes have stopped arriving.
+
+        The settings dialog saves a store as several keys in a row, and each
+        one is a signal. Coalesced rather than answered one by one: a rebuild
+        shuts the thread pool down and starts every backend over, and doing
+        that per key is what made typing a path feel like the application had
+        stopped.
+        """
+        if self._rebuild_source is not None:
+            return
+
+        def rebuild() -> bool:
+            self._rebuild_source = None
+            self._rebuild_backends()
+            return GLib.SOURCE_REMOVE
+
+        self._rebuild_source = GLib.timeout_add(REBUILD_DELAY_MS, rebuild)
 
     def _on_reload(self, _action, _param) -> None:
         """Build every configured backend again, from scratch.
@@ -509,7 +622,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             key: Changed key (backend-instances)
         """
         logger.info("Backend configuration changed, reloading...")
-        self._rebuild_backends()
+        self._schedule_rebuild()
 
     def _rebuild_backends(self) -> None:
         """Throw the manager away and load everything again."""
@@ -596,8 +709,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Every selection, not only the ones that are entries: standing on a
         # folder changes which actions have a target, and nothing else would
         # say so.
+        self.password_list.connect("selection-changed", self._on_selection_changed)
+        # Enter or a double-click on an entry copies its password: the one
+        # thing somebody who has found the row they wanted does next.
         self.password_list.connect(
-            "selection-changed", lambda *_: self._refresh_write_actions()
+            "password-activated",
+            lambda _tree, backend_id, name: self._copy_from(
+                (backend_id, name), "Password"
+            ),
         )
         self.password_detail.connect("copy-requested", self._on_copy_requested)
 
@@ -608,6 +727,33 @@ class GTKPassWindow(Adw.ApplicationWindow):
             "changed::show-hidden-passwords", self._apply_reveal_preference
         )
         self._apply_reveal_preference()
+
+    def _on_selection_changed(self, _tree) -> None:
+        self._refresh_write_actions()
+        self._show_selected_store_state()
+
+    def _show_selected_store_state(self) -> None:
+        """Say why a store did not load, when its row is what was chosen.
+
+        The row said "(unavailable)" and kept the reason in its tooltip, and
+        clicking it did nothing. Chosen, it now takes the pane, with the
+        reason and the two ways out; choosing anything else gives it back.
+        """
+        selected = self.password_list.selected_backend()
+        failed = {
+            backend_id: (backend_type, error)
+            for backend_id, backend_type, error in self.failed_backends
+        }
+        if (
+            selected in failed
+            and self.password_list.get_selected_password() is None
+            and self.password_list.get_selected_folder() is None
+        ):
+            backend_type, error = failed[selected]
+            name = self._get_backend_display_name(selected)
+            self._show_placeholder("unavailable", f"{name} ({backend_type})\n\n{error}")
+        elif self._placeholder_state == "unavailable":
+            self._refresh_placeholder(reapply=False)
 
     def _refresh_write_actions(self) -> None:
         """Offer adding only where something can take it.
@@ -651,6 +797,8 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 folder[0] in writable if folder is not None else writable_entry
             )
 
+        self._refresh_sync_store_action()
+
         if writable:
             self.add_button.set_tooltip_text("Add Password")
         elif self.backend_manager.get_all_backends():
@@ -676,6 +824,19 @@ class GTKPassWindow(Adw.ApplicationWindow):
         # Escape in the box clears it rather than leaving the tree narrowed by
         # a search the user has visibly abandoned.
         self.search_entry.connect("stop-search", lambda *_: self._clear_search())
+        # Typing anywhere in the window types into the box, as every list in
+        # GNOME does; the tree has no type-ahead of its own to compete with.
+        self.search_entry.set_key_capture_widget(self)
+        # And Down leaves it again, for the rows the search just narrowed.
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_search_key)
+        self.search_entry.add_controller(keys)
+
+    def _on_search_key(self, _controller, keyval: int, _keycode, _state) -> bool:
+        if keyval != Gdk.KEY_Down:
+            return False
+        self.password_list.focus_rows()
+        return True
 
     def _on_search_changed(self, _entry) -> None:
         if self.settings.get_boolean("search-as-you-type"):
@@ -777,6 +938,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         for backend_id, record in zip(loaded_backends, records, strict=False):
             self._list_into(request, backend_id, record)
+            self._count_unpushed(request, backend_id)
 
         # Only on a first listing, when there is nothing else to say what shape
         # the tree should be. After that the rows say it themselves.
@@ -791,6 +953,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
             if request != self._listing_request:
                 return
             logger.debug(f"Loaded {len(passwords)} passwords from {backend_id}")
+            self._modified.update(
+                {
+                    (backend_id, password.name): password.modified
+                    for password in passwords
+                }
+            )
             # The whole listing at once, so the tree can be compared with it
             # rather than emptied and filled. A listing that says what is
             # already there changes nothing at all -- which is what a sync of
@@ -809,6 +977,33 @@ class GTKPassWindow(Adw.ApplicationWindow):
 
         try:
             future = self.backend_manager.list_passwords_async(backend_id)
+        except ValueError as e:
+            report(e)
+            return
+        on_ui_thread(future, show, report)
+
+    def _count_unpushed(self, request: int, backend_id: str) -> None:
+        """Say beside a store how much it still has to push.
+
+        Only for a store that can sync: anywhere else the count is zero by
+        definition and asking would cost a worker for nothing. Runs git, so it
+        goes to the pool with the listing and lands whenever it lands.
+        """
+        if backend_id not in self._syncable_backends:
+            return
+
+        def show(count: int) -> None:
+            if request != self._listing_request:
+                return
+            self.password_list.set_badge(
+                backend_id, f"{count} to push" if count else ""
+            )
+
+        def report(error) -> None:
+            logger.debug(f"Could not count unpushed commits in {backend_id}: {error}")
+
+        try:
+            future = self.backend_manager.unpushed_commits_async(backend_id)
         except ValueError as e:
             report(e)
             return
@@ -850,9 +1045,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self._show_placeholder("no-backends")
             return
 
-        self._show_placeholder("found-store", str(store))
         self.adopt_store_button.set_label(f"Use {_tilde(store)}")
-        self.adopt_store_button.set_visible(True)
+        # The label is a path, and a path can be longer than a narrow window.
+        # Ellipsized in the middle, so the start and the store's own name --
+        # the parts that identify it -- are what survive.
+        label = self.adopt_store_button.get_child()
+        if isinstance(label, Gtk.Label):
+            label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        self._show_placeholder("found-store", _tilde(store))
 
     def _on_adopt_store(self, _action, _param) -> None:
         """Configure the store the first-run screen found, and open it.
@@ -894,18 +1094,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
         An entry already on display is left alone: only the states that mean
         "there is nothing to show" take the pane back from it.
         """
-        title, description, icon, offer_preferences = PLACEHOLDER_STATES[state]
+        title, description, icon, buttons = PLACEHOLDER_STATES[state]
         self.placeholder_page.set_title(title)
         self.placeholder_page.set_description(
             detail if description is None else description
         )
         self.placeholder_page.set_icon_name(icon)
-        self.open_preferences_button.set_visible(offer_preferences)
+        for button in PLACEHOLDER_BUTTONS:
+            getattr(self, button).set_visible(button in buttons)
         self._placeholder_state = state
-
-        if state != "found-store":
-            # Only the first-run screen offers it, and only while it is up.
-            self.adopt_store_button.set_visible(False)
 
         if (
             state
@@ -914,6 +1111,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
                 "found-store",
                 "empty",
                 "failed",
+                "unavailable",
             )
             or not self._showing_entry
         ):
@@ -1076,6 +1274,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
         action = self.lookup_action("sync")
         if action is not None:
             action.set_enabled(bool(syncable))
+        self._refresh_sync_store_action()
 
         if syncable:
             details = ", ".join(
@@ -1097,17 +1296,39 @@ class GTKPassWindow(Adw.ApplicationWindow):
         else:
             self.sync_button.set_tooltip_text("No backends are configured.")
 
+    def _refresh_sync_store_action(self) -> None:
+        action = self.lookup_action("sync-store")
+        sync_action = self.lookup_action("sync")
+        if action is None or sync_action is None:
+            return
+        selected = self.password_list.selected_backend()
+        action.set_enabled(
+            sync_action.get_enabled() and selected in self._syncable_backends
+        )
+
     def _on_sync(self, action, param):
-        """Pull and push the syncable backends, off the UI thread."""
-        if not self._syncable_backends:
+        """Pull and push every syncable backend, off the UI thread."""
+        self._start_sync(list(self._syncable_backends))
+
+    def _on_sync_store(self, action, param):
+        """Pull and push the store the sidebar is standing in."""
+        selected = self.password_list.selected_backend()
+        if selected in self._syncable_backends:
+            self._start_sync([selected])
+
+    def _start_sync(self, backends: list[str]) -> None:
+        if not backends:
             return
 
-        action.set_enabled(False)
+        for name in ("sync", "sync-store"):
+            action = self.lookup_action(name)
+            if action is not None:
+                action.set_enabled(False)
         self.sync_stack.set_visible_child_name("busy")
 
         # One at a time: they queue on the same four-worker pool anyway, and a
         # single report reads better than one toast per backend.
-        self._pending_syncs = list(self._syncable_backends)
+        self._pending_syncs = backends
         self._sync_next()
 
     def _sync_next(self) -> None:
@@ -1265,7 +1486,11 @@ class GTKPassWindow(Adw.ApplicationWindow):
             if request != self._detail_request:
                 entry.clear_password()
                 return
-            self.password_detail.show_entry(entry)
+            self.password_detail.show_entry(
+                entry,
+                store_name=self._get_backend_display_name(backend_id),
+                modified=self._modified.get((backend_id, password_name)),
+            )
             self._set_shown((backend_id, password_name))
 
         def report(error):
@@ -1278,6 +1503,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             # On the page rather than only in a toast: five seconds is not long
             # enough to read a GPG error, and the pane is where the user is
             # already looking.
+            self._failed_open = (backend_id, password_name)
             self._show_placeholder("failed", f"{password_name}\n\n{error}")
 
         try:
@@ -1286,6 +1512,15 @@ class GTKPassWindow(Adw.ApplicationWindow):
             report(e)
             return
         on_ui_thread(future, show, report)
+
+    def _on_retry_open(self, _action, _param) -> None:
+        if self._failed_open is not None:
+            self._on_password_selected(*self._failed_open)
+
+    def _on_clear_clipboard(self, _action, _param) -> None:
+        """Take a copied secret back now rather than when the timeout does."""
+        self._clipboard.clear_if_ours()
+        self._copied_from = None
 
     def _apply_reveal_preference(self, *_args) -> None:
         """Show or dot out passwords, following the preference."""
@@ -1319,7 +1554,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.password_list.get_selected_password() is not None
             or self._shown is not None
         )
-        for name in ("copy-password", "copy-username"):
+        for name in ("copy-password", "copy-username", "copy-url", "copy-otp"):
             action = self.lookup_action(name)
             if action is not None:
                 action.set_enabled(selected)
@@ -1608,9 +1843,12 @@ class GTKPassWindow(Adw.ApplicationWindow):
         self._clipboard.copy(value, timeout)
         self._copied_from = self._shown
         if timeout > 0:
-            self._toast(f"{field} copied, clearing in {timeout}s")
+            message = f"{field} copied, clearing in {timeout}s"
         else:
-            self._toast(f"{field} copied")
+            message = f"{field} copied"
+        # The toast announces a clear nobody asked for the timing of; the
+        # button is the say in it -- pasted already, take it back now.
+        self._toast(message, button="Clear Now", action="win.clear-clipboard")
 
     def discard_clipboard(self) -> None:
         """Take a copied secret back before the application goes away.
@@ -1624,8 +1862,14 @@ class GTKPassWindow(Adw.ApplicationWindow):
         """
         self._clipboard.clear_at_shutdown()
 
-    def _toast(self, message: str) -> None:
-        self.toast_overlay.add_toast(Adw.Toast.new(message))
+    def _toast(
+        self, message: str, button: str | None = None, action: str | None = None
+    ) -> None:
+        toast = Adw.Toast.new(message)
+        if button and action:
+            toast.set_button_label(button)
+            toast.set_action_name(action)
+        self.toast_overlay.add_toast(toast)
 
     def _report_failure(self, summary: str, error: object) -> None:
         """Say what failed, and keep the whole of why within reach.

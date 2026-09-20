@@ -35,7 +35,13 @@ ABSTRACT_METHODS = sorted(PasswordBackend.__abstractmethods__)
 #: Methods the ABC supplies a working default for, so they are absent from
 #: __abstractmethods__ and the signature check above would never see them.
 #: A backend may override these; if it does, it has to keep the signature.
-OPTIONAL_METHODS = ["sync", "sync_capability", "recipient_audit", "move_folder"]
+OPTIONAL_METHODS = [
+    "sync",
+    "sync_capability",
+    "recipient_audit",
+    "move_folder",
+    "unpushed_commits",
+]
 
 
 #: ``is_available()`` runs on the UI thread during window construction, so a
@@ -370,6 +376,9 @@ class TestDemoBackendBehaviour:
         entries = backend.list_passwords()
         assert entries
         assert all(isinstance(entry, PasswordMetadata) for entry in entries)
+
+    def test_a_backend_that_cannot_sync_has_nothing_to_push(self, backend):
+        assert backend.unpushed_commits() == 0
 
     def test_get_password_returns_content(self, backend):
         first = backend.list_passwords()[0]
