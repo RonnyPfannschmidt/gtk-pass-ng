@@ -166,6 +166,27 @@ comes from, and somebody moving to another device needs to get at it. A line
 that cannot produce codes keeps the row and says why, because an entry with a
 broken OTP line has a problem its owner wants told.
 
+The pane offers two readings of the same entry, as an `Adw.ViewStack` with a
+switcher above it: **Fields**, which is everything described above, and **Raw**,
+which is the decrypted content as the store wrote it, in a monospace
+`Gtk.TextView`. Every division the pane makes — field against prose, notes
+against the rest — is a convention rather than a specification, because `pass`
+prescribes no format below the first line. When a line is read the way its
+owner did not mean it, Raw is what shows that without decrypting the file
+outside the application. Fields stays the default: Raw is for when the reading
+looks wrong, not the way in. Clearing the pane empties the buffer, which would
+otherwise hold the plaintext after the entry itself was dropped.
+
+Each extra field's row carries a copy button, and how it reaches a handler is
+worth knowing. A `BuilderListItemFactory` template cannot connect a signal, so
+the button activates an action — but a *parameterised* action needs its target
+bound to the item, and that target is null until the row is bound, which makes
+GTK's action helper warn about the type mismatch twice for every row built. So
+each field gets its own parameterless action instead, named for its position in
+the model (`extras.copy-3`), registered beside the model in `_show_extra_fields`
+and dropped when the next entry replaces it. A stale action left behind would be
+a row recycled onto a shorter entry copying a value no longer on screen.
+
 It emits `copy-requested` instead of touching the clipboard, leaving the window
 to apply the user's timeout and raise the toast.
 

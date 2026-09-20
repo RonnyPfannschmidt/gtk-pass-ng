@@ -673,3 +673,122 @@ class TestOTPFieldOf:
 
         broken = entry("s3cret\notpauth://totp/a?secret=!!!")
         assert field_of(broken, "One-Time Code") == ""
+
+
+def buttons_of(widget):
+    """Every Button below ``widget``, in the order they are laid out."""
+
+    def walk(parent):
+        child = parent.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Button):
+                yield child
+            yield from walk(child)
+            child = child.get_next_sibling()
+
+    return list(walk(widget))
+
+
+class TestTheRawTab:
+    """The entry as the store wrote it, beside the pane that interprets it.
+
+    The pane divides an entry into fields, notes and a password, and every one
+    of those divisions is a convention rather than a specification. When it
+    reads a line the way its owner did not mean, the only way to see that was
+    to decrypt the file outside the application.
+    """
+
+    CONTENT = "s3cret\nusername: alice\nhost: db.example.com\nthe safe opens at 10:30"
+
+    def test_it_shows_the_entry_exactly_as_stored(self, view):
+        view.show_entry(entry(self.CONTENT))
+
+        assert view.raw_text() == self.CONTENT
+
+    def test_the_fields_are_still_what_opens(self, view):
+        """Raw is for when the reading looks wrong, not the way in."""
+        view.show_entry(entry(self.CONTENT))
+
+        assert view.view_stack.get_visible_child_name() == "fields"
+
+    def test_another_entry_replaces_it(self, view):
+        view.show_entry(entry(self.CONTENT))
+        view.show_entry(entry("other\nusername: bob"))
+
+        assert view.raw_text() == "other\nusername: bob"
+
+    def test_clear_empties_it(self, view):
+        """A buffer keeps what it was given: the plaintext would outlive the
+        entry that was dropped when the pane moved on."""
+        view.show_entry(entry(self.CONTENT))
+        view.clear()
+
+        assert view.raw_text() == ""
+
+    def test_copying_everything_copies_the_whole_entry(self, view):
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(self.CONTENT))
+        view.copy_raw_btn.emit("clicked")
+
+        assert captured == [("Entry", self.CONTENT)]
+
+    def test_an_entry_with_nothing_below_the_password_is_still_raw(self, view):
+        view.show_entry(entry("s3cret"))
+
+        assert view.raw_text() == "s3cret"
+
+
+class TestCopyingTheOtherFields:
+    """A copy button per row, for the fields the pane has no row of its own for.
+
+    They were readable and selectable and nothing else: copying a host or an
+    API key meant dragging across a label, which is the one interaction a
+    dotted-out field does not offer at all.
+    """
+
+    CONTENT = "s3cret\nhost: db.example.com\nport: 5432\napi-key: sk-live-42"
+
+    def test_every_row_gets_one(self, view):
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+
+        assert len(buttons_of(view.extras_view)) == 3
+
+    def test_clicking_it_copies_that_field(self, view):
+        """Presented rather than driven through the action: a binding in a
+        list-item template only runs when a row is actually built."""
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+
+        buttons_of(view.extras_view)[0].emit("clicked")
+
+        assert captured == [("host", "db.example.com")]
+
+    def test_a_hidden_field_copies_its_value_and_not_the_dots(self, view):
+        """api-key is dotted out on screen; the clipboard wants the key."""
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+
+        buttons_of(view.extras_view)[2].emit("clicked")
+
+        assert captured == [("api-key", "sk-live-42")]
+
+    def test_the_buttons_follow_the_entry(self, view):
+        """Fewer fields than the entry before must leave no stale action."""
+        view.show_entry(entry(self.CONTENT))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) >= 3)
+        view.show_entry(entry("s3cret\nhost: only.example.com"))
+        present_until(view, lambda v: len(buttons_of(v.extras_view)) == 1)
+
+        assert len(buttons_of(view.extras_view)) == 1

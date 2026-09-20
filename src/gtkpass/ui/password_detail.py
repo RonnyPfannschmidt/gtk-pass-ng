@@ -125,9 +125,16 @@ SENSITIVE_KEYS = frozenset(
 #: the toast, the menu item, the shortcut window and the copy plumbing.
 OTP_FIELD = "One-Time Code"
 
+#: What the whole entry is called when it is copied off the Raw tab.
+RAW_FIELD = "Entry"
+
 #: Fields that can be copied from outside the pane, named as the copy is
 #: reported. The keyboard shortcuts reach all of these.
 COPYABLE_FIELDS = ("Password", "Username", "URL", OTP_FIELD)
+
+#: The action group the extras rows' copy buttons look their actions up in.
+#: Named in the row template as well, so the two have to agree.
+EXTRAS_ACTION_GROUP = "extras"
 
 #: How often the one-time code row redraws, in milliseconds.
 #:
@@ -178,10 +185,23 @@ class MetadataField(GObject.Object):
     key = GObject.Property(type=str, default="")
     value = GObject.Property(type=str, default="")
     sensitive = GObject.Property(type=bool, default=False)
+    #: Where this field sits in the model, which is what names its copy
+    #: action. See the row template's comment for why it is the position
+    #: rather than the key: a key may contain characters an action name
+    #: cannot, and a position cannot collide with a second spelling of the
+    #: same field.
+    index = GObject.Property(type=int, default=0)
 
-    def __init__(self, key: str = "", value: str = "") -> None:
-        super().__init__(key=key, value=value, sensitive=looks_sensitive(key))
+    def __init__(self, key: str = "", value: str = "", index: int = 0) -> None:
+        super().__init__(
+            key=key, value=value, sensitive=looks_sensitive(key), index=index
+        )
         self._revealed = False
+
+    @GObject.Property(type=str, default="")
+    def action(self) -> str:
+        """The action the row's copy button activates."""
+        return f"{EXTRAS_ACTION_GROUP}.copy-{self.index}"
 
     @GObject.Property(type=str, default="")
     def display(self) -> str:
@@ -234,6 +254,10 @@ class PasswordDetailView(Gtk.Box):
     otp_countdown_label: Gtk.Label = Gtk.Template.Child()
     copy_otp_btn: Gtk.Button = Gtk.Template.Child()
     url_row: Adw.ActionRow = Gtk.Template.Child()
+    view_stack: Adw.ViewStack = Gtk.Template.Child()
+    view_switcher: Adw.ViewSwitcher = Gtk.Template.Child()
+    raw_view: Gtk.TextView = Gtk.Template.Child()
+    copy_raw_btn: Gtk.Button = Gtk.Template.Child()
     extras_group: Adw.PreferencesGroup = Gtk.Template.Child()
     extras_view: Gtk.ListView = Gtk.Template.Child()
     notes_group: Adw.PreferencesGroup = Gtk.Template.Child()
@@ -260,6 +284,10 @@ class PasswordDetailView(Gtk.Box):
         #: GLib source redrawing them. Zero means no timer is running.
         self._otp: OTPParameters | None = None
         self._otp_tick = 0
+        #: One parameterless action per extra field, rebuilt whenever the
+        #: fields are. Inserted on the view so the rows below it can reach it.
+        self._extras_actions = Gio.SimpleActionGroup()
+        self.insert_action_group(EXTRAS_ACTION_GROUP, self._extras_actions)
         # The timer outlives the widget otherwise: GLib holds the callback, the
         # callback holds the view, and the view holds a decrypted secret.
         self.connect("destroy", lambda _view: self._stop_otp())
@@ -308,6 +336,8 @@ class PasswordDetailView(Gtk.Box):
         self.url_row.set_subtitle(url or PLACEHOLDER)
         self.open_url_btn.set_visible(is_openable(url))
         self._show_extra_fields(metadata)
+
+        self.raw_view.get_buffer().set_text(entry.content or "")
 
         notes = _notes(entry)
         self.notes_label.set_text(notes)
@@ -396,10 +426,15 @@ class PasswordDetailView(Gtk.Box):
         as metadata, so it never reached the notes either, and an entry could
         lose half of what it carried without saying so.
         """
+        self._forget_extras_actions()
         self.extra_fields.remove_all()
         for key, value in metadata.items():
             if key not in KNOWN_KEYS and value:
-                self.extra_fields.append(MetadataField(key=key, value=value))
+                index = self.extra_fields.get_n_items()
+                self.extra_fields.append(
+                    MetadataField(key=key, value=value, index=index)
+                )
+                self._add_extras_action(index)
         hidden = any(
             self.extra_fields.get_item(index).sensitive
             for index in range(self.extra_fields.get_n_items())
@@ -409,6 +444,32 @@ class PasswordDetailView(Gtk.Box):
         # for passwords to be shown did not mean "except these".
         self.set_reveal_extras(self._reveal_password if hidden else False)
         self.extras_group.set_visible(bool(self.extra_fields.get_n_items()))
+
+    def _add_extras_action(self, index: int) -> None:
+        """Give one extra field the action its row's copy button activates."""
+        action = Gio.SimpleAction.new(f"copy-{index}", None)
+        action.connect("activate", lambda _action, _param: self._copy_extra(index))
+        self._extras_actions.add_action(action)
+
+    def _forget_extras_actions(self) -> None:
+        """Drop the previous entry's actions before the next one's are added.
+
+        Left alone they would accumulate, and a row recycled onto a shorter
+        entry would find the action of a field that is no longer on screen --
+        which is another entry's value, copied silently.
+        """
+        for name in self._extras_actions.list_actions():
+            self._extras_actions.remove_action(name)
+
+    def _copy_extra(self, index: int) -> None:
+        """Copy one extra field, by the name the store wrote it under.
+
+        The value rather than what the row displays: a field that is a secret
+        is dotted out on screen, and the dots are not what anybody is copying.
+        """
+        field = self.extra_fields.get_item(index)
+        if field is not None:
+            self._request_copy(field.key, field.value)
 
     def set_reveal_extras(self, reveal: bool) -> None:
         """Show or hide every field that is a secret in its own right."""
@@ -437,6 +498,9 @@ class PasswordDetailView(Gtk.Box):
         self._show_extra_fields({})
         self.notes_label.set_text("")
         self.notes_group.set_visible(False)
+        # A buffer keeps what it was given: without this the plaintext would
+        # outlive the entry that _replace_entry just dropped.
+        self.raw_view.get_buffer().set_text("")
         self.spinner.set_spinning(False)
 
     def set_reveal_password(self, reveal: bool) -> None:
@@ -473,6 +537,10 @@ class PasswordDetailView(Gtk.Box):
         self._request_copy("URL", self.url_row.get_subtitle())
 
     @Gtk.Template.Callback()
+    def _on_copy_raw(self, _button) -> None:
+        self._request_copy(RAW_FIELD, self.raw_text())
+
+    @Gtk.Template.Callback()
     def _on_copy_otp(self, _button) -> None:
         self._request_copy(OTP_FIELD, self._current_code())
 
@@ -503,6 +571,11 @@ class PasswordDetailView(Gtk.Box):
         value = getter()
         self._request_copy(field, value)
         return bool(value) and value != PLACEHOLDER
+
+    def raw_text(self) -> str:
+        """The entry as the store wrote it, as the Raw tab is showing it."""
+        buffer = self.raw_view.get_buffer()
+        return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)
 
     def _current_code(self) -> str:
         """The code as of this moment, not as the row last drew it.

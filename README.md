@@ -50,6 +50,9 @@ What works today:
   on request or at startup, with what is still to push shown beside the store
 - One-time codes from an entry's `otpauth://` line, with the seconds they have
   left, computed here rather than by a dependency
+- A Raw tab showing the entry exactly as the store wrote it, for when the
+  pane's reading of a line is not what its owner meant
+- A copy button on every field, including the ones that are dotted out
 
 What does not exist yet: re-encrypting a store to a changed recipient set. See
 [ROADMAP.md](ROADMAP.md).
