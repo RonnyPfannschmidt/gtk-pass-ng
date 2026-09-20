@@ -13,7 +13,7 @@
   },
   {
     "name": "personal/social/github",
-    "content": "GitHubT0ken789\nusername: johndoe\nurl: https://github.com\nnotes: Personal GitHub account"
+    "content": "GitHubT0ken789\nusername: johndoe\nurl: https://github.com\notpauth://totp/GitHub:johndoe?secret=JBSWY3DPEHPK3PXP&issuer=GitHub\nnotes: Personal GitHub account"
   },
   {
     "name": "work/email",

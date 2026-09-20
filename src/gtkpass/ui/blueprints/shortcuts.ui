@@ -63,6 +63,12 @@ corresponding .blp file and regenerate this file with blueprint-compiler.
                 <property name="accelerator">&lt;Control&gt;&lt;Shift&gt;l</property>
               </object>
             </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title" translatable="yes" context="shortcut window">Copy One-Time Code</property>
+                <property name="accelerator">&lt;Control&gt;&lt;Shift&gt;o</property>
+              </object>
+            </child>
           </object>
         </child>
         <child>

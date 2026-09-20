@@ -715,6 +715,7 @@ class TestTheContextMenu:
             "win.copy-password",
             "win.copy-username",
             "win.copy-url",
+            "win.copy-otp",
             "win.add-password",
             "win.edit-password",
             "win.rotate-password",

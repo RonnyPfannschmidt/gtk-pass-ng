@@ -631,6 +631,33 @@ class TestKeyboard:
 
         assert copied == [url]
 
+    def test_copying_the_one_time_code_copies_the_one_on_display(
+        self, demo_backend_configured
+    ):
+        """The code, not the otpauth line the pane computed it from."""
+        copied = []
+
+        def copy(app):
+            window = listed_window(app)
+            window._clipboard.copy = lambda value, timeout, secret=True: copied.append(
+                value
+            )
+            backend = window.backend_manager.get_backend(DEMO_BACKEND_ID)
+            with_otp = next(
+                entry.name
+                for entry in backend.list_passwords()
+                if "otpauth" in backend.get_password(entry.name).metadata
+            )
+            window._on_password_selected(DEMO_BACKEND_ID, with_otp)
+            pump_until(lambda: window._shown is not None)
+            window.activate_action("win.copy-otp", None)
+            return window.password_detail.otp_row.get_subtitle()
+
+        shown = run_in_application(copy)
+
+        assert copied and copied[0].isdigit()
+        assert copied[0] == shown.replace(" ", "")
+
     def test_copying_the_password_needs_an_entry(self, demo_backend_configured):
         def enabled(app):
             return listed_window(app).lookup_action("copy-password").get_enabled()

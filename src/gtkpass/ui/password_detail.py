@@ -1,11 +1,33 @@
 """Detail pane showing one decrypted password entry."""
 
 import importlib.resources
+import time
 from typing import ClassVar
 from urllib.parse import urlparse
 
 from gtkpass._gi import Adw, Gio, GLib, GObject, Gtk
 from gtkpass.backends import PasswordEntry, metadata_pair
+from gtkpass.otp import (
+    OTPError,
+    OTPParameters,
+    code_at,
+    format_code,
+    otpauth_line,
+    parse_otpauth,
+    seconds_remaining,
+)
+
+
+def now() -> float:
+    """The wall clock the one-time codes are read against.
+
+    A function of its own so a test can stand still, as ``launch_uri`` is one
+    so a test does not open a browser. A code and its countdown are both
+    functions of the time, and nothing about them can be asserted while it
+    moves underneath.
+    """
+    return time.time()
+
 
 #: Schemes an Open button will hand to the desktop.
 #:
@@ -57,6 +79,8 @@ def field_of(entry: PasswordEntry, field: str) -> str:
     """
     if field == "Password":
         return entry.password or ""
+    if field == OTP_FIELD:
+        return current_code(entry.metadata) or ""
     keys = {"Username": USERNAME_KEYS, "URL": URL_KEYS}[field]
     metadata = entry.metadata
     for key in keys:
@@ -97,14 +121,43 @@ SENSITIVE_KEYS = frozenset(
     }
 )
 
+#: What the one-time code is called wherever a field is named by a string:
+#: the toast, the menu item, the shortcut window and the copy plumbing.
+OTP_FIELD = "One-Time Code"
+
 #: Fields that can be copied from outside the pane, named as the copy is
-#: reported. The keyboard shortcuts reach two of these.
-COPYABLE_FIELDS = ("Password", "Username", "URL")
+#: reported. The keyboard shortcuts reach all of these.
+COPYABLE_FIELDS = ("Password", "Username", "URL", OTP_FIELD)
+
+#: How often the one-time code row redraws, in milliseconds.
+#:
+#: Twice a second rather than once. The code is recomputed from the clock each
+#: tick, so a second-long tick cannot drift -- but it can land just after a
+#: rollover and leave the previous code on screen for most of a second, which
+#: is a code that will be refused. Half a second costs one HMAC.
+OTP_TICK_MS = 500
 
 PLACEHOLDER = "—"
 
 #: What a masked field shows instead of itself.
 DOTS = "••••••••"
+
+
+def current_code(metadata: dict[str, str]) -> str:
+    """The code this entry's otpauth line stands for right now, if it has one.
+
+    Empty for an entry with no such line and for one whose line cannot produce
+    codes. The pane says which of the two it is; a copy made from the sidebar,
+    without the entry being opened, has nothing to say it with and nothing to
+    give either.
+    """
+    line = otpauth_line(metadata)
+    if not line:
+        return ""
+    try:
+        return code_at(parse_otpauth(line), now())
+    except OTPError:
+        return ""
 
 
 def looks_sensitive(key: str) -> bool:
@@ -177,6 +230,9 @@ class PasswordDetailView(Gtk.Box):
     modified_row: Adw.ActionRow = Gtk.Template.Child()
     username_row: Adw.ActionRow = Gtk.Template.Child()
     password_row: Adw.PasswordEntryRow = Gtk.Template.Child()
+    otp_row: Adw.ActionRow = Gtk.Template.Child()
+    otp_countdown_label: Gtk.Label = Gtk.Template.Child()
+    copy_otp_btn: Gtk.Button = Gtk.Template.Child()
     url_row: Adw.ActionRow = Gtk.Template.Child()
     extras_group: Adw.PreferencesGroup = Gtk.Template.Child()
     extras_view: Gtk.ListView = Gtk.Template.Child()
@@ -200,6 +256,13 @@ class PasswordDetailView(Gtk.Box):
         #: Fields with no row of their own, in the order the store wrote them.
         self.extra_fields: Gio.ListStore = Gio.ListStore(item_type=MetadataField)
         self.extras_view.set_model(Gtk.NoSelection(model=self.extra_fields))
+        #: The one-time code parameters of the entry on display, and the
+        #: GLib source redrawing them. Zero means no timer is running.
+        self._otp: OTPParameters | None = None
+        self._otp_tick = 0
+        # The timer outlives the widget otherwise: GLib holds the callback, the
+        # callback holds the view, and the view holds a decrypted secret.
+        self.connect("destroy", lambda _view: self._stop_otp())
         self.stack.set_visible_child_name("content")
 
     # -- state ---------------------------------------------------------------
@@ -240,6 +303,7 @@ class PasswordDetailView(Gtk.Box):
         self.password_row.set_text(entry.password or "")
         # Re-applied per entry: setting the text can reset the delegate.
         self.set_reveal_password(self._reveal_password)
+        self._show_otp(metadata)
         url = _first(metadata, URL_KEYS)
         self.url_row.set_subtitle(url or PLACEHOLDER)
         self.open_url_btn.set_visible(is_openable(url))
@@ -274,6 +338,56 @@ class PasswordDetailView(Gtk.Box):
         when = GLib.DateTime.new_from_unix_local(int(modified))
         self.modified_row.set_subtitle(when.format("%x %H:%M") if when else "")
         self.modified_row.set_visible(when is not None)
+
+    # -- one-time codes ------------------------------------------------------
+
+    def _show_otp(self, metadata: dict[str, str]) -> None:
+        """Show the code this entry's otpauth line stands for, or why there is none.
+
+        Three outcomes, and the difference between the last two is the point:
+        no line at all means no row, while a line that cannot produce codes
+        keeps the row and says so. Dropping the row for a malformed line would
+        have made a broken entry indistinguishable from an ordinary one.
+        """
+        self._stop_otp()
+        line = otpauth_line(metadata)
+        if not line:
+            self.otp_row.set_visible(False)
+            self.otp_row.set_subtitle("")
+            return
+
+        self.otp_row.set_visible(True)
+        try:
+            self._otp = parse_otpauth(line)
+        except OTPError as error:
+            self._otp = None
+            self.otp_row.set_subtitle(str(error))
+            self.otp_countdown_label.set_text("")
+            self.copy_otp_btn.set_visible(False)
+            return
+
+        self.copy_otp_btn.set_visible(True)
+        self.refresh_otp()
+        self._otp_tick = GLib.timeout_add(OTP_TICK_MS, self._on_otp_tick)
+
+    def refresh_otp(self) -> None:
+        """Put the code valid now, and its remaining life, into the row."""
+        if self._otp is None:
+            return
+        when = now()
+        self.otp_row.set_subtitle(format_code(code_at(self._otp, when)))
+        self.otp_countdown_label.set_text(f"{seconds_remaining(self._otp, when)}s")
+
+    def _on_otp_tick(self) -> bool:
+        self.refresh_otp()
+        return GLib.SOURCE_CONTINUE
+
+    def _stop_otp(self) -> None:
+        """Forget the secret and stop redrawing it."""
+        if self._otp_tick:
+            GLib.source_remove(self._otp_tick)
+            self._otp_tick = 0
+        self._otp = None
 
     def _show_extra_fields(self, metadata: dict[str, str]) -> None:
         """List every field that has no row of its own, as the store wrote it.
@@ -317,6 +431,7 @@ class PasswordDetailView(Gtk.Box):
         self._show_modified(None)
         self.username_row.set_subtitle(PLACEHOLDER)
         self.password_row.set_text("")
+        self._show_otp({})
         self.url_row.set_subtitle(PLACEHOLDER)
         self.open_url_btn.set_visible(False)
         self._show_extra_fields({})
@@ -358,6 +473,10 @@ class PasswordDetailView(Gtk.Box):
         self._request_copy("URL", self.url_row.get_subtitle())
 
     @Gtk.Template.Callback()
+    def _on_copy_otp(self, _button) -> None:
+        self._request_copy(OTP_FIELD, self._current_code())
+
+    @Gtk.Template.Callback()
     def _on_open_url(self, _button) -> None:
         url = self.url_row.get_subtitle() or ""
         if is_openable(url):
@@ -379,10 +498,21 @@ class PasswordDetailView(Gtk.Box):
             "Password": self.password_row.get_text,
             "Username": self.username_row.get_subtitle,
             "URL": self.url_row.get_subtitle,
+            OTP_FIELD: self._current_code,
         }[field]
         value = getter()
         self._request_copy(field, value)
         return bool(value) and value != PLACEHOLDER
+
+    def _current_code(self) -> str:
+        """The code as of this moment, not as the row last drew it.
+
+        Read from the clock rather than off the row for two reasons: the row
+        shows the code in groups and a form wants the digits, and a copy made
+        in the half second after a rollover has to be the new code rather than
+        the one still on screen.
+        """
+        return code_at(self._otp, now()) if self._otp is not None else ""
 
     def _request_copy(self, field: str, value: str | None) -> None:
         if value and value != PLACEHOLDER:

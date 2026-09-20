@@ -109,16 +109,16 @@ application; none of its dates survived contact with the work.
 - No launcher script in any of them: an installed build refuses nothing and
   needs nothing set, because the store guard asks whether it is running from a
   checkout rather than waiting to be told
+- One-time codes from the `otpauth://` line `pass-otp` writes, with the seconds
+  the code has left, computed in `otp.py` from RFC 6238 over `hmac` and checked
+  against the vectors in the RFC. The line stays in the entry, so the store is
+  still a `pass-otp` store; counter-based (HOTP) URIs say they are unsupported
+  rather than handing out a code whose counter nothing writes back
 
 ## Next
 
 Roughly in the order that would make the application usable day to day.
 
-- **`pass-otp`.** Reading an entry's `otpauth://` line and showing a code with
-  its countdown, in the format `pass-otp` already writes, so a store stays
-  usable from both. Generating the code is RFC 6238 over `hmac` — the work is in
-  the entry format and the interface, not the arithmetic. QR code scanning is
-  not part of this and stays out; see below.
 - **Re-encrypting a store to a changed recipient set**, which `pass init
   <ids...>` does and GTKPass cannot. Multi-recipient stores already work, so a
   per-machine key model is adoptable today — but enrolling a machine or retiring
@@ -180,11 +180,12 @@ are the part that would have cost a webcam, an image decoder and two
 dependencies to match. Reading an `otpauth://` line an entry already contains
 and showing a code costs none of that, and an entry a store holds that the
 application will not display is a gap in the frontend rather than a decision.
-QR codes stay out.
+It has since landed, and QR codes stay out.
 
 The original specification prescribed `keyring`, `GitPython`, `pyotp`, `qrcode`,
-`pillow` and `opencv` as dependencies. None were ever used, and OTP moving does
-not admit one by itself; see [AGENTS.md](AGENTS.md).
+`pillow` and `opencv` as dependencies. None were ever used, and OTP did not
+admit one either: it is RFC 6238 over the standard library. See
+[AGENTS.md](AGENTS.md).
 
 ## Versioning
 

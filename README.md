@@ -48,9 +48,11 @@ What works today:
   keyboard shortcut for everything; typing anywhere searches
 - Syncing a git-backed store: pull with rebase, then push, off the UI thread,
   on request or at startup, with what is still to push shown beside the store
+- One-time codes from an entry's `otpauth://` line, with the seconds they have
+  left, computed here rather than by a dependency
 
-What does not exist yet: OTP codes, and re-encrypting a store to a changed
-recipient set. See [ROADMAP.md](ROADMAP.md).
+What does not exist yet: re-encrypting a store to a changed recipient set. See
+[ROADMAP.md](ROADMAP.md).
 
 ## Backends
 
@@ -123,10 +125,12 @@ fit together.
 ## Compatibility
 
 The Direct GPG and Pass backends use the passwordstore format, so a store stays
-readable by `pass`, qtpass, and Android Password Store via git sync. Extensions
-are not supported yet — `pass-otp` and `pass-update` are the two intended, and
-until they land an OTP secret is shown as the secret it is, masked with the
-other fields that are secrets, rather than turned into a code.
+readable by `pass`, qtpass, and Android Password Store via git sync. An entry
+written by `pass-otp` is read as `pass-otp` wrote it: the `otpauth://` line
+becomes a code with a countdown, and the line itself stays in the entry, so the
+same store keeps working from both. Nothing here writes or edits that line, and
+counter-based (HOTP) URIs are shown as unsupported rather than advanced without
+being written back. `pass-update` is not supported.
 
 ## Security
 

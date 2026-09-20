@@ -31,6 +31,7 @@ from gtkpass.firstrun import backend_type_for, existing_store
 # template below is parsed, or window.ui fails with "Invalid object type".
 from gtkpass.ui.password_add import PasswordAddDialog
 from gtkpass.ui.password_detail import (  # noqa: F401
+    OTP_FIELD,
     URL_KEYS,
     USERNAME_KEYS,
     PasswordDetailView,
@@ -363,6 +364,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             ("copy-password", "Password"),
             ("copy-username", "Username"),
             ("copy-url", "URL"),
+            ("copy-otp", OTP_FIELD),
         ):
             copy_action = Gio.SimpleAction.new(name, None)
             copy_action.connect(
@@ -1552,7 +1554,7 @@ class GTKPassWindow(Adw.ApplicationWindow):
             self.password_list.get_selected_password() is not None
             or self._shown is not None
         )
-        for name in ("copy-password", "copy-username", "copy-url"):
+        for name in ("copy-password", "copy-username", "copy-url", "copy-otp"):
             action = self.lookup_action(name)
             if action is not None:
                 action.set_enabled(selected)

@@ -157,6 +157,15 @@ to connect it to, and `action-target` takes a `GVariant` that a string property
 cannot be bound to. The row binds `display`, which the item recomputes and
 notifies when it is revealed.
 
+An entry carrying an `otpauth://` line gets a row of its own above the URL,
+showing the code that line currently stands for and the seconds it has left.
+The arithmetic is `otp.py` — RFC 6238 over `hmac`, which is a counter read off
+the clock, an HMAC and a truncation — rather than a dependency. The line itself
+stays below in the other fields, dotted out: it is the secret every future code
+comes from, and somebody moving to another device needs to get at it. A line
+that cannot produce codes keeps the row and says why, because an entry with a
+broken OTP line has a problem its owner wants told.
+
 It emits `copy-requested` instead of touching the clipboard, leaving the window
 to apply the user's timeout and raise the toast.
 
@@ -289,7 +298,10 @@ The rules are in [AGENTS.md](AGENTS.md); the mechanisms are here.
 
 An earlier design described OTP, QR code, Git and keyring *services*, and
 prescribed the dependencies to build them — `keyring`, `GitPython`, `pyotp`,
-`qrcode`, `pillow`, `opencv`. None were ever written and none are planned.
+`qrcode`, `pillow`, `opencv`. None were ever installed. OTP was the one of them
+that turned out to be worth having, and it cost no dependency: `otp.py` is RFC
+6238 over the standard library. QR code scanning stays out — that is the half
+that would have wanted a camera and an image decoder.
 
 Git is handled by `backends/git_store.py`, a plain `GitStore` object owned by a
 backend instance rather than a mixin on `PasswordBackend`. It is the only thing

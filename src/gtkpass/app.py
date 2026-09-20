@@ -144,6 +144,9 @@ class GTKPassApp(Adw.Application):
         # L for link: U and C are taken, and Shift+L is free in every text
         # widget the window has.
         "win.copy-url": ["<Control><Shift>l"],
+        # O for one-time. Beside the other three, and free everywhere: no text
+        # widget in the window wants Ctrl+Shift+O.
+        "win.copy-otp": ["<Control><Shift>o"],
         "win.search": ["<Control>f"],
         # Shift+D for directories, Shift+E for everything. Collapsing is in the
         # menu and unbound on purpose: the letters left are ones a text widget

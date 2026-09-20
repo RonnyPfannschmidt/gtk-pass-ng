@@ -516,3 +516,160 @@ class TestLastChanged:
         view.clear()
 
         assert not view.modified_row.get_visible()
+
+
+OTP_URI = "otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP"
+
+#: A Unix time with 12 seconds gone from its 30-second step, so the code and
+#: the countdown are both fixed and neither sits on a boundary.
+OTP_TIME = 1_700_000_052.0
+
+
+@pytest.fixture
+def at_a_fixed_time(monkeypatch):
+    """Freeze the pane's clock, so a code and a countdown can be asserted."""
+    monkeypatch.setattr("gtkpass.ui.password_detail.now", lambda: OTP_TIME)
+
+
+class TestOneTimeCode:
+    """An entry's otpauth:// line, shown as the code it currently stands for.
+
+    The line is what `pass-otp` writes and what the pane used to show as a
+    dotted-out field nobody could do anything with: the secret was there, the
+    code was not, and the entry had to be taken to another application.
+    """
+
+    def test_an_entry_without_one_has_no_row(self, view):
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert not view.otp_row.get_visible()
+
+    def test_the_code_is_the_one_the_secret_stands_for(self, view, at_a_fixed_time):
+        from gtkpass.otp import code_at, format_code, parse_otpauth
+
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        expected = format_code(code_at(parse_otpauth(OTP_URI), OTP_TIME))
+        assert view.otp_row.get_visible()
+        assert view.otp_row.get_subtitle() == expected
+
+    def test_the_countdown_says_how_long_it_lasts(self, view, at_a_fixed_time):
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        assert view.otp_countdown_label.get_text() == "18s"
+
+    def test_the_code_follows_the_clock(self, view, monkeypatch):
+        """The row is a countdown, so it has to redraw without being reopened."""
+        from gtkpass.otp import code_at, format_code, parse_otpauth
+
+        monkeypatch.setattr("gtkpass.ui.password_detail.now", lambda: OTP_TIME)
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        first = view.otp_row.get_subtitle()
+
+        monkeypatch.setattr("gtkpass.ui.password_detail.now", lambda: OTP_TIME + 30)
+        view.refresh_otp()
+
+        params = parse_otpauth(OTP_URI)
+        assert view.otp_row.get_subtitle() == format_code(
+            code_at(params, OTP_TIME + 30)
+        )
+        assert view.otp_row.get_subtitle() != first
+
+    def test_a_line_that_cannot_produce_codes_says_so(self, view):
+        """Silently showing no row would hide a broken entry from its owner."""
+        view.show_entry(entry("s3cret\notpauth://hotp/a?secret=JBSWY3DPEHPK3PXP"))
+
+        assert view.otp_row.get_visible()
+        assert "HOTP" in view.otp_row.get_subtitle()
+        assert not view.copy_otp_btn.get_visible()
+
+    def test_the_copy_button_returns_when_the_line_is_readable(self, view):
+        view.show_entry(entry("s3cret\notpauth://hotp/a?secret=JBSWY3DPEHPK3PXP"))
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        assert view.copy_otp_btn.get_visible()
+
+    def test_copying_gives_the_digits_not_the_grouping(self, view, at_a_fixed_time):
+        """The row groups the code to be read; a form wants it unspaced."""
+        from gtkpass.otp import code_at, parse_otpauth
+
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.copy_otp_btn.emit("clicked")
+
+        assert captured == [
+            ("One-Time Code", code_at(parse_otpauth(OTP_URI), OTP_TIME))
+        ]
+
+    def test_copying_by_name_reaches_the_same_code(self, view, at_a_fixed_time):
+        """What the window's action and the sidebar's menu go through."""
+        from gtkpass.otp import code_at, parse_otpauth
+
+        captured = []
+        view.connect(
+            "copy-requested", lambda _v, field, value: captured.append((field, value))
+        )
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        assert view.copy_field("One-Time Code") is True
+        assert captured == [
+            ("One-Time Code", code_at(parse_otpauth(OTP_URI), OTP_TIME))
+        ]
+
+    def test_copying_an_entry_that_has_none_reports_nothing_to_copy(self, view):
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert view.copy_field("One-Time Code") is False
+
+    def test_moving_to_an_entry_without_one_takes_the_row_away(self, view):
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.show_entry(entry("s3cret\nusername: alice"))
+
+        assert not view.otp_row.get_visible()
+
+    def test_clear_takes_it_away(self, view):
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.clear()
+
+        assert not view.otp_row.get_visible()
+
+    def test_clearing_stops_the_countdown(self, view):
+        """A timer left running holds the secret and redraws a hidden row."""
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+        view.clear()
+
+        assert view._otp_tick == 0
+
+    def test_the_secret_is_not_left_in_other_fields(self, view):
+        """It is still the entry's own line, so it stays -- dotted out."""
+        view.show_entry(entry(f"s3cret\n{OTP_URI}"))
+
+        shown = present_until(view, lambda v: v.extra_fields.get_n_items() > 0)
+        assert OTP_URI not in shown
+
+
+class TestOTPFieldOf:
+    """field_of is how a copy made without opening the entry finds a value."""
+
+    def test_the_code_is_computed_from_the_entry(self, at_a_fixed_time):
+        from gtkpass.otp import code_at, parse_otpauth
+        from gtkpass.ui.password_detail import field_of
+
+        value = field_of(entry(f"s3cret\n{OTP_URI}"), "One-Time Code")
+
+        assert value == code_at(parse_otpauth(OTP_URI), OTP_TIME)
+
+    def test_an_entry_without_one_yields_nothing(self):
+        from gtkpass.ui.password_detail import field_of
+
+        assert field_of(entry("s3cret\nusername: alice"), "One-Time Code") == ""
+
+    def test_a_broken_line_yields_nothing_rather_than_raising(self):
+        """The pane says why; a copy from the sidebar just has nothing to give."""
+        from gtkpass.ui.password_detail import field_of
+
+        broken = entry("s3cret\notpauth://totp/a?secret=!!!")
+        assert field_of(broken, "One-Time Code") == ""
