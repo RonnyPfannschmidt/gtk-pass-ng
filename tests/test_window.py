@@ -678,8 +678,9 @@ class TestKeyboard:
             name = backend.list_passwords()[0].name
             window._on_password_selected(DEMO_BACKEND_ID, name)
             pump_until(
-                lambda: window.password_detail.stack.get_visible_child_name()
-                == "content"
+                lambda: (
+                    window.password_detail.stack.get_visible_child_name() == "content"
+                )
             )
             expected = window.password_detail.password_row.get_text()
 
@@ -1398,8 +1399,10 @@ class TestSettingsEditsReachAnOpenWindow:
                 "custom-data-path", demo_data_path
             )
             rebuilt = pump_until(
-                lambda: window.backend_manager is not before
-                and window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+                lambda: (
+                    window.backend_manager is not before
+                    and window.backend_manager.get_backend(DEMO_BACKEND_ID) is not None
+                )
             )
             return rebuilt
 
@@ -1445,8 +1448,10 @@ class TestShowingDetails:
 
         window._on_password_selected(DEMO_BACKEND_ID, name)
         pump_until(
-            lambda: window.content_stack.get_visible_child_name() == "detail"
-            and window.password_detail.stack.get_visible_child_name() == "content"
+            lambda: (
+                window.content_stack.get_visible_child_name() == "detail"
+                and window.password_detail.stack.get_visible_child_name() == "content"
+            )
         )
         return window, name
 
@@ -2325,8 +2330,9 @@ class TestRenamingAFolder:
                 DEMO_BACKEND_ID, backend.list_passwords()[0].name
             )
             pump_until(
-                lambda: window.password_detail.stack.get_visible_child_name()
-                == "content"
+                lambda: (
+                    window.password_detail.stack.get_visible_child_name() == "content"
+                )
             )
             self.select_folder(window)
 
@@ -2360,8 +2366,9 @@ class TestRenamingAFolder:
                 DEMO_BACKEND_ID, backend.list_passwords()[0].name
             )
             pump_until(
-                lambda: window.password_detail.stack.get_visible_child_name()
-                == "content"
+                lambda: (
+                    window.password_detail.stack.get_visible_child_name() == "content"
+                )
             )
             before = window.lookup_action(action_name).get_enabled()
             self.select_folder(window)
@@ -2414,8 +2421,9 @@ class TestRenamingAFolder:
             )
             window._on_password_selected(DEMO_BACKEND_ID, nested)
             pump_until(
-                lambda: window.password_detail.stack.get_visible_child_name()
-                == "content"
+                lambda: (
+                    window.password_detail.stack.get_visible_child_name() == "content"
+                )
             )
             self.select_folder(window)
 
@@ -2562,8 +2570,9 @@ class TestRotating:
             )
             window._on_password_selected(DEMO_BACKEND_ID, name)
             pump_until(
-                lambda: window.password_detail.stack.get_visible_child_name()
-                == "content"
+                lambda: (
+                    window.password_detail.stack.get_visible_child_name() == "content"
+                )
             )
             original = backend.get_password(name).content
 
@@ -2837,8 +2846,10 @@ class TestEntryNamesStayOutOfTheLog:
             with caplog.at_level(logging.DEBUG):
                 window._on_password_selected(DEMO_BACKEND_ID, name)
                 pump_until(
-                    lambda: window.password_detail.stack.get_visible_child_name()
-                    == "content"
+                    lambda: (
+                        window.password_detail.stack.get_visible_child_name()
+                        == "content"
+                    )
                 )
             return name, caplog.text
 
@@ -2882,9 +2893,9 @@ class TestRecipientsThatChanged:
 
     def test_it_is_not_shown_for_a_store_nobody_touched(self, demo_backend_configured):
         revealed = run_in_application(
-            lambda app: self.window_reporting(
-                app, self.audit(changed=False)
-            ).recipient_banner
+            lambda app: (
+                self.window_reporting(app, self.audit(changed=False)).recipient_banner
+            )
         ).get_revealed()
 
         assert not revealed
@@ -3168,8 +3179,10 @@ class TestSyncing:
 
             window._load_passwords()
             pump_until(
-                lambda: window.password_list.root.get_n_items() > 0
-                and window.password_list.root.get_item(0).badge != ""
+                lambda: (
+                    window.password_list.root.get_n_items() > 0
+                    and window.password_list.root.get_item(0).badge != ""
+                )
             )
             return window.password_list.root.get_item(0).badge
 
