@@ -44,7 +44,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.0.0",
     "mypy>=1.0.0",
-    "ruff==0.14.10",
+    "ruff==0.17.4",
     "blueprint-compiler>=0.22.2",
     "pre-commit>=4.0.0",
 ]
