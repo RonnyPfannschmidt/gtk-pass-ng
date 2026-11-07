@@ -1,7 +1,7 @@
 # Optional: Use this Dockerfile if you need more customization
 # Reference it in devcontainer.json by changing "image" to "build": { "dockerfile": "Dockerfile" }
 
-FROM mcr.microsoft.com/devcontainers/python:3.14
+FROM mcr.microsoft.com/devcontainers/python:3.15
 
 # Install GTK and development dependencies
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
