@@ -64,7 +64,7 @@ jobs:
         run: echo "keepcache=True" >> /etc/dnf/dnf.conf
 
       - name: cache the packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /var/cache/libdnf5
           key: dnf-44-${{ github.run_id }}
@@ -141,7 +141,7 @@ jobs:
         run: echo "keepcache=True" >> /etc/dnf/dnf.conf
 
       - name: cache the packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /var/cache/libdnf5
           key: dnf-${{ matrix.fedora }}-${{ github.run_id }}
@@ -209,7 +209,7 @@ jobs:
             > /etc/apt/apt.conf.d/99keep-downloads
 
       - name: cache the packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-${{ matrix.id }}-${{ github.run_id }}
@@ -425,7 +425,7 @@ jobs:
       # GitHub release. Cached on the archive rather than the unpacked tree:
       # restoring one file beats restoring fifteen thousand.
       - name: cache the GTK stack
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/windows/GTK4_Gvsbuild_*.zip
           key: gvsbuild-2026.8.0-x64
@@ -510,7 +510,7 @@ jobs:
         run: echo "keepcache=True" >> /etc/dnf/dnf.conf
 
       - name: cache the packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /var/cache/libdnf5
           key: dnf-${{ matrix.fedora }}-${{ github.run_id }}
