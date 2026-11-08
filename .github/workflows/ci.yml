@@ -76,7 +76,7 @@ jobs:
             make git-core uv python3-devel python3-gobject gtk4 libadwaita \
             gobject-introspection glib2-devel cairo-gobject-devel
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -92,7 +92,7 @@ jobs:
     name: build the wheel and sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # setuptools-scm reads the version out of git, and reads it wrong
           # without the tags and the history between them.
@@ -154,7 +154,7 @@ jobs:
             pyproject-rpm-macros desktop-file-utils libappstream-glib \
             glib2-devel
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -229,7 +229,7 @@ jobs:
             git ca-certificates dpkg-dev fakeroot \
             python3-build python3-setuptools python3-setuptools-scm
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -284,7 +284,7 @@ jobs:
             dbus-daemon dbus-bin \
             gnupg pass desktop-file-utils appstream-util libglib2.0-bin
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v4
         with:
@@ -334,7 +334,7 @@ jobs:
             gnupg2 pass git-core desktop-file-utils \
             xorg-x11-server-Xvfb dbus-daemon
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v4
         with:
@@ -367,7 +367,7 @@ jobs:
             gnupg2 pass desktop-file-utils libappstream-glib \
             xorg-x11-server-Xvfb dbus-daemon
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v4
         with:
@@ -410,7 +410,7 @@ jobs:
     # than an oversight.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -542,7 +542,7 @@ jobs:
           dnf -y --setopt=install_weak_deps=False install \
             gtk4 libadwaita python3-gobject python3-secretstorage gnupg2 pass
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
