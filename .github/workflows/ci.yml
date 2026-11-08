@@ -98,7 +98,7 @@ jobs:
           # without the tags and the history between them.
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
@@ -417,7 +417,7 @@ jobs:
       # The interpreter the gvsbuild wheels were built for. build.ps1 refuses
       # to continue on any other, so this pin and the one in that script are
       # the same fact written twice and have to move together.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
 
