@@ -44,7 +44,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: distribution
           path: dist
@@ -87,7 +87,7 @@ jobs:
       # Everything the run built, including the artefacts uploaded by the
       # reusable CI workflow -- the same files that were installed and inspected
       # there, rather than a second build nobody checked.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artefacts
 
