@@ -46,7 +46,7 @@ jobs:
   check:
     name: lint, format, types
     runs-on: ubuntu-latest
-    container: registry.fedoraproject.org/fedora:44
+    container: registry.fedoraproject.org/fedora:46
     steps:
       # Every one of these jobs starts from a bare Fedora and installs its
       # tools before it can do anything, and dnf5 deletes the packages once it

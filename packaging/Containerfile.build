@@ -15,7 +15,7 @@
 # `podman build` is the staleness check; there is no stamp to keep in step. A
 # fully cached build of this file takes about a second.
 
-ARG FEDORA_RELEASE=44
+ARG FEDORA_RELEASE=46
 FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE}
 
 # Keep the downloaded packages in the image. dnf5 deletes them after installing
